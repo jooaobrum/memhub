@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: memhub
+      POSTGRES_PASSWORD: memhub
+      POSTGRES_DB: memhub
+    ports:
+      - "5433:5432"
+    volumes:
+      - memhub-pg:/var/lib/postgresql/data
+
+volumes:
+  memhub-pg:

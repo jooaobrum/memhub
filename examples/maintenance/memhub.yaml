@@ -1,0 +1,28 @@
+# Maintenance agent on an existing Azure Database for PostgreSQL; Azure OpenAI for chat and embeddings.
+# The schema is a Python class next to this file (maint_types.py); the support example declares its types in the yaml instead.
+project_prefix: maint
+database_url: ${MAINT_DATABASE_URL}          # e.g. postgresql://user:pw@myserver.postgres.database.azure.com:5432/plant?sslmode=require
+database_schema: memhub                       # created if missing; the vector extension must be allowed on the server
+workspace_default: plant1
+llm:
+  extractor: {provider: azure_openai, model: gpt-4o-mini, api_key_env: AZURE_OPENAI_API_KEY, base_url: "${AZURE_OPENAI_ENDPOINT}", params: {api_version: "2024-10-21", azure_deployment: gpt-4o-mini}}
+  judge:     {provider: azure_openai, model: gpt-4o,      api_key_env: AZURE_OPENAI_API_KEY, base_url: "${AZURE_OPENAI_ENDPOINT}", params: {api_version: "2024-10-21", azure_deployment: gpt-4o}}
+embeddings:  {provider: azure_openai, model: text-embedding-3-small, api_key_env: AZURE_OPENAI_API_KEY, base_url: "${AZURE_OPENAI_ENDPOINT}", dims: 1536, params: {api_version: "2024-10-21", azure_deployment: embeddings}}
+scopes: [workspace]
+entity_types: [machine]
+types:
+  incident:
+    class: "maint_types:Incident"            # equipment, fault_code, fix
+    content_template: "{equipment} fault {fault_code}: {fix}"
+    scopes: [workspace]
+    on_remember: true
+sources:
+  cmms:
+    kind: sql                                 # the maintenance system's own table of technician chats
+    dsn_env: MAINT_DATABASE_URL
+    query: "select chat_id, msg_id, plant, technician, ts, technician_msg, assistant_msg from technician_chats"
+    fields: {thread_id: chat_id, message_id: msg_id, timestamp: ts, user_id: technician, workspace_id: plant, user_content: technician_msg, assistant_content: assistant_msg}
+extraction:
+  retries: 4
+  instructions: |
+    Maintenance assistant. Keep durable knowledge about machines: model, location, known quirks, and fixes that worked (an `incident`). Never keep questions, greetings or measurements that only describe the moment.

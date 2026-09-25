@@ -1,0 +1,88 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>memhub overview</title>
+<style>
+*{box-sizing:border-box;margin:0}
+body{background:#fff;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:#1f2937}
+#c{position:relative;width:1600px;height:980px;background:#fff;overflow:hidden}
+.band{position:absolute;border-radius:24px;border:1.5px solid}
+.n{position:absolute;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;border-radius:18px;padding:8px 10px;line-height:1.32;font-size:15px}
+.n b{font-size:19px;font-weight:700}
+.n span{color:#374151}
+.t{position:absolute;white-space:nowrap}
+.lab{position:absolute;transform:translate(-50%,-50%);background:#fff;padding:1px 7px;border-radius:8px;font-size:14px;color:#374151;white-space:nowrap}
+svg{position:absolute;left:0;top:0}
+.chip{border:1.5px solid #c7d2fe;background:#eef2ff;border-radius:14px;font-size:14px}
+.chip b{font-size:18px}
+</style></head><body>
+<div id="c">
+<div class="t" style="left:50px;top:38px;font-size:38px;font-weight:500;color:#111827">memhub: reviewed long-term memory for AI agents</div>
+<div class="t" style="left:50px;top:92px;font-size:19px;color:#6b7280">Remembers what users said, proves it with a quote, and keeps a person in charge of what is shared.</div>
+
+<div class="band" style="left:30px;top:140px;width:1540px;height:405px;background:#fafafa;border-color:#e5e7eb"></div>
+<div class="t" style="left:60px;top:158px;font-size:14px;font-weight:700;letter-spacing:.5px;color:#9ca3af">EVERY CONVERSATION TURN · ONLINE</div>
+<div class="band" style="left:30px;top:575px;width:1540px;height:285px;background:#f4fbf7;border-color:#cfe8d9"></div>
+<div class="t" style="left:60px;top:593px;font-size:14px;font-weight:700;letter-spacing:.5px;color:#6aa384">LEARNING LOOP · OFFLINE BATCH</div>
+<div class="t" style="left:60px;top:825px;font-size:14px;color:#6b7280">runs on a schedule with cheap models; every dropped candidate is logged with a reason</div>
+
+<div class="n" id="q"   style="left:50px;top:295px;width:150px;height:90px;background:#f5e1a8"><b>User query</b></div>
+<div class="n" id="ag"  style="left:260px;top:295px;width:210px;height:90px;background:#f6cccc"><b>Agent</b><span>+ memhub middleware</span></div>
+<div class="n" id="grp" style="left:560px;top:152px;width:310px;height:384px;background:#f3eefc;border:2px dashed #8b7fb8;border-radius:26px;justify-content:flex-start;padding-top:8px;color:#4b5563">Context sources</div>
+<div class="n" id="tl"  style="left:585px;top:190px;width:260px;height:92px;background:#dcc7fb"><b>Tools / APIs</b></div>
+<div class="n" id="rag" style="left:585px;top:296px;width:260px;height:92px;background:#dcc7fb"><b>Retriever (RAG)</b><span>docs, knowledge base</span></div>
+<div class="n" id="rd"  style="left:585px;top:402px;width:260px;height:124px;background:#a6ddbf;border:2px solid #2f8f5b"><b>memhub reader</b><span>profile · preferences · topic pages</span><span>facts, dated, current, cited</span><span>logs memory_id@version injected</span></div>
+<div class="n" id="pa"  style="left:1010px;top:295px;width:210px;height:90px;background:#b6c3f0"><b>Prompt assembly</b><span>merges tools, RAG and memory</span></div>
+<div class="n" id="llm" style="left:1290px;top:295px;width:170px;height:90px;background:#f5e1a8"><b>LLM</b><span>reasoning + tool calls</span></div>
+<div class="n" id="ans" style="left:1290px;top:430px;width:170px;height:90px;background:#dcc7fb"><b>Answer to user</b></div>
+
+<div class="n" id="log" style="left:1290px;top:650px;width:170px;height:130px;background:#f5e1a8"><b>Conversation logs</b><span>JSONL / MLflow</span></div>
+<div class="n" id="p1"  style="left:1060px;top:650px;width:170px;height:130px;background:#c9e9d7"><b>1 · Propose</b><span>AI suggests up to 3</span><span>memories per chunk</span></div>
+<div class="n" id="p2"  style="left:830px;top:650px;width:170px;height:130px;background:#c9e9d7"><b>2 · Verify + score</b><span>real quote or drop</span><span>useful and new?</span></div>
+<div class="n" id="p3"  style="left:600px;top:650px;width:170px;height:130px;background:#c9e9d7"><b>3 · Reconcile</b><span>merge, update,</span><span>flag conflicts</span></div>
+<div class="n" id="led" style="left:310px;top:640px;width:220px;height:150px;background:#a6ddbf;border:2px solid #2f8f5b"><b>Memory ledger</b><span>Postgres + pgvector</span><span>typed · versioned</span><span>evidence per row</span></div>
+<div class="n" id="hum" style="left:50px;top:650px;width:200px;height:130px;background:#ffe3b3;border:2px solid #d98e04"><b>Human review</b><span>approve · edit</span><span>resolve · erase</span></div>
+
+<div class="n chip" style="left:30px;top:885px;width:370px;height:72px"><b>Evidence first</b><span>no quote, no memory</span></div>
+<div class="n chip" style="left:418px;top:885px;width:370px;height:72px"><b>Time-aware</b><span>dated, expiring, versioned</span></div>
+<div class="n chip" style="left:806px;top:885px;width:370px;height:72px"><b>Human in the loop</b><span>people approve shared facts</span></div>
+<div class="n chip" style="left:1194px;top:885px;width:376px;height:72px"><b>Small on purpose</b><span>caps and filters, not a dump</span></div>
+
+<svg id="s" width="1600" height="980"><defs><marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker></defs></svg>
+</div>
+<script>
+const c=document.getElementById('c'),s=document.getElementById('s'),C=c.getBoundingClientRect();
+const R=id=>{const r=document.getElementById(id).getBoundingClientRect();return{l:r.left-C.left,r:r.right-C.left,t:r.top-C.top,b:r.bottom-C.top,cx:(r.left+r.right)/2-C.left,cy:(r.top+r.bottom)/2-C.top}};
+const NS='http://www.w3.org/2000/svg';
+function line(pts,{head=true,tail=false}={}){const p=document.createElementNS(NS,'path');
+ p.setAttribute('d','M'+pts.map(q=>q.join(',')).join(' L'));p.setAttribute('fill','none');p.setAttribute('stroke','#374151');p.setAttribute('stroke-width','2.2');p.setAttribute('stroke-linejoin','round');
+ if(head)p.setAttribute('marker-end','url(#h)');if(tail)p.setAttribute('marker-start','url(#h)');s.appendChild(p)}
+function lab(x,y,t){const d=document.createElement('div');d.className='lab';d.style.left=x+'px';d.style.top=y+'px';d.textContent=t;c.appendChild(d)}
+const q=R('q'),ag=R('ag'),tl=R('tl'),rag=R('rag'),rd=R('rd'),pa=R('pa'),llm=R('llm'),ans=R('ans'),log=R('log'),p1=R('p1'),p2=R('p2'),p3=R('p3'),led=R('led'),hum=R('hum');
+const y=ag.cy;
+line([[q.r,y],[ag.l,y]]);
+// request: trunk from agent to the three sources
+const tx=(ag.r+tl.l-25)/2+ (ag.r-0)/2-ag.r/2+ (0); const trunk=(ag.r+ (R('grp').l))/2;
+line([[ag.r,y],[trunk,y]],{head:false});
+line([[trunk,tl.cy],[trunk,rd.cy]],{head:false});
+line([[trunk,tl.cy],[tl.l,tl.cy]]);line([[trunk,y],[rag.l,y]]);line([[trunk,rd.cy],[rd.l,rd.cy]]);
+lab(trunk,(tl.cy+y)/2,'request');
+// context: sources merge into prompt assembly
+const m=(R('grp').r+pa.l)/2;
+line([[tl.r,tl.cy],[m,tl.cy]],{head:false});line([[rag.r,rag.cy],[m,rag.cy]],{head:false});line([[rd.r,rd.cy],[m,rd.cy]],{head:false});
+line([[m,tl.cy],[m,rd.cy]],{head:false});line([[m,y],[pa.l,y]]);
+lab((tl.r+m)/2+8,tl.cy-18,'context');lab((rag.r+m)/2+8,rag.cy-18,'context');lab((rd.r+m)/2+8,rd.cy-18,'memories');
+line([[pa.r,y],[llm.l,y]]);lab((pa.r+llm.l)/2,y-18,'prompt');
+line([[llm.cx,llm.b],[ans.cx,ans.t]]);
+line([[ans.cx,ans.b],[log.cx,log.t]]);lab(ans.cx,(ans.b+log.t)/2,'traces saved');
+// learning loop, right to left
+const yy=p1.cy;
+line([[log.l,yy],[p1.r,yy]]);line([[p1.l,yy],[p2.r,yy]]);line([[p2.l,yy],[p3.r,yy]]);line([[p3.l,led.cy],[led.r,led.cy]]);lab((p3.l+led.r)/2,led.cy-18,'save');
+line([[hum.r,led.cy],[led.l,led.cy]],{tail:true});
+// ledger -> reader
+const gy=560;line([[led.cx,led.t],[led.cx,gy],[rd.cx,gy],[rd.cx,rd.b]]);lab((led.cx+rd.cx)/2,gy,'serves memories');
+// checks
+const boxes=[...document.querySelectorAll('.n')].filter(e=>!['grp'].includes(e.id));
+const bad=[];boxes.forEach(e=>{if(e.scrollWidth>e.clientWidth+1||e.scrollHeight>e.clientHeight+1)bad.push('overflow '+e.id+e.textContent.slice(0,20))});
+for(let i=0;i<boxes.length;i++)for(let j=i+1;j<boxes.length;j++){const a=boxes[i].getBoundingClientRect(),b=boxes[j].getBoundingClientRect();
+ if(a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom&&!['rd','tl','rag'].includes(boxes[i].id)&&!['rd','tl','rag'].includes(boxes[j].id))bad.push('overlap '+boxes[i].id+' '+boxes[j].id)}
+window.__bad=bad;
+</script></body></html>

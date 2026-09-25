@@ -1,0 +1,43 @@
+project_prefix: support
+database_url: ${CRM_URL}
+database_schema: support_mem            # the tables live in their own schema of the project's existing database
+workspace_default: default
+llm:
+  extractor: {provider: openai, model: google/gemini-2.5-flash-lite, base_url: "https://openrouter.ai/api/v1", api_key_env: OPENROUTER_API_KEY}
+  judge:     {provider: openai, model: google/gemini-2.5-flash,      base_url: "https://openrouter.ai/api/v1", api_key_env: OPENROUTER_API_KEY}
+embeddings: {provider: openai, model: text-embedding-3-small, api_key_env: OPENAI_API_KEY, dims: 1536}
+scopes: [user, workspace]
+types:
+  account:                      # declared in yaml, no Python
+    fields:
+      company: {type: "str", description: "the customer's company"}
+      plan: {type: "str?", description: "subscription plan, if said"}
+      contact: {type: "str?", description: "admin or main contact person"}
+    content_template: "{company} - plan {plan}, contact {contact}"
+    scopes: [workspace]
+    retrieval: search
+  preference: {class: "memhub.types:Preference", retrieval: always, keyed: true, strict_keys: false, keys: {language: "language of the answers", detail: "length of the answers"}, scopes: [user]}
+  ticket:
+    fields:
+      symptom: {type: str, description: "what the customer observed"}
+      root_cause: {type: str}
+      resolution: {type: str, description: "what fixed it"}
+      outcome: {type: str}
+    content_template: "Symptom: {symptom} Root cause: {root_cause} Resolution: {resolution} Outcome: {outcome}"
+    extract: false
+    on_remember: true
+    scopes: [workspace]
+  fact: {class: "memhub.types:Fact", retrieval: search, scopes: [workspace]}
+sources:
+  crm:
+    kind: sql
+    dsn_env: CRM_URL
+    query: "select chat_id, msg_id, tenant, customer, ts, customer_msg, agent_msg from support_chats order by ts"
+    fields: {thread_id: chat_id, message_id: msg_id, timestamp: ts, user_id: customer, workspace_id: tenant, user_content: customer_msg, assistant_content: agent_msg}
+extraction:
+  remember_instructions: |
+    A `/remember` order either says what to keep or points at the conversation ("save this ticket"): then read the messages above. A solved problem is a `ticket` (symptom, root_cause, resolution, outcome; "not stated" if missing). Company, plan and contacts of the customer are an `account`. How they want to be answered is a `preference`; other lasting facts are a `fact`.
+  instructions: |
+    Customer-support agent. Keep durable facts the customer states about their company, account, setup and integrations (account, fact) and how they want answers (preference). Never keep questions, one-off requests or what the agent says.
+  retries: 4
+ingestion: {segment_idle: 1h, max_candidates: 5, verify_claims: true, repair_relative_time: true}

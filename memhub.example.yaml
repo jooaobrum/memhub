@@ -1,0 +1,109 @@
+# Example memhub.yaml (Habitantes-style pilot: user scope only, JSONL source, built-in types).
+# Start Postgres with `docker compose up -d`, then:
+#   export MEMHUB_DATABASE_URL=postgresql://memhub:memhub@localhost:5433/memhub
+#   export OPENROUTER_API_KEY=... OPENAI_API_KEY=...
+#   memhub init -c memhub.example.yaml && memhub ingest --source jsonl -c memhub.example.yaml
+project_prefix: habitantes
+database_url: ${MEMHUB_DATABASE_URL}
+workspace_default: habitantes
+
+llm:
+  extractor: {provider: openai, model: google/gemini-2.5-flash-lite, base_url: "https://openrouter.ai/api/v1", api_key_env: OPENROUTER_API_KEY}
+  judge:     {provider: openai, model: google/gemini-2.5-flash,      base_url: "https://openrouter.ai/api/v1", api_key_env: OPENROUTER_API_KEY}
+embeddings:
+  provider: openai
+  model: text-embedding-3-small
+  api_key_env: OPENAI_API_KEY
+  dims: 1536
+
+entity_types: []
+scopes: [user, workspace]                 # workspace is used only by `term` (the shared glossary)
+
+types:
+  fact:       {class: "memhub.types:Fact",       retrieval: search,          type_prior: 0.6, scopes: [user]}
+  # A keyed type stores one active row per (owner, key): a change (a new city) updates that row.
+  profile:
+    class: "memhub.types:Profile"
+    retrieval: always
+    type_prior: 0.8
+    scopes: [user]
+  preference:
+    class: "memhub.types:Preference"
+    retrieval: always
+    type_prior: 0.8
+    max_chars: 1500
+    max_active: 20
+    scopes: [user]
+    keyed: true
+    strict_keys: false
+    keys: {language: "answer language", scope: "answer scope", detail: "length and level of detail", format: "shape of the answers", emoji: "emoji or none", tone: "formal or casual", sources: "cite sources or not", address: "what to call the user"}
+  episode:    {class: "memhub.types:Episode",    retrieval: search,          type_prior: 0.4, ttl: 180d, scopes: [user]}
+  # The shared glossary (workspace scope): proposed only from explicit definitions, approved by an admin.
+  case:       {class: "memhub.types:Case",       retrieval: search,          type_prior: 0.7, extract: false, on_remember: true, scopes: [user], content_template: "Symptom: {symptom} Root cause: {root_cause} Action: {action} Outcome: {outcome}"}   # a solved problem, saved with `/remember save this case` (add workspace to share cases: they then wait for review)
+  term:       {class: "memhub.types:Term",       retrieval: search,          type_prior: 0.5, scopes: [workspace]}
+  skill:      {class: "memhub.types:Skill",      retrieval: index_then_load, extract: false, scopes: [user]}
+
+# Kinds that are on: fact, profile, preference, episode. `episode` is secondary (low prior; the Habitantes pilot caps it with max_active: 10). `skill` is off for extraction (extract: false).
+# Turn a kind off for extraction with `extract: false`; it is then never offered to the extractor.
+
+terms: {max_per_workspace: 300, max_aliases: 5, min_confidence: 0.9}
+
+# How long a memory holds when the text gives no end date; a type's own ttl wins. null = never expires.
+ttl: {stable: null, ongoing: 365d, temporary: 30d}
+
+sources:
+  jsonl:
+    kind: jsonl
+    path: logs/interactions.jsonl
+    one_line_per: turn
+    fields:
+      thread_id: chat_id
+      user_id: chat_id
+      message_id: message_id
+      timestamp: timestamp
+      trace_id: trace_id
+      user_content: user_query
+      assistant_content: answer
+      metadata: [intent, category, confidence, error]
+    signals:
+      path: logs/feedback.jsonl
+      join_on: {message_id: message_id, thread_id: chat_id}
+      map: {rating: {down: feedback_down, up: feedback_up}}
+
+# What is worth remembering is project policy. Example for a maintenance agent (machines, fixes):
+# extraction:
+#   instructions: |
+#     Keep durable facts about machines (model, location, known quirks), fixes that worked and their
+#     cause, and technician preferences. Never store one-off questions or readings that will be stale.
+extraction:
+  remember_instructions: |
+    A `/remember` order either says what to keep or points at the conversation ("save this", "save this case", "guarda isso"). In the second case read the messages ABOVE it, with their context, and keep what was just discussed. A solved problem, fault or case is a `case`: `symptom` = what was observed, `root_cause` = why it happened, `action` = what was done, `outcome` = how it ended. Take each part from the conversation (the assistant's diagnosis and steps count), never invent one: write "not stated" for a part the conversation does not give. Write each part in the third person or impersonally ("Apertou os parafusos", not "Apertei"), in the language of the conversation. Anything about who the user is, a lasting fact or how they want to be answered is a `profile`, `fact` or `preference`. Each `quote` is copied verbatim from ONE message (cite its id); `content` is your rewrite; absolute dates; utility 5, assertion `stated`; if nothing can be worked out return an empty list.
+  passes: 2    # two independent samples per slice, united: a cheap model misses different facts each time
+  retries: 4   # sample again when a cheap model returns truncated JSON
+  instructions: |
+    Keep durable facts the user revealed about themselves and their stated preferences. Never store
+    questions, one-off requests, or anything that only appears in the assistant's answers.
+
+ingestion:
+  segment_idle: 1h
+  thread_close: 7d
+  min_user_turns: 1
+  max_candidates: 5
+  segment_max_user_turns: 5
+  assistant_chars: 600        # long assistant answers are shown to the extractor cut (they never carry a claim)
+  repair_relative_time: true  # the judge dates "next year" / "soon" from the message date instead of dropping the claim
+  verify_claims: true         # the judge checks the claims that look invented or about someone else against their quote
+  verify_episodes: true      # the judge confirms the user told situation, action and outcome   # a long thread is extracted in slices of this many user turns
+  skip_when: {intent: [greeting, out_of_scope]}
+
+admission:
+  weights: {utility: 0.35, evidence: 0.30, novelty: 0.20, type_prior: 0.10, signals: 0.05}
+  threshold: 0.75
+
+reconcile: {duplicate: 0.92, conflict_band: [0.80, 0.92], compare_floor: 0.30, compare_max: 4, extends: false, compare_across: [[profile, fact]]}
+roles: {approve_workspace: [workspace_admin]}
+retention: {dropped_days: 90}
+
+# Conservative defaults: only what the user or a tool actually said is stored.
+# allow_inferred: true lets candidates with assertion=inferred (deductions) through the normal path.
+guardrails: {allow_inferred: false}
