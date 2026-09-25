@@ -37,8 +37,6 @@ Extras pick your LLM provider and sources; combine them as needed (`".[openai,ml
 | `mlflow` | MLflow traces as an ingest source |
 | `dev` | pytest, for running the tests |
 
-As a dependency in another project: `pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"`.
-
 ## Quickstart
 
 ```bash
@@ -52,6 +50,33 @@ memhub list && memhub queue                                                 # br
 ```
 
 Run the tests with `pip install -e ".[dev]"` and `pytest` (needs Docker; the pgvector container is started by the fixtures).
+
+## Use it in an existing project
+
+Install memhub as a dependency instead of copying files:
+
+```bash
+uv pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"    # or pip install, same spec
+```
+
+To pin it in `pyproject.toml`, use `memhub[openai] @ git+https://github.com/jooaobrum/memhub.git@main`. If you use the LangChain middleware, also pin `langchain>=1.0` (memhub declares `>=0.3`, the middleware needs 1.x).
+
+Then add to your repo:
+
+```
+<your repo>/
+  memhub.yaml                 # models, types, source mapping (start from memhub.example.yaml)
+  <app>/memory/service.py     # builds MemoryService once; the only file that imports memhub
+  scripts/ingest_memory.py    # optional: entrypoint for a scheduled ingest job
+```
+
+```bash
+docker compose up -d                                        # or point database_url at your own Postgres with pgvector
+memhub init -c memhub.yaml
+memhub ingest --source jsonl --dry-run -c memhub.yaml       # check the extraction before writing anything
+```
+
+Connect your agent in steps: **A** offline extraction only, **B** your agent calls `service.search(...)`, **C** `MemoryMiddleware` on a LangChain agent (see [chatbot.py](examples/habitantes/chatbot.py)). Start at A. Details, including a separate schema in an existing Postgres and multi-agent setups, are in [docs/integration.md](docs/integration.md).
 
 ## CLI
 
