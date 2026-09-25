@@ -11,12 +11,10 @@ __pycache__/
 *.log
 
 # project-specific data and configs (real conversations, local ledgers)
-data/
+/data/
 /memhub.yaml
 /memhub_*.yaml
 
-# pilot iteration outputs: only scripts are tracked
-pilot/*
-!pilot/*.py
-!pilot/dump.sh
-!pilot/memories_template.html
+
+# local pilot iterations and real-data experiments (not published)
+/pilot/

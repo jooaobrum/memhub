@@ -68,7 +68,7 @@ Ingest quality knobs:
 ## Examples
 
 - [examples/support](examples/support) and [examples/maintenance](examples/maintenance): adapting memhub to another project
-- Pilot (Habitantes): `memhub.yaml` points at `data/*.jsonl`. After `init` + `ingest`, run `python pilot/functional_check.py` for an end-to-end PASS/FAIL of every command.
+- [examples/habitantes](examples/habitantes): a chatbot with memhub memory (config, sample data, LangChain agent, functional check)
 
 ## Documentation
 

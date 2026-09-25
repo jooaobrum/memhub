@@ -1,6 +1,6 @@
 """End-to-end functional check of the memhub CLI against the pilot ledger.
 
-Run after `memhub init` + `memhub ingest`:   python pilot/functional_check.py
+Run after `memhub init` + `memhub ingest`:   python examples/habitantes/functional_check.py
 
 It answers "are memories being generated, and does every command work?" with PASS/FAIL lines and a
 non-zero exit code on any failure. It only writes for a throwaway user (`pilot-check-user`), which it
@@ -14,9 +14,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 MEMHUB = ROOT / ".venv" / "bin" / "memhub"
-CFG = ["-c", str(ROOT / "memhub.yaml")]
+CFG = ["-c", str(ROOT / "examples" / "habitantes" / "memhub.yaml")]
 USER = "pilot-check-user"
 failures: list[str] = []
 

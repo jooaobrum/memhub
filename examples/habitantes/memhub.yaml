@@ -1,0 +1,175 @@
+# Habitantes example config (user scope, JSONL source, built-in types). Run every command from the repo root with -c examples/habitantes/memhub.yaml.
+# Keys come from .env (OPENROUTER_API_KEY, OPENAI_API_KEY). Start Postgres: docker compose up -d
+project_prefix: habitantes
+database_url: postgresql://memhub:memhub@localhost:5433/memhub
+workspace_default: habitantes
+
+llm:
+  extractor: {provider: openai, model: google/gemini-2.5-flash-lite, base_url: "https://openrouter.ai/api/v1", api_key_env: OPENROUTER_API_KEY}
+  judge:     {provider: openai, model: google/gemini-2.5-flash,      base_url: "https://openrouter.ai/api/v1", api_key_env: OPENROUTER_API_KEY}
+embeddings:
+  provider: openai
+  model: text-embedding-3-small
+  api_key_env: OPENAI_API_KEY
+  dims: 1536
+
+entity_types: []
+scopes: [user, workspace]                 # workspace is used only by `term` (the shared glossary)
+
+types:
+  fact:       {class: "memhub.types:Fact",       retrieval: search,          type_prior: 0.6, area: required, scopes: [user]}
+  profile:
+    class: "memhub.types:Profile"
+    retrieval: always
+    type_prior: 0.8
+    scopes: [user]
+  preference:
+    class: "memhub.types:Preference"
+    retrieval: always
+    type_prior: 0.8
+    max_chars: 1500
+    max_active: 20
+    scopes: [user]
+    keyed: true
+    strict_keys: false   # the keys are suggestions: any short key is accepted, like Profile there is no fixed schema
+    keys:
+      language: "the language the agent should answer in"
+      scope: "how broad or narrow the answers should be (only the main option, no follow-up questions)"
+      detail: "how long the answers should be and how much detail they have"
+      format: "the shape of the answers (bullets, numbered steps, a list of N items)"
+      emoji: "whether the answers may use emoji"
+      tone: "how formal or casual the agent is with the user"
+      sources: "whether the answers must cite their sources"
+      address: "what to call the user"
+  episode:    {class: "memhub.types:Episode",    retrieval: search,          type_prior: 0.4, ttl: 180d, max_active: 10, scopes: [user]}
+  case:       {class: "memhub.types:Case",       retrieval: search,          type_prior: 0.7, extract: false, on_remember: true, scopes: [user], content_template: "Symptom: {symptom} Root cause: {root_cause} Action: {action} Outcome: {outcome}"}   # a solved problem, saved with `/remember save this case` (add workspace to share cases: they then wait for review)
+  term:       {class: "memhub.types:Term",       retrieval: search,          type_prior: 0.5, scopes: [workspace]}
+  area:       {class: "memhub.types:Area",       retrieval: search,          extract: false, scopes: [user]}
+  skill:      {class: "memhub.types:Skill",      retrieval: index_then_load, extract: false, scopes: [user]}
+
+# How long a memory holds when the text gives no end date; a type's own ttl wins. null = never expires.
+ttl: {stable: null, ongoing: 365d, temporary: 30d}
+
+# The shared glossary: a term is proposed only when a message defines it explicitly, and an admin approves it.
+terms: {max_per_workspace: 300, max_aliases: 5, min_confidence: 0.9}
+
+# Topics a Fact belongs to (a Fact that fits none is dropped). A seed becomes a row for a user when their first Fact lands in it.
+areas:
+  open: true
+  merge_similarity: 0.88
+  max_per_user: 25
+  max_per_workspace: 40
+  page_max_items: 15
+  seeds:
+    - {key: visa_residence, title: "Visto & Residência", icon: "🛂", description: "visa, titre de séjour, permits, renewals, prefecture, residence status"}
+    - {key: documents, title: "Documentos & Burocracia", icon: "📄", description: "identity documents, driving licence, certificates, translations, administrative paperwork"}
+    - {key: housing_caf, title: "Moradia & CAF", icon: "🏠", description: "renting, lease, deposit, housing search, CAF housing aid, utilities"}
+    - {key: health_insurance, title: "Saúde & Seguro", icon: "🩺", description: "health insurance, sécurité sociale, doctors, prescriptions, mutuelle"}
+    - {key: work_internship, title: "Trabalho & Estágio", icon: "💼", description: "job, internship, work contract, work permit rules, self-employment"}
+    - {key: university_studies, title: "Universidade & Estudos", icon: "🎓", description: "university, degree, enrolment, scholarships, courses, student status"}
+    - {key: banking_finance, title: "Banco & Finanças", icon: "🏦", description: "bank account, transfers, taxes, income, budget"}
+    - {key: phone_telecom, title: "Telefone & Internet", icon: "📱", description: "mobile plan, SIM card, internet subscription"}
+    - {key: travel_transport, title: "Viagens & Transporte", icon: "🚆", description: "trains, buses, flights, travel, transport passes, cars"}
+    - {key: neighbourhood_safety, title: "Bairro & Segurança", icon: "🏘️", description: "the neighbourhood, safety, neighbours, local issues"}
+    - {key: daily_life, title: "Vida Cotidiana & Serviços", icon: "🧺", description: "everyday services, shopping, post office, waste, home life"}
+    - {key: food_restaurants, title: "Comida & Restaurantes", icon: "🍽️", description: "food, restaurants, groceries, dietary habits"}
+    - {key: nightlife_events, title: "Vida Noturna & Eventos", icon: "🎉", description: "bars, clubs, concerts, events, going out"}
+    - {key: ski_trekking, title: "Ski & Trilhas", icon: "⛷️", description: "skiing, hiking, mountain activities"}
+    - {key: sports_activities, title: "Esportes & Atividades", icon: "🏃", description: "sports, gyms, clubs, hobbies"}
+    - {key: hair_beauty, title: "Cabelo & Beleza", icon: "💇", description: "hairdresser, barber, beauty and personal care"}
+    - {key: integration_language, title: "Integração & Idioma", icon: "🗣️", description: "French language level and courses, cultural integration, community"}
+    - {key: marketplace, title: "Marketplace & Compra/Venda", icon: "🛒", description: "buying and selling second-hand items, online marketplaces"}
+    - {key: pets, title: "Pets & Animais", icon: "🐾", description: "pets, animals, vet, pet rules"}
+
+sources:
+  jsonl:
+    kind: jsonl
+    path: examples/habitantes/data/interactions.jsonl
+    one_line_per: turn
+    fields:
+      thread_id: chat_id
+      user_id: chat_id
+      message_id: message_id
+      timestamp: timestamp
+      trace_id: trace_id
+      user_content: user_query
+      assistant_content: answer
+      metadata: [intent, category, confidence, error]
+    signals:
+      path: examples/habitantes/data/feedback.jsonl
+      join_on: {message_id: message_id, thread_id: chat_id}
+      map: {rating: {down: feedback_down, up: feedback_up}}
+
+extraction:
+  remember_instructions: |
+    A `/remember` order either says what to keep or points at the conversation ("save this", "save this case", "guarda isso"). In the second case read the messages ABOVE it, with their context, and keep what was just discussed. A solved problem, fault or case is a `case`: `symptom` = what was observed, `root_cause` = why it happened, `action` = what was done, `outcome` = how it ended. Take each part from the conversation (the assistant's diagnosis and steps count), never invent one: write "not stated" for a part the conversation does not give. Write each part in the third person or impersonally ("Apertou os parafusos", not "Apertei"), in the language of the conversation. Anything about who the user is, a lasting fact or how they want to be answered is a `profile`, `fact` or `preference`. Each `quote` is copied verbatim from ONE message (cite its id); `content` is your rewrite; absolute dates; utility 5, assertion `stated`; if nothing can be worked out return an empty list.
+  passes: 2    # two independent samples per slice, united: a cheap model misses different facts each time
+  retries: 4   # the cheap extractor truncates its JSON in ~1 of 5 calls: sample again before giving up on a segment
+  instructions: |
+    KINDS. SEMANTIC memory is what the agent should know: stable facts about the user and their environment. `profile` = who the user is (identity, role, constraints, goals). What characterises a profile, for example: nationality, the city they live in, age, what and where they study, their job, family, the residence permit or documents they hold and their state, a lasting goal. These are ideas, not fields: write one free sentence per statement, only what the user said, and never force a statement into a category it does not state (\"sou de Belo Horizonte\" is where they are from, not a nationality). `fact` = other stable knowledge about the user's situation or the domain, filed under an area. EPISODIC memory (`episode`) is what the user went through: a specific past situation with its outcome, or ongoing work and its state. A state that can change ("has a Brazilian driving licence", "holds a student permit") is still a profile row: a later message replaces it and the old value stays in history. Ask of every candidate: will this help me answer this user better in a month? If not, emit nothing.
+
+    VOICE. Write `content` in the third person about the user, in the language the user wrote in, never in the first person: "Tem CNH brasileira", "Já morou em Grenoble", "Faz doutorado na França" - not "Tenho CNH brasileira" or "Sou estudante". Do not guess the user's gender: when the message does not show it, use wording that needs none. An acute one-off problem or errand (a toothache, a lost card or phone, a search for a doctor) is not stored. A statement about someone else (a child, partner, parent, friend, pet) names that person and is never written as if it were about the user: "Alice (filha) é intolerante a lactose", "Marido joga futebol aos domingos", "Mãe de 68 anos vem visitá-la em novembro", not "É intolerante a lactose" or "Tem 3 anos". A joke, sarcasm or a self-description that is not a real fact about the user ("sou a mais divônica") is never a memory.
+
+    A memory is a DURABLE fact about the USER's own life that the USER STATED in a first-person sentence and that would help serve them in a FUTURE conversation: nationality/identity, status (student, worker), a visa/permit/document they HOLD, where they live, studies, job, family, a decision already made, a stated preference, or a correction of the assistant.
+    Many segments yield NO candidates (return an empty list), but when a user message DOES state facts about themselves, capture each distinct durable fact (up to 5 per segment) even if the message also contains a question. Worth keeping when the user states it: identity and status; documents held; where they live and with whom; studies and job; family, household and pets; health constraints (an allergy, an intolerance) and the diet they follow, and any change of it ("voltei a comer carne", "desisti do veganismo" is a new state that replaces the old one); habits and sports they practise, tastes; money facts (budget, income, savings); language level; how they get around (a bike, a car); and DATED commitments about the future: a visit from family on a set month, a trip with a date, the start of a job or internship, a child starting school, adopting a pet or a birthday coming up - write these with the absolute date and set `valid_until` to that date. Only vague plans, doubts and wishes ("estou pensando em", "quero", "vale a pena?") are not kept.
+
+    SELF-CHECK before emitting each candidate - all four must be YES:
+     a) Did the user literally write a first-person statement about themselves (I am / I have / I live / I moved / my ...; eu sou / tenho / moro / mudei / meu / minha / estou fazendo ...)?
+     b) Is the memory a lasting fact, not a plan, search, question or errand? A question about how to do something ("como renovo o visto?", "tem como pedir titre de séjour?", "como solicito assistência habitação?") is NOT a fact: emit nothing. A vague intention ("I want to / I'm thinking of / eu quero / pretendo / estou pensando em / decidindo se ...") is NOT stored; store only the durable fact behind it when there is one, otherwise nothing. A commitment that is already settled and dated ("meu pai vem em outubro", "começo o estágio em outubro", "vou ver minha família em dezembro") is a fact, not an intention. A decision the user announces as taken ("decidi ficar em X") is a fact too.
+     c) Is it stated by the user, not deduced and not taken from the assistant's answer?
+     d) Would it still be true and useful in a month?
+         e) Does the memory carry SPECIFIC information (what, who, where or when)? A bare word or topic ("Trabalho", "Renovação de visto"), or a vague need with no substance and no end date, is not a memory. A fact the user states about themselves IS a memory even when the question is about the same subject ("sou vegetariana, tem restaurante bom?" -> "É vegetariana.").
+    If any answer is NO, emit nothing for that idea.
+
+    NEVER emit:
+     - "The user is looking for / asking about / interested in / wants to know / wants to buy / needs information on ..." (any search, recommendation request, list request, how-to question).
+     - a location or nationality deduced from the topic of a question ("Where to throw clothes in Grenoble?" -> nothing; "Lists of bars in Grenoble" -> nothing).
+     - a group, website or tool the user merely mentions or asks about.
+     - facts that only appear in the assistant's answers (e.g. which consulate serves Grenoble).
+         - a location, status or nationality of the user that they never stated ("Mora em Grenoble" from a question about butchers in Grenoble; "É brasileiro" from a passport-renewal question) - that is a deduction, emit nothing.
+         - anything whose only support is a QUESTION: the quote must be the user's declarative clause ("eu ja tenho a brasileira", "sendo universitária"), never a question sentence. Asking to renew a Brazilian passport does not mean the user "is Brazilian" or "lives in France".
+         - a correction, comment or opinion about something other than the user (a restaurant, a service): that is not about the user.
+    If the user gives a held fact together with a request, keep ONLY the held fact and drop the request.
+
+    TIME RULES (strict). Every message shows its date, e.g. [#3 2026-07-21]. Never write in `content` any relative time: "ano que vem", "no ano seguinte", "próximo ano", "recentemente", "faz pouco tempo", "agora", "atualmente", "este ano", "next year", "recently", "soon". Before writing `content`, REWRITE each such phrase with the DATE OF THE MESSAGE that says it ("ano que vem" said on 2026-07-21 -> "em 2027"; "no ano seguinte quando deixar de ser estudante" -> "em 2027"; "faz pouco tempo" said on 2026-07-19 -> "pouco antes de 2026-07-19"), or drop the phrase. Count: if the message says "next year"/"ano seguinte", the words "seguinte"/"que vem"/"next" must NOT appear in your output, and the year must. A fact whose text gives an end date MUST get `valid_until` = the last day of that period, and `durability` ongoing.
+
+        EPISODES (rare; most segments have none). An `episode` is something that HAPPENED TO THE USER and that the user told in a declarative sentence, with all three parts stated by the user: the situation, what they did, and the outcome ("Fui à prefeitura pedir o titre de séjour, faltou um documento e tive que voltar" is an episode; "Como peço o titre de séjour?" is not). Never invent a missing part. NEVER write an episode that starts with or means "The user asked / inquired / is asking / wonders / is looking for / wants ..." - a question, request or list of questions is never an episode, and never a summary of what the conversation was about. The `outcome` must be what the USER says happened to them; what the ASSISTANT answered or explained is NEVER an outcome ("the assistant confirmed / informed / explained ..." means it is not an episode). If the user did not tell you how it ended, do not emit an episode. An `episode` that repeats a fact, or whose `content` is a single word like "user", is wrong. An episode is never a restatement of where the user lives, what they do or how they arrived (those are `profile`/`fact`), and never an event whose end the user has not told ("perdi o celular, e agora?" has no outcome). Write the episode in the language the user wrote in.
+
+    VAGUE MEMORIES ARE FORBIDDEN. Before emitting, ask: does this sentence tell me something concrete (what, which, where, since when) that I could not guess from the topic? "Sou universitária", "É brasileiro" without more, "Tem um problema com o visto", "Está procurando emprego" are too thin: emit them only when the user gave the concrete detail (which studies and where, which permit and its state, which job and where). When two candidates say nearly the same thing, emit only the more specific one. `profile` is one free sentence with a concrete value: the city name (never just "França"); what and where they study; the exact permit and its state; the job and where. A need, difficulty, errand or ongoing search ("precisa de passaporte novo", "está com dificuldade para achar trabalho", "procura cabeleireira") is NOT a profile and NOT a fact: emit nothing. Never combine a fact with the request that came with it. If in doubt, emit nothing: an empty list is a good answer.
+
+        EXAMPLES (illustrations of the rules only: never emit a memory from them, only what THIS user wrote)
+     user (message dated 2026-03-10): "Eu tenho CNH brasileira. Sou estudante no segundo ano aqui. Preciso pedir a CNH francesa agora?"  -> fact "Tem CNH brasileira." (stable) and fact "É estudante no segundo ano na França em 2026." (ongoing). Drop the question. Never write "este ano" / "next year" in content.
+     user (message dated 2026-05-02): "Mudei de Lyon pra Annecy, peguei um T3 maior. Preciso atualizar o endereço em algum lugar?" -> profile "Mora em Annecy." (the new state, which replaces the old one; NOT an episode: nothing is told about how it ended). Any move, new job, new diet or new status is written as the state the user is in now.
+     user (message dated 2026-03-10): "Sou estudante e estou decidindo se peço a troca agora ou ano que vem." -> NOTHING (a stated intention is not stored, and there is no durable fact behind it besides "É estudante", which is a fact only if not already captured).
+     user: "Tenho autorização de residência temporária em Portugal, como trabalho em Grenoble como autônoma?" -> "Tem autorização de residência temporária em Portugal e quer trabalhar de forma independente em Grenoble." 
+     user: "Cara, eu to fazendo doutorado e tô pensando em pedir cidadania francesa." -> fact "Faz doutorado na França." (the intention to apply for citizenship is not stored).
+     user: "Mudei pra Grenoble faz pouco tempo, o consulado é o de Marseille?" -> "Mudou-se para Grenoble pouco antes de 2026-07-19." (absolute date from the message date; the consulate answer is NOT a memory)
+     user: "Preciso renovar meu passaporte brasileiro, quanto custa?" -> NOTHING (a need and a question, not a fact).   user: "Procuro cabeleireira que faça megahair em Grenoble" -> NOTHING (a search).   user: "Como faço a CNH francesa? Eu ja tenho a brasileira" -> fact "Tem CNH brasileira." only.   user: "Sou universitária" with no course or place -> NOTHING (too thin).   user: "Meu recipissé vai expirar e a prefeitura não respondeu. O que faço?" -> residence_status "Tem recipissé do titre de séjour prestes a expirar, sem resposta da prefeitura (2026-07-21)." and NO episode (no outcome yet).   user (asks in Portuguese) -> NOTHING for the `language` preference: only store a preference when the user asks for it ("responda sempre em português").
+     user: "E sobre renovação de visto?" -> NOTHING.   user: "Como eu faço para solicitar assistência habitação?" -> NOTHING.   user: "Mas teve sim, pode gravar ai" -> NOTHING.   user: "Quais melhores academias de Grenoble?" -> NOTHING.   user: "Tipos de visto" -> NOTHING.   user: "Como arranjar moradia?" -> NOTHING.
+
+    PREFERENCES. `preference` = how the user wants the assistant to answer or to address them; set `key` to one of the suggested keys (listed at the end of the prompt) when it fits, otherwise to a short snake_case name of your own; one row per key, the latest wins. Store one when the user asks for it or says they like it ("responde curto", "pode me chamar de X", "sem emoji", "perfeito assim, sempre com fontes"). A request that only concerns the current answer ("dessa vez pode detalhar") is NOT a preference. Praise for the format of an answer ("ótimo assim, curtinho") states the preference for that format. Liking or thanking for a suggestion or a place ("gostei da sugestão", "ótima dica") is nothing. A statement about the user's own life is never a preference: it is a `profile` or a `fact`. Write the `content` as a complete sentence that says what is wanted ("Prefere respostas em lista de no máximo 3 itens"), never a bare quote ("sempre assim", "sem emoji"); if you cannot say what the format is, emit nothing. A request that covers two keys ("detalhada e com fontes") gives two memories, one per key.
+
+    TERMS. `term` is the shared glossary of the domain, not a memory about the user (scope `workspace`, not counted in the limit above). When a message uses an administrative acronym, an official document or procedure name, or a local word that a newcomer would need explained, and you know exactly what it means and what it is also called, propose a `term` with `confidence` (0 to 1; only 0.9 or more is kept) and `confirmed_by_user` false. When the user themself defines or confirms the meaning, set `confirmed_by_user` true. At most two terms per segment; never a term that is an everyday word, a place, a person or a brand.
+
+    One memory per distinct fact, however small: read every user message and give each stated fact its own memory (a message stating three facts gives three memories, a fact about a family member or a pet included); merge only true overlaps and never repeat a fact already captured. Facts: 'has X', 'is Y', 'lives in Z'. Write in the language the user wrote in, as a self-contained statement without "the user is", with absolute dates and no relative time in `content`. Quote verbatim from a user message. Never use `assertion: inferred`: candidates deduced beyond what the user literally wrote are dropped. Utility (1-5): 5 = a constraint the assistant must respect in almost every answer (allergy, diet, permit, where they live, a format they asked for); 4 = another lasting circumstance (job, studies, family, pets, budget, level, a dated commitment); 3 = mildly useful (a hobby, a taste); 1-2 = trivia. Be strict about what is not the user's own life, not about what is.
+
+ingestion:
+  segment_idle: 1h
+  thread_close: 7d
+  min_user_turns: 1
+  max_candidates: 5
+  segment_max_user_turns: 5
+  assistant_chars: 600        # long assistant answers are shown to the extractor cut (they never carry a claim)
+  repair_relative_time: true  # the judge dates "next year" / "soon" from the message date instead of dropping the claim
+  verify_claims: true         # the judge checks the claims that look invented or about someone else against their quote
+  verify_episodes: true      # the judge confirms the user told situation, action and outcome
+  llm_correction_check: true
+  skip_when: {intent: [greeting, out_of_scope]}
+
+admission:
+  weights: {utility: 0.35, evidence: 0.30, novelty: 0.20, type_prior: 0.10, signals: 0.05}
+  threshold: 0.75
+
+reconcile: {duplicate: 0.92, conflict_band: [0.80, 0.92], compare_floor: 0.30, compare_max: 4, extends: false, compare_across: [[profile, fact]]}
+roles: {approve_workspace: [workspace_admin]}
+retention: {dropped_days: 90}
