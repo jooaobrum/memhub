@@ -19,22 +19,39 @@ It is a library plus CLI (no daemon, no HTTP API) on top of a single Postgres + 
 
 Works with any agent framework and any LLM provider.
 
-## Quickstart
+## Install
 
-Requires Python 3.11+, [uv](https://docs.astral.sh/uv/) and Docker.
+Requires Python 3.11+ and Docker (for Postgres with pgvector).
 
 ```bash
-uv venv && uv pip install -e ".[dev,openai,mlflow]"
-docker compose up -d
-export MEMHUB_DATABASE_URL=postgresql://memhub:memhub@localhost:5433/memhub
-cp memhub.example.yaml memhub.yaml
-memhub init
-memhub ingest --source jsonl
+git clone https://github.com/jooaobrum/memhub.git
+cd memhub
+uv venv && uv pip install -e ".[openai]"     # or: python -m venv .venv && .venv/bin/pip install -e ".[openai]"
 ```
 
-Provider extras: `openai`, `anthropic`, `google`, `bedrock`, `ollama`, `mistral`, plus `mlflow` for MLflow traces. API keys are read from a git-ignored `.env` (e.g. `OPENROUTER_API_KEY`, `OPENAI_API_KEY`).
+Extras pick your LLM provider and sources; combine them as needed (`".[openai,mlflow]"`):
 
-Run the tests with `pytest` (needs Docker; the pgvector container is started by the fixtures).
+| Extra | Adds |
+|---|---|
+| `openai`, `anthropic`, `google`, `bedrock`, `ollama`, `mistral` | the LangChain integration for that provider |
+| `mlflow` | MLflow traces as an ingest source |
+| `dev` | pytest, for running the tests |
+
+As a dependency in another project: `pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"`.
+
+## Quickstart
+
+```bash
+docker compose up -d                                                        # Postgres + pgvector on port 5433
+export MEMHUB_DATABASE_URL=postgresql://memhub:memhub@localhost:5433/memhub
+cp memhub.example.yaml memhub.yaml                                          # edit sources, types and models
+echo "OPENAI_API_KEY=..." > .env                                            # git-ignored; keys are read from here
+memhub init                                                                 # create the tables
+memhub ingest --source jsonl                                                # extract memories from your traces
+memhub list && memhub queue                                                 # browse, then review what waits for approval
+```
+
+Run the tests with `pip install -e ".[dev]"` and `pytest` (needs Docker; the pgvector container is started by the fixtures).
 
 ## CLI
 
@@ -76,10 +93,3 @@ Ingest quality knobs:
 - [Integration](docs/integration.md): adoption steps
 - [TDD](docs/tdd.md): rules and field-level detail
 - [.specs/features/memhub/](.specs/features/memhub/): spec, design and research; [tickets/](.specs/features/memhub/tickets): work items
-
-## Known v1 limitations
-
-- `cost_usd` is not computed (tokens are)
-- `rephrase` signals are not detected
-- The correction detector's LLM fallback is off unless `ingestion.llm_correction_check: true`
-- Middleware entity boost is not wired
