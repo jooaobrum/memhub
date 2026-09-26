@@ -1,10 +1,24 @@
-# memhub
+<p align="center"><img src="docs/img/logo.png" alt="memhub" width="100%"></p>
 
-Reviewed, typed, versioned long-term memory for agents.
+<p align="center"><b>Reviewed, typed, versioned long-term memory for agents.</b></p>
 
 Agents forget between conversations, and memory tools that write on their own can store things that are not true. memhub keeps a small, trustworthy memory: every item is backed by a real quote, dated, versioned, and approved by a person when it is shared.
 
 It is a library plus CLI (no daemon, no HTTP API) on top of a single Postgres + pgvector database. An ingest pipeline turns conversation traces (JSONL or MLflow) into evidence-backed memories.
+
+## Why
+
+Most agent memory is write-and-hope: the agent saves whatever looks important, and everything saved is used. Over time memories from different users, projects and contexts get mixed. Guesses sit next to facts, old values sit next to new ones, and the agent keeps using things nobody wanted it to use. Nobody can see or fix what it relies on.
+
+That is fine for a toy assistant. It is not fine for systems where the data must be trusted: support, operations, maintenance, anything where a wrong "remembered" fact becomes a wrong answer.
+
+memhub treats memory as data that is **validated before use**:
+
+- A memory is only usable when it is `active`. Candidates, rejected, archived and superseded rows never reach the agent.
+- Shared knowledge and contradictions wait in a review queue until a person approves, edits or rejects them.
+- Every memory can be inspected, corrected, archived or erased, and every change is a new version with who and when.
+
+The goal is to run this from a simple management UI where a person decides what the agent may remember (see [Manage memories in a UI](#manage-memories-in-a-ui)).
 
 ![memhub overview](docs/img/memhub-overview.png)
 
@@ -18,6 +32,29 @@ It is a library plus CLI (no daemon, no HTTP API) on top of a single Postgres + 
 | **Small on purpose** | Caps, one value per attribute and strict filters keep memory short and useful |
 
 Works with any agent framework and any LLM provider.
+
+## Manage memories in a UI
+
+memhub ships no UI; building one is out of scope for this repo. It is designed to sit under one, though: every action below already exists in `MemoryService` and the CLI, so a UI is a thin layer on top. The screens are a **concept mockup** (source: [docs/img/review-ui.html](docs/img/review-ui.html)).
+
+**See and validate what the agent knows about a user.** Every memory is shown with the user's own words and whether a person has reviewed it. A reviewer confirms, edits or archives each one, resolves conflicts, and can test a question to see exactly which memories the agent would get.
+
+![A user's memories](docs/img/review-ui-memories.png)
+
+**Correct a memory, keep the history.** Every change is a new version with its source. A person's edit is never overwritten by the AI; a later change only comes back as a proposal to review.
+
+![History and edit](docs/img/review-ui-history.png)
+
+| In the UI | CLI | `MemoryService` |
+|---|---|---|
+| Review waiting proposals and conflicts | `memhub queue`, `memhub approve <id> [--resolve keep_old\|replace\|keep_both]`, `memhub reject <id>` | `queue()`, `approve()`, `reject()` |
+| A user's memories | `memhub list --user <user>` | `list()` |
+| Confirm | `memhub edit <memory_id> -f empty.json` (a file containing `{}`) | `edit(fields={})` |
+| Edit | `memhub edit <memory_id> -f fields.json` | `edit()` |
+| History | `memhub history <memory_id>` | `history()` |
+| Archive | `memhub archive <memory_id>` | `archive()` |
+| Test what the agent sees | `memhub search "<question>" --user <user>` | `search()` |
+| Erase a user | `memhub delete --user <user>` | `delete_user()` |
 
 ## Install
 
@@ -109,8 +146,58 @@ Ingest quality knobs:
 
 ## Examples
 
-- [examples/support](examples/support) and [examples/maintenance](examples/maintenance): adapting memhub to another project
-- [examples/habitantes](examples/habitantes): a chatbot with memhub memory (config, sample data, LangChain agent, functional check)
+### Example projects
+
+| Example | Shows |
+|---|---|
+| [examples/habitantes](examples/habitantes) | A chatbot with memhub memory: config, synthetic sample data, LangChain agent, functional check |
+| [examples/support](examples/support) | Adapting memhub to a support project: config only |
+| [examples/maintenance](examples/maintenance) | Adapting memhub to maintenance work, with a project memory type in Python ([maint_types.py](examples/maintenance/maint_types.py)) |
+
+### Review workflows
+
+The commands below use the Habitantes config (`C=examples/habitantes/memhub.yaml`, after `memhub ingest --source jsonl -c $C`). Every command prints JSON; `<id>` is a row id from `queue`, and `<memory_id>` is the stable id shared by all versions of a memory.
+
+**Resolve a contradiction.** The user first asked for short answers and later for step-by-step detail. Both values are kept until someone decides:
+
+```bash
+memhub queue -c $C                                   # conflicts first, each with its quote and the row it conflicts with
+memhub approve <id> --resolve replace -c $C          # the new value becomes active; the old one stays in history
+# or: --resolve keep_old, or --resolve keep_both (one row holding both values)
+```
+
+**Approve shared knowledge.** A glossary term or a promoted episode is visible to every user, so it waits for an admin:
+
+```bash
+memhub approve <id> --note "checked with the official website" -c $C
+memhub reject <id> --note "personal detail, not general" -c $C
+```
+
+**Correct what the AI extracted.** Only the fields you pass change. The new version is marked verified, and later ingests never overwrite it:
+
+```bash
+cat > fix.json <<'EOF'
+{"content": "Lives in a shared flat near campus since May 2026; receives a housing allowance."}
+EOF
+memhub edit <memory_id> -f fix.json -c $C
+memhub history <memory_id> -c $C                     # every version with its evidence, author and date
+```
+
+**Clean up.** Find what has expired, hide what should not be used, erase a user on request:
+
+```bash
+memhub list --user demo-ana --stale -c $C            # memories past their valid_until (never served to the agent)
+memhub archive <memory_id> -c $C                     # hidden from the agent, history kept
+memhub delete --user demo-ana -c $C                  # permanent erasure of every row for this user
+```
+
+**Audit what was dropped.** Every candidate the pipeline rejected is logged with a reason (see [last_run.json](examples/habitantes/last_run.json)):
+
+```bash
+memhub runs -c $C                                    # proposed / created / merged / conflicts, and dropped_by_reason
+```
+
+Approving and rejecting need a role from `roles.approve_workspace` (default `workspace_admin`). The CLI acts as `cli:<your OS user>` with the roles in `MEMHUB_CLI_ROLES`.
 
 ## Documentation
 

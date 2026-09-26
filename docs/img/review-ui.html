@@ -1,0 +1,191 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>memhub review console (mockup)</title>
+<!-- Concept mockup of a management UI on top of MemoryService (list / edit / history / archive / search / delete_user).
+     Not shipped with memhub. Rendered to PNG by render.py: one screenshot per .frame. Mock "today" is 18 May 2026. -->
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--g:#2f8f5b;--g-bg:#ecf7f0;--g-bd:#b7e0c8;--r:#c0392b;--r-bg:#fdf0ee;--r-bd:#f3c1ba;--i:#4f46e5;--i-bg:#eef2ff;
+      --a:#b45309;--a-bg:#fef6e4;--a-bd:#f6d58e;--ink:#111827;--tx:#374151;--mu:#6b7280;--li:#9ca3af;--bd:#e5e7eb;--bg:#f9fafb}
+body{background:#e5e7eb;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:var(--tx);font-size:15px;padding:40px;line-height:1.4}
+.frame{width:1600px;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #d1d5db;margin-bottom:40px;display:grid;grid-template-columns:212px 1fr;grid-template-rows:58px auto}
+/* chrome */
+.top{grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 22px;border-bottom:1px solid var(--bd)}
+.logo{font-weight:700;font-size:19px;color:#2563eb;width:170px}.logo i{font-style:normal;color:#4f8ff7}
+.ws{border:1px solid #d1d5db;border-radius:8px;padding:6px 10px;font-size:14px}
+.gs{border:1px solid #d1d5db;border-radius:8px;padding:6px 12px;font-size:14px;color:var(--li);width:380px}
+.mock{margin-left:auto;font-size:11px;letter-spacing:.6px;font-weight:700;color:var(--li);border:1px dashed #cbd5e1;border-radius:6px;padding:4px 8px}
+.me{font-size:14px;display:flex;align-items:center;gap:8px}
+.av{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#fde7b0;color:#92400e;font-weight:700;font-size:12px}
+nav{border-right:1px solid var(--bd);padding:16px 10px;background:var(--bg)}
+nav a{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-radius:8px;margin-bottom:2px}
+nav a.on{background:var(--g-bg);color:#1d6b42;font-weight:700}
+nav .n{font-size:12px;font-weight:700;background:#f59e0b;color:#fff;border-radius:10px;padding:1px 8px}
+nav .c{font-size:12px;color:var(--li)}
+nav h6{font-size:11px;letter-spacing:.6px;color:var(--li);margin:18px 12px 6px}
+main{grid-column:2;padding:22px 26px 26px;min-width:0}
+/* shared */
+h1{font-size:23px;font-weight:600;color:var(--ink)}
+.lab{font-size:11px;letter-spacing:.6px;font-weight:700;color:var(--mu);text-transform:uppercase}
+.mu{color:var(--mu);font-size:13px}
+.lnk{color:#2563eb;font-size:13px}
+.row{display:flex;gap:8px;align-items:center}
+.sp{margin-left:auto}
+.tag{display:inline-flex;font-size:12px;font-weight:700;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.t-ty{background:#f3f4f6;color:#4b5563}.t-sh{background:var(--i-bg);color:var(--i)}.t-conf{background:var(--r-bg);color:var(--r)}
+.t-ok{background:var(--g-bg);color:#1d6b42}.t-hum{background:var(--a-bg);color:var(--a)}.t-ai{background:#f5f3ff;color:#6d28d9}.t-exp{background:#fff1e6;color:#c2410c}
+.btn{display:inline-flex;border-radius:8px;padding:8px 14px;font-size:14px;font-weight:600;border:1px solid #d1d5db;background:#fff;white-space:nowrap}
+.b-dk{background:var(--ink);border-color:var(--ink);color:#fff}.b-no{color:var(--r);border-color:var(--r-bd)}
+.panel{border:1px solid var(--bd);border-radius:12px;background:#fff}
+.inp{border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:14px;color:var(--ink)}
+/* memories */
+.grid{display:grid;grid-template-columns:1fr 380px;gap:22px;margin-top:16px}
+.att{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}
+.att>div{border-radius:10px;padding:11px 14px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.att b{font-size:15px;color:var(--ink)}
+.sec{display:flex;align-items:baseline;gap:10px;margin:20px 0 8px}
+.sec .lab{font-size:12px}
+table{width:100%;border-collapse:collapse}
+td{padding:11px 10px;border-bottom:1px solid #f1f3f5;vertical-align:top;font-size:14.5px}
+td:first-child{padding-left:0;width:100px}
+td:nth-child(3){width:190px}td:last-child{width:200px}
+td .q{color:var(--mu);font-size:13px;margin-top:3px}
+td .q:before{content:"“"}td .q:after{content:"”"}
+.ia{display:flex;gap:6px;justify-content:flex-end}
+.ib{border:1px solid var(--bd);border-radius:7px;padding:4px 9px;font-size:13px;white-space:nowrap}
+.ib.g{color:#1d6b42;border-color:var(--g-bd);background:var(--g-bg);font-weight:600}
+.ib.r{color:var(--r);border-color:var(--r-bd)}
+.res{border-top:1px solid var(--bd);padding:10px 0;display:flex;gap:10px;font-size:14px}
+.res .sc{font-size:12px;color:var(--mu);margin-left:auto;white-space:nowrap}
+.danger{margin-top:18px;border:1px solid var(--r-bd);background:#fffafa;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:14px;font-size:14px;color:#7f1d1d}
+/* history */
+.tl{position:relative;padding-left:28px}
+.tl:before{content:"";position:absolute;left:9px;top:10px;bottom:10px;width:2px;background:var(--bd)}
+.ver{position:relative;margin-bottom:14px}
+.ver:before{content:"";position:absolute;left:-25px;top:16px;width:12px;height:12px;border-radius:50%;background:#d1d5db;border:2px solid #fff;box-shadow:0 0 0 1px #d1d5db}
+.ver.cur:before{background:var(--g);box-shadow:0 0 0 1px var(--g)}
+.ver .panel{padding:14px 16px}
+.ver.cur .panel{border:1.5px solid var(--g-bd)}
+.claim{font-size:18px;color:var(--ink);margin:6px 0 10px}
+ins{background:#dcfce7;color:#14532d;text-decoration:none;padding:0 2px;border-radius:3px}
+del{background:#fde2e2;color:#991b1b;padding:0 2px;border-radius:3px}
+.quote{border-left:3px solid var(--g);background:#f4fbf7;padding:7px 12px;border-radius:0 8px 8px 0;font-size:13.5px}
+.quote small{display:block;color:var(--mu);font-size:12px;margin-top:2px}
+.form label{display:block;margin:14px 0 6px}
+.ta{border:1.5px solid var(--g);box-shadow:0 0 0 3px #dcfce7;min-height:70px;font-size:15px}
+.ro{background:var(--bg);color:var(--mu)}
+.info{background:var(--a-bg);border:1px solid var(--a-bd);border-radius:10px;padding:10px 12px;font-size:13.5px;color:#78350f;margin-top:14px}
+</style></head><body>
+
+<!-- 1. One user's memories: what the agent sees, and what needs a person -->
+<div class="frame" id="memories" data-nav="memories">
+  <main>
+    <div class="mu">Memories › Users › demo-ana</div>
+    <div class="row" style="margin-top:6px"><span class="av" style="width:40px;height:40px;font-size:15px;background:#dbeafe;color:#1e40af">DA</span>
+      <div><h1>demo-ana</h1><div class="mu">7 active memories · last conversation 16 May 2026</div></div>
+      <span class="btn sp">Export</span><span class="btn">Add memory</span></div>
+
+    <div class="att">
+      <div style="background:var(--r-bg);border:1px solid var(--r-bd)"><b>1 conflict waiting</b><span class="mu">Answer style: short → detailed</span><span class="lnk">Resolve →</span></div>
+      <div style="background:#fff7ed;border:1px solid #fed7aa"><b>1 expires in 12 days</b><span class="mu">Residence permit, 30 May 2026</span><span class="lnk">Review →</span></div>
+      <div style="background:#f5f3ff;border:1px solid #ddd6fe"><b>4 not reviewed by a person</b><span class="mu">Extracted by the AI from her own words</span><span class="lnk">Review one by one →</span></div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="sec"><span class="lab">Always given to the agent</span><span class="mu">profile and preferences, in every conversation</span></div>
+        <table>
+          <tr><td><span class="tag t-ty">profile</span></td><td>Brazilian; master's student in Grenoble since September 2025.<div class="q">I'm Brazilian, I came to Grenoble in September for my master's.</div></td><td><span class="tag t-ai">Not reviewed</span></td><td><div class="ia"><span class="ib g">Confirm</span><span class="ib">Edit</span><span class="ib">⋯</span></div></td></tr>
+          <tr><td><span class="tag t-ty">profile</span></td><td>Student residence permit expires on 30 May 2026.<div class="q">My permit expires on 30 May.</div></td><td><span class="tag t-exp">Expires in 12 days</span></td><td><div class="ia"><span class="ib g">Confirm</span><span class="ib">Edit</span><span class="ib">⋯</span></div></td></tr>
+          <tr><td><span class="tag t-ty">profile</span></td><td>Lives in a shared flat near campus; receives a housing allowance.<div class="q">I moved to a shared flat right next to campus.</div></td><td><span class="tag t-hum">Edited by joao</span></td><td><div class="ia"><span class="ib">Edit</span><span class="ib">History</span><span class="ib">⋯</span></div></td></tr>
+          <tr><td><span class="tag t-ty">preference</span></td><td><b>detail</b> · Prefers short answers.<div class="q">I prefer short answers, please.</div></td><td><span class="tag t-conf">Conflict</span></td><td><div class="ia"><span class="ib r">Resolve</span></div></td></tr>
+          <tr><td><span class="tag t-ty">preference</span></td><td><b>language</b> · Answer in English.<div class="q">Please answer in English.</div></td><td><span class="tag t-hum">Confirmed by demo-ana</span></td><td><div class="ia"><span class="ib">Edit</span><span class="ib">History</span><span class="ib">⋯</span></div></td></tr>
+        </table>
+
+        <div class="sec" style="margin-top:22px"><span class="lab">Retrieved when relevant</span><span class="mu">facts and episodes, by area</span></div>
+        <table>
+          <tr><td><span class="tag t-ty">fact</span></td><td>Goes rock climbing twice a week.<div class="q">I climb twice a week at the gym, it keeps me sane.</div><div class="mu" style="margin-top:4px">Sports &amp; activities · valid until 28 Mar 2027</div></td><td><span class="tag t-ai">Not reviewed</span></td><td><div class="ia"><span class="ib g">Confirm</span><span class="ib">Edit</span><span class="ib">⋯</span></div></td></tr>
+          <tr><td><span class="tag t-ty">episode</span></td><td><b>Context</b> Residence permit renewal refused: proof of funds missing. <b>Action</b> Sent it again with the scholarship letter. <b>Outcome</b> Renewal accepted.<div class="q">They refused it because the proof was missing… I sent the scholarship letter and it went through!</div><div class="mu" style="margin-top:4px">Visa &amp; residence · valid until 24 Sep 2026</div></td><td><span class="tag t-ai">Not reviewed</span></td><td><div class="ia"><span class="ib g">Confirm</span><span class="ib">Edit</span><span class="ib">⋯</span></div></td></tr>
+        </table>
+        <div class="danger"><b>Right to erasure</b> Permanently delete every memory, version and quote for demo-ana.<span class="btn b-no sp">Erase user…</span></div>
+      </div>
+
+      <div>
+        <div class="panel" style="padding:16px">
+          <div class="lab">Test what the agent sees</div>
+          <div class="mu" style="margin:4px 0 10px">Ask as demo-ana; nothing is sent to the model.</div>
+          <div class="inp">When does my residence permit expire?</div>
+          <div class="mu" style="margin:14px 0 6px"><b style="color:var(--tx)">Always included</b> · 3 profile, 2 preferences</div>
+          <div class="mu" style="margin:10px 0 2px"><b style="color:var(--tx)">Found for this question</b></div>
+          <div class="res"><span class="tag t-ty">episode</span><span>Permit renewal refused, sent again with the scholarship letter</span></div>
+          <div class="res"><span class="tag t-sh">term</span><span>Prefecture: the office that issues residence permits</span><span class="sc">shared</span></div>
+          <div class="mu" style="border-top:1px solid var(--bd);padding-top:10px">Never included: proposals waiting for review, archived, superseded and expired memories.</div>
+        </div>
+        <div class="panel" style="padding:16px;margin-top:14px">
+          <div class="lab" style="margin-bottom:10px">Area pages</div>
+          <div class="res">Visa &amp; residence<span class="sc">2 memories</span></div>
+          <div class="res">Housing<span class="sc">1 memory</span></div>
+          <div class="res">University &amp; studies<span class="sc">1 memory</span></div>
+          <div class="res">Sports &amp; activities<span class="sc">1 memory</span></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 2. Version history + a person's edit -->
+<div class="frame" id="history" data-nav="memories">
+  <main>
+    <div class="mu">Memories › Users › demo-ana › profile</div>
+    <div class="row" style="margin-top:6px"><h1>Where demo-ana lives</h1><span class="tag t-ok">Active · v3</span><span class="tag t-hum">Edited by joao</span><span class="sp mu">always given to the agent</span></div>
+    <div class="grid" style="grid-template-columns:1fr 520px">
+      <div class="tl">
+        <div class="ver cur"><div class="panel">
+          <div class="row"><b style="color:var(--ink)">v3</b><span class="tag t-hum">edited by joao</span><span class="sp mu">15 May 2026 10:22</span></div>
+          <div class="claim">Lives in a shared flat near campus<ins>; receives a housing allowance</ins>.</div>
+          <div class="mu">Edited by a person: later ingests will not overwrite it. Quote kept from v2.</div>
+        </div></div>
+        <div class="ver"><div class="panel">
+          <div class="row"><b style="color:var(--ink)">v2</b><span class="tag t-ai">AI · update</span><span class="sp mu">said 10 May 2026 19:41</span><span class="lnk">Restore</span></div>
+          <div class="claim" style="color:#4b5563">Lives in <del>a studio in the city centre and receives a housing allowance</del><ins>a shared flat near campus</ins>.</div>
+          <div class="quote">“I moved to a shared flat right next to campus.”<small>demo-ana · message 33 · open conversation ↗</small></div>
+        </div></div>
+        <div class="ver"><div class="panel">
+          <div class="row"><b style="color:var(--ink)">v1</b><span class="tag t-ai">AI</span><span class="sp mu">said 2 Mar 2026 09:15</span><span class="lnk">Restore</span></div>
+          <div class="claim" style="color:#4b5563">Lives in a studio in the city centre and receives a housing allowance.</div>
+          <div class="quote">“I also live in a studio in the city centre and I get housing aid.”<small>demo-ana · message 5 · open conversation ↗</small></div>
+        </div></div>
+      </div>
+
+      <div class="panel form" style="padding:18px 20px;align-self:start">
+        <div class="row"><b style="font-size:17px;color:var(--ink)">Edit</b><span class="sp mu">saves as v4</span></div>
+        <label class="lab">What the agent reads</label>
+        <div class="inp ta">Lives in a shared flat near campus since May 2026; receives a housing allowance.|</div>
+        <div class="row mu" style="margin-top:6px">Changes vs v3: <ins>since May 2026</ins></div>
+        <label class="lab">Tags</label>
+        <div class="inp"><span class="tag t-ty">housing</span> <span class="tag t-ty">benefits</span> <span class="mu">+ add</span></div>
+        <label class="lab">Said on · valid until <span style="font-weight:400;text-transform:none;letter-spacing:0">(from the conversation, read-only)</span></label>
+        <div class="inp ro">10 May 2026 · no end date</div>
+        <label class="lab">Evidence <span style="font-weight:400;text-transform:none;letter-spacing:0">(read-only)</span></label>
+        <div class="quote">“I moved to a shared flat right next to campus.”<small>message 33 · kept on every version</small></div>
+        <div class="info">Saving marks this memory as reviewed by you. Later ingests can propose a change, but it will wait for review.</div>
+        <div class="row" style="margin-top:16px"><span class="btn b-dk">Save v4</span><span class="btn">Cancel</span><span class="btn b-no sp">Archive…</span></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// shared chrome: top bar + left nav, injected into every frame
+const NAV = [["review","Review",'<span class="n">12</span>'],["memories","Memories",'<span class="c">1,204</span>'],["areas","Areas",'<span class="c">37</span>'],["glossary","Glossary",'<span class="c">41</span>']];
+const AUDIT = ["Ingest runs","Activity log","Erasure requests"];
+for (const f of document.querySelectorAll(".frame")) {
+  const on = f.dataset.nav;
+  f.insertAdjacentHTML("afterbegin",
+    `<div class="top"><span class="logo">mem<i>hub</i></span><span class="ws">student-support ▾</span>` +
+    `<span class="gs">Search memories, users, terms…</span><span class="mock">CONCEPT MOCKUP</span>` +
+    `<span class="me"><span class="av">JB</span>joao · admin</span></div>` +
+    `<nav>${NAV.map(([k, t, b]) => `<a class="${k === on ? "on" : ""}">${t}${b}</a>`).join("")}` +
+    `<h6>AUDIT</h6>${AUDIT.map(t => `<a>${t}</a>`).join("")}</nav>`);
+}
+</script>
+</body></html>
