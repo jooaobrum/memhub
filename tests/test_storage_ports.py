@@ -63,6 +63,7 @@ def test_postgres_capabilities_for_every_db_kind(pg_dsn):
     with ConnectionPool(pg_dsn, min_size=1, max_size=1, open=True) as pool, psycopg.connect(pg_dsn) as conn:
         for db in (pool, conn, lambda: psycopg.connect(pg_dsn), pg_dsn):
             backend = open_backend(db, "p")
+            backend = backend.resolve() if getattr(backend, "deferred", False) else backend  # a callable: told by its result
             assert isinstance(backend, MemoryStore)
             assert backend.capabilities == frozenset(Capability)
 

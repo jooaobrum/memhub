@@ -19,7 +19,7 @@ from memhub.config import Config, ConfigError, EmbeddingConfig, build_chat_model
 from memhub.service import MemoryService, ServiceError
 from memhub.settings import SEARCH_PLACES, Parts, Resolved, embedding_model_id, read_context, resolve
 from memhub.sources import build_source
-from memhub.storage.postgres import MemoryStore
+from memhub.storage import open_backend
 from memhub.storage.rules import Actor, StoreError
 
 load_dotenv(find_dotenv(usecwd=True))  # API keys live in a git-ignored .env
@@ -67,7 +67,7 @@ def _service(config: Optional[Path], *, check_embedding: bool = True) -> MemoryS
     _require_db_and_embedder(resolved)
     try:
         embeddings = parts.embedder
-        store = MemoryStore(parts.db, settings.project_prefix, settings.database_schema)
+        store = open_backend(parts.db, settings.project_prefix, settings.database_schema)  # Postgres, SQLite or memory
         if settings.embeddings is None:  # `models:` / `connect:`: the dims are what the model answers
             settings.embeddings = EmbeddingConfig(model=embedding_model_id(embeddings, settings), dims=len(embeddings.embed_query("memhub")))
     except ConfigError as exc:
@@ -115,7 +115,7 @@ ConfigOpt = typer.Option(None, "--config", "-c", help="Path to memhub.yaml (defa
 def init(
     config: Optional[Path] = ConfigOpt,
     project: Optional[str] = typer.Option(None, "--project", help="Table prefix (a project per prefix can share one database)"),
-    db: Optional[str] = typer.Option(None, "--db", help="Postgres URL (a `${VAR}` for the password keeps it out of the file)"),
+    db: Optional[str] = typer.Option(None, "--db", help="postgresql://... (a `${VAR}` for the password keeps it out of the file), or sqlite:///memhub.db"),
     chat: Optional[str] = typer.Option(None, "--chat", help="Chat model as provider:model (needed by `ingest`)"),
     embeddings: Optional[str] = typer.Option(None, "--embeddings", help="Embedding model as provider:model"),
     preset: Optional[str] = typer.Option(None, "--preset", help="maintenance | support | assistant"),
