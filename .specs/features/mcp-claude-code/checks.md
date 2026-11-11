@@ -87,8 +87,8 @@ Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Handoff
 
-- **Settled mid-build:** none
-- **Dispatched:** none yet
-- **Boundary:** none yet
+- **Settled mid-build:** user: "Any question you need from me, I'll let you decide the best decision" - `run_id = mcp-<hex>` per process and the folder-named default workspace (AD-022); `memhub mcp` builds `Memory` from the CLI's own model builders; `mcp` is in the CLI command table and skipped where it would serve on stdin
+- **Dispatched:** Verifier at `1ec7729`, diff `0b58be3..1ec7729` (0b58be3: feat/schema-migrations, this branch's base; no screens sub-agent: no capture)
+- **Boundary:** C1-C15 closed at `1ec7729`
 - **Abandoned:** none
 - **Walked:** n/a - no screen
