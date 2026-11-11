@@ -16,6 +16,7 @@ from dotenv import find_dotenv, load_dotenv
 
 from memhub.config import Settings, build_chat_model, build_embeddings, load_config
 from memhub.service import MemoryService, ServiceError
+from memhub.sources import build_source
 from memhub.store import Actor, MemoryStore, StoreError
 
 load_dotenv(find_dotenv(usecwd=True))  # API keys live in a git-ignored .env
@@ -32,7 +33,13 @@ def _settings(config: Path) -> Settings:
     if not config.exists():
         typer.secho(f"config file not found: {config}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
-    return load_config(config)
+    settings = load_config(config)
+    # The CLI builds its own connection and models, so it needs what `Memory(db=, llm=, embedder=)` does not.
+    for key in ("database_url", "embeddings"):
+        if getattr(settings, key) is None:
+            typer.secho(f"{config} is missing `{key}`: the CLI needs it to reach the ledger", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+    return settings
 
 
 def _service(config: Path, *, check_embedding: bool = True) -> MemoryService:
@@ -100,26 +107,11 @@ def _build_source(settings: Settings, name: str, config: Path):
     if name not in settings.sources:
         typer.secho(f"unknown source {name!r}; configured: {list(settings.sources)}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
-    cfg = settings.sources[name]
-    if cfg.kind == "jsonl":
-        from memhub.sources.jsonl import JSONLSource
-
-        return JSONLSource(cfg, workspace_id=settings.workspace_default, base_dir=config.resolve().parent)
-    if cfg.kind == "mlflow":
-        from memhub.sources.mlflow import MLflowSource
-
-        return MLflowSource(cfg, workspace_id=settings.workspace_default)
-    if cfg.kind == "sql":
-        from memhub.sources.sql import SQLSource
-
-        return SQLSource(cfg, workspace_id=settings.workspace_default)
-    if ":" in cfg.kind:  # "package.module:Class": the project's own adapter (see sources/base.py)
-        import importlib
-
-        module, _, name = cfg.kind.partition(":")
-        return getattr(importlib.import_module(module), name)(cfg, workspace_id=settings.workspace_default)
-    typer.secho(f"unsupported source kind {cfg.kind!r}", fg=typer.colors.RED, err=True)
-    raise typer.Exit(1)
+    try:
+        return build_source(settings.sources[name], workspace_id=settings.workspace_default, base_dir=config.resolve().parent)
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -135,6 +127,9 @@ def ingest(
 
     service = _service(config)
     settings = service.settings
+    if settings.llm is None:
+        typer.secho(f"{config} is missing `llm`: ingest needs an extractor and a judge", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
     summary = ingest_source(
         store=service.store,
         settings=settings,

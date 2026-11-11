@@ -305,3 +305,11 @@ def test_the_toolkit_gives_any_agent_stack_the_same_search_and_propose(service, 
     assert "error" in json.loads(kit.call("delete_everything", {}))
     assert "error" in json.loads(kit.call("search_memory", {"nonsense": 1}))
     assert json.loads(kit.call("search_memory", {"query": "Okta"})) == []  # a candidate is not searchable until approved
+
+
+def test_propose_memory_tool_returns_id_event_status(mw, service):
+    import json
+
+    out = json.loads(tool(mw, "propose_memory")("fact", {"content": "alice drinks green tea"}, [], ctx()))
+    [row] = service.list(Actor(id="x"), user_id="alice")
+    assert out == {"id": str(row["memory_id"]), "event": "PENDING", "status": "candidate"}

@@ -14,6 +14,12 @@ from typing import Any
 from memhub.service import Actor, MemoryService, ServiceError
 
 
+def proposal_result(row: dict) -> dict[str, str]:
+    """What a tool tells the model about a proposal: the stable memory id (not the version row id), the write
+    event and the status - the same vocabulary as `memhub.MemoryEvent`."""
+    return {"id": str(row["memory_id"]), "event": "PENDING", "status": row["status"]}
+
+
 def _view(row: dict) -> dict[str, Any]:
     observed = row["observed_at"]
     return {
@@ -41,7 +47,7 @@ class MemoryToolkit:
             )
         except ServiceError as exc:
             return {"rejected": str(exc)}
-        return {"proposed": str(row["id"]), "status": "candidate"}
+        return proposal_result(row)
 
     def tool_specs(self) -> list[dict[str, Any]]:
         types = list(self.service.settings.types)

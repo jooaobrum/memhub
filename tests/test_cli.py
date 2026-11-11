@@ -263,3 +263,14 @@ def test_history_lists_every_version_with_value_time_evidence_and_creator(cli_en
         (1, "superseded", "lives in Grenoble", "city"), (2, "active", "lives in Paris", "city")]
     assert all(v["observed_at"] and v["evidence"] and v["created_by"] for v in versions)
     assert cli_env("history", str(uuid.uuid4())).exit_code == 1
+
+
+@pytest.mark.parametrize("command", [["list"], ["init"], ["search", "anything"]])
+def test_cli_without_database_url_names_key(command, pg_dsn, tmp_path):
+    config = _config_dict(pg_dsn, f"c{uuid.uuid4().hex[:8]}")
+    del config["database_url"]
+    path = tmp_path / "memhub.yaml"
+    path.write_text(yaml.safe_dump(config))
+    result = runner.invoke(cli.app, [*command, "--config", str(path)])
+    assert result.exit_code != 0
+    assert "database_url" in result.output
