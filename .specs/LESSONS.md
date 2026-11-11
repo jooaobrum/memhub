@@ -80,6 +80,24 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: src/memhub/connection.py sqlite_path; C2 (connection)
 - last seen: 2026-11-11T18:29:59Z
 
+### L-012 - Content-hash ids for resent messages must not depend on where the resent window starts
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `ingestion` · harmful: 0
+- features: push-ingestion
+- evidence: src/memhub/pipeline/push.py to_interactions; C8 (ingestion)
+- last seen: 2026-11-11T20:25:43Z
+
+### L-013 - Prove every row of an event mapping, including the review-pending branch of a new version
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `ingestion` · harmful: 0
+- features: push-ingestion
+- evidence: src/memhub/memory.py _push_event; C2 (ingestion)
+- last seen: 2026-11-11T20:25:43Z
+
+### L-014 - Do not chain != in assertions: compare each variant against the base value
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `tests` · harmful: 0
+- features: push-ingestion
+- evidence: tests/test_push.py test_message_ids; C9 (tests)
+- last seen: 2026-11-11T20:25:43Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
