@@ -1,7 +1,6 @@
 """Borrowed connections: memhub uses the app's pool, connection, callable or URL, and hands each back as it found it."""
 from __future__ import annotations
 
-import sqlite3
 import uuid
 
 import psycopg
@@ -70,13 +69,6 @@ def test_add_then_search_through_each_db_kind(kind, pg_dsn, pool, conn):
     added = m.add("boiler pressure must stay under two bar", **IDS).results[0]
     rows = m.search("boiler pressure must stay under two bar", **IDS)
     assert rows[0]["memory_id"] == uuid.UUID(added.id)
-
-
-@pytest.mark.parametrize("db", ["sqlite", "sqlite_url"])
-def test_sqlite_is_not_implemented_yet(db, tmp_path):
-    value = sqlite3.connect(":memory:") if db == "sqlite" else f"sqlite:///{tmp_path}/m.db"
-    with pytest.raises(NotImplementedError, match="sqlite"):
-        Memory(db=value, embedder=FakeEmbeddings(16))
 
 
 @pytest.mark.parametrize("db", [42, "mysql://u:p@localhost/db", object()])

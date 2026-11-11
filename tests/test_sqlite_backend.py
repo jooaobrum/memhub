@@ -17,7 +17,7 @@ import pytest
 from memhub import Memory
 from memhub.connection import SqliteSource, connection_source, sqlite_path
 from memhub.service import ValidationError
-from memhub.storage import Capability, open_backend
+from memhub.storage import Capability, DeferredBackend, open_backend
 from memhub.storage import contract
 from memhub.storage.contract import DIMS, MODEL, NOW, _cand, _ingest, _ledger, _line, add, contents, vec
 from memhub.storage.memory import InMemoryBackend
@@ -68,8 +68,12 @@ def test_db_kinds_build_a_sqlite_backend_and_run_no_sql(tmp_path, monkeypatch):
     }
     for kind, (db, path) in kinds.items():
         m = _memory(db)
-        assert isinstance(m.store, SqliteBackend), kind
-        assert isinstance(connection_source(db) if kind != "callable" else m.store.source, SqliteSource), kind
+        if kind == "callable":  # what it returns decides the backend, and building Memory calls nothing (AD-002)
+            assert isinstance(m.store, DeferredBackend) and opened == []
+            assert isinstance(m.store.resolve(), SqliteBackend) and len(opened) == 1
+        else:
+            assert isinstance(m.store, SqliteBackend), kind
+            assert isinstance(connection_source(db), SqliteSource), kind
         if path is not None:
             assert not path.exists() or _tables(path) == [], kind  # nothing created before init()
         m.init()

@@ -68,7 +68,7 @@ Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_a_vector_o
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_contract_suite_runs_on_both_vector_paths_with_no_skip`
 
 **C18** - `docs/sqlite.md` states the fallback's limit of about 50k rows per owner and that without `memhub[sqlite]` the fallback is used; the README links it (AC 13)
-Proof: `.venv/bin/python -m pytest tests/test_packaging.py::test_sqlite_docs`
+Proof: `.venv/bin/python -m pytest tests/test_sqlite_packaging.py::test_sqlite_docs`
 
 ### S3 - What SQLite cannot do fails loudly
 
@@ -94,7 +94,7 @@ Proof: `.venv/bin/python -m pytest tests/e2e/test_pr4_sqlite_ingest.py::test_ini
 **C24** - The same JSONL fixture and fake models write the same memory rows (type, scope, status, content) and run rows (thread, `candidates_proposed`, `created`, dropped reasons) on SQLite as in memory; a failed segment leaves nothing and is retried; the whole suite stays green; `sqlite-vec` is in the `sqlite` and `dev` extras and not in the core dependencies (AC 19, AC 20)
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_ingest_matches_the_in_memory_backend`
 Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_failed_segment_leaves_nothing_and_is_retried`
-Proof: `.venv/bin/python -m pytest tests/test_packaging.py::test_sqlite_vec_is_an_extra_not_a_core_dependency`
+Proof: `.venv/bin/python -m pytest tests/test_sqlite_packaging.py::test_sqlite_vec_is_an_extra_not_a_core_dependency`
 Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Coverage

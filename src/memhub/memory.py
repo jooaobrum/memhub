@@ -171,11 +171,9 @@ class Memory:
             raise TypeError("Memory needs an embedder (a LangChain Embeddings, or anything with embed_query)")
         self.settings = _settings(config)
         self.store = open_backend(db, self.settings.project_prefix, self.settings.database_schema)
-        self.source = getattr(self.store, "source", None)  # Postgres: where connections come from
-        for capability in _NEEDED:
-            require(self.store, capability, "use Postgres")
-        if self.settings.database_schema:
-            require(self.store, Capability.SCHEMAS, "remove database_schema from the config, or use Postgres")
+        self._capable = False
+        if not getattr(self.store, "deferred", False):  # a callable `db` is checked on first use: nothing opens here
+            self._check_capabilities()
         self.llm = llm
         self.judge = judge if judge is not None else llm
         self.embedder = embedder
@@ -191,6 +189,21 @@ class Memory:
 
     # --- setup ------------------------------------------------------------------------------------------------
 
+    @property
+    def source(self) -> Any:
+        """Postgres and SQLite: where connections come from."""
+        return getattr(self.store, "source", None)
+
+    def _check_capabilities(self) -> None:
+        """What every call relies on, and `schemas` when the config sets `database_schema`: fail at startup."""
+        if self._capable:
+            return
+        for capability in _NEEDED:
+            require(self.store, capability, "use Postgres")
+        if self.settings.database_schema:
+            require(self.store, Capability.SCHEMAS, "remove database_schema from the config, or use Postgres")
+        self._capable = True
+
     def _probe(self) -> EmbeddingConfig:
         if self.settings.embeddings is None:
             dims = len(self.embedder.embed_query("memhub"))
@@ -200,6 +213,7 @@ class Memory:
     def init(self) -> None:
         """Create the tables, or add what an older memhub lacks (idempotent). Stores the embedding model and the
         dims of one probe embed; a later `Memory` with another embedder is refused with `EmbeddingMismatch`."""
+        self._check_capabilities()
         emb = self._probe()
         self.store.init(embedding_model=emb.model, dims=emb.dims)
         self._checked = True
@@ -208,6 +222,7 @@ class Memory:
         """Once per instance: the ledger exists and was built with this embedder."""
         if self._checked:
             return
+        self._check_capabilities()
         emb = self._probe()
         with self.store.unit_of_work() as uow:  # no tables yet: EmbeddingMismatch naming `init()`, on every backend
             uow.meta.check_embedding_config(model=emb.model, dims=emb.dims)
