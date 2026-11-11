@@ -98,6 +98,21 @@ me = m.scope(workspace_id="acme", user_id="anna", run_id="run-1")
 me.search("inlet filter")
 ```
 
+Push a conversation straight in, with no log to write and no job to schedule. `add(messages, infer=True)` runs the
+same pipeline as `memhub ingest` on the messages you pass and returns an `AddResult` with every memory written
+(`ADD`, `PENDING`, `UPDATE`, `MERGE`, `CONFLICT`) and every candidate dropped, with its reason:
+
+```python
+out = me.add([{"role": "user", "content": "The C3 compressor trips when the inlet filter clogs"},
+              {"role": "assistant", "content": "Noted: check the filter first."}], infer=True)
+[(e.event, e.status, e.content) for e in out.results]   # [("PENDING", "candidate", "...")] - workspace memories wait for review
+out.dropped                                             # [Dropped(content=..., reason="low_score"), ...]
+```
+
+`infer` defaults to `False`: `add("text")` or `add({...fields}, type=...)` stores one memory with no model call. The
+same messages sent again are not extracted twice; only the ones after the thread's last push are (`thread_id`
+defaults to `run_id`).
+
 `memhub.yaml` is only memhub's own behaviour, a few lines. It is looked up in `./memhub.yaml`, `$MEMHUB_CONFIG`, then `~/.config/memhub/memhub.yaml`; `MEMHUB_*` environment variables (`MEMHUB_PRESET`, `MEMHUB_DB`, nested keys with `__`) and `Memory(config=, overrides=)` override it. `memhub config show` prints every setting with where it came from, `memhub config set KEY VALUE` edits it, and `memhub use acme --user anna` sets the workspace and user for the next commands. Presets: `maintenance`, `support`, `assistant`; a `types:` block replaces or adds to a preset's types. To reuse your app's own pool and models, point `connect: "your_app.memory:build"` at a function returning `{"db": ..., "embedder": ..., "llm": ...}`.
 
 Run the tests with `pip install -e ".[dev]"` and `pytest` (needs Docker; the pgvector container is started by the fixtures).
