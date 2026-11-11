@@ -30,11 +30,13 @@ SOURCE = "push"
 ROLES = ("user", "assistant")
 
 
-def message_id(workspace_id: str, user_id: str, thread_id: str, role: str, content: str, timestamp: str, n: int) -> str:
+def message_id(workspace_id: str, user_id: str, thread_id: str, role: str, content: str, timestamp: str,
+               prev_role: str, prev_content: str, n: int) -> str:
     """A message's id: the same message, sent again, gets the same id. `timestamp` is the ISO text the app gave
-    ("" when it gave none); `n` counts the earlier messages of the same call with the same role, content and
-    timestamp, so "yes" twice in one call is two messages."""
-    text = "\x1f".join([workspace_id, user_id, thread_id, role, content, timestamp, str(n)])
+    ("" when it gave none); `prev_role` / `prev_content` are the message before it in the call ("" for the first),
+    so the same reply after another question is another message even in a window that starts later (AD-023);
+    `n` counts the earlier messages of the call with all of these equal, so "yes" twice in one call is two."""
+    text = "\x1f".join([workspace_id, user_id, thread_id, role, content, timestamp, prev_role, prev_content, str(n)])
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
 
 
@@ -82,16 +84,17 @@ def to_messages(data: Any) -> list[dict[str, Any]]:
 def to_interactions(messages: list[dict[str, Any]], *, workspace_id: str, user_id: str, thread_id: str,
                     trace_id: str, now: datetime) -> list[Interaction]:
     """One `Interaction` per message, in the list's order; a message with no timestamp is dated `now`."""
-    out, seen = [], {}
+    out, seen, prev = [], {}, ("", "")
     for msg in messages:
         when, stamp = _when(msg.get("timestamp"))
-        key = (msg["role"], msg["content"], stamp)
+        key = (msg["role"], msg["content"], stamp, *prev)
         seen[key] = n = seen.get(key, -1) + 1
         out.append(Interaction(
             thread_id=thread_id, user_id=user_id, workspace_id=workspace_id, role=msg["role"], content=msg["content"],
-            message_id=message_id(workspace_id, user_id, thread_id, msg["role"], msg["content"], stamp, n),
+            message_id=message_id(workspace_id, user_id, thread_id, msg["role"], msg["content"], stamp, *prev, n),
             timestamp=when or now, trace_id=trace_id,
         ))
+        prev = (msg["role"], msg["content"])
     return out
 
 
