@@ -1,6 +1,6 @@
 # config-and-cli proofs
 
-**HEAD**: ded780b
+**HEAD**: 1b6ba12
 **Tree**: clean
 **Result**: 63 pass, 0 fail; mutations 5 killed, 0 not
 
