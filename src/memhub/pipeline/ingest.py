@@ -73,6 +73,7 @@ class _SegmentResult:
     extends: int = 0
     touched_areas: set[str] = field(default_factory=set)  # memory_id of every area that gained or changed a row
     dropped: list[dict] = field(default_factory=list)
+    routed: list[Routed] = field(default_factory=list)  # what each written proposal became, in order
     extract_error: bool = False
     tokens_in: int = 0
     tokens_out: int = 0
@@ -90,7 +91,7 @@ def _segment_signals(segment: Segment, feedback: list[dict], llm_check=None) -> 
 
 def _write(
     uow: UnitOfWork, p: Proposal, res: _SegmentResult, *, settings, registry, segment, source_name,
-    judge, embeddings, now,
+    judge, embeddings, now, app_run_id=None, agent_id=None,
 ) -> Routed | None:
     """Reconcile and route one admitted proposal; None when a cap or its areas drop it. Counts created/merged."""
     plan = None
@@ -130,8 +131,9 @@ def _write(
         res.touched_areas |= {l["memory_id"] for l in links}
     routed = route(
         p, decision, uow=uow, registry=registry, segment=segment, source_name=source_name,
-        settings=settings, links=links,
+        settings=settings, links=links, run_id=app_run_id, agent_id=agent_id,
     )
+    res.routed.append(routed)
     if routed.outcome == "merged":
         res.merged += 1
     else:
@@ -190,8 +192,10 @@ def _verify(proposals, judge, segment, settings, res):
 
 def _process_segment(
     uow: UnitOfWork, segment: Segment, signals: list[dict], *, settings, registry, source_name, extractor, judge,
-    embeddings, run_id, now, history=None,
+    embeddings, run_id, now, history=None, app_run_id=None, agent_id=None,
 ) -> _SegmentResult:
+    """One segment in `uow`. `run_id` groups the run rows; `app_run_id` / `agent_id` are the app's ids, stamped
+    on the memory rows written (a push passes them, a scheduled ingest does not)."""
     res = _SegmentResult()
     cmd = settings.ingestion.remember_command
     ordered = [] if segment.is_final_pass else command_messages(segment, cmd)  # `/remember ...` messages
@@ -233,7 +237,8 @@ def _process_segment(
             p.embedding = list(embeddings.embed_query(p.memory.content))
         proposals, low = admit(proposals, uow=uow, settings=settings, segment=segment, signals=signals)
         res.dropped += low
-        write = dict(settings=settings, registry=registry, segment=segment, source_name=source_name, judge=judge, embeddings=embeddings, now=now)
+        write = dict(settings=settings, registry=registry, segment=segment, source_name=source_name, judge=judge,
+                     embeddings=embeddings, now=now, app_run_id=app_run_id, agent_id=agent_id)
         for p in proposals:
             _write(uow, p, res, **write)
     first, last = segment.messages[0], segment.messages[-1]
@@ -338,18 +343,27 @@ def ingest_source(
     summary.same_slot_in_segment = summary.dropped_by_reason.get("same_slot_in_segment", 0)
 
     if not dry_run:
-        for area_id in sorted(touched):  # after the last segment: one summary per area, a failure loses only its own
-            try:
-                with store.unit_of_work() as uow:
-                    done = summarize_area(
-                        judge, uow=uow, area_memory_id=uuid.UUID(area_id), retries=settings.extraction.retries
-                    )
-            except Exception:
-                log.warning("area summary failed: area=%s", area_id, exc_info=True)
-                continue
-            summary.summaries_written += done.written
-            summary.summary_tokens_in += done.tokens_in
-            summary.summary_tokens_out += done.tokens_out
-        with store.unit_of_work() as uow:
-            uow.runs.purge_dropped(retention_days=settings.retention.dropped_days)
+        written, tin, tout = _finish_run(store, settings, judge, touched)
+        summary.summaries_written += written
+        summary.summary_tokens_in += tin
+        summary.summary_tokens_out += tout
     return summary
+
+
+def _finish_run(store: Backend, settings: Settings, judge: Any, touched: set[str]) -> tuple[int, int, int]:
+    """After the last segment: one summary per touched area (a failure loses only its own), then the purge of
+    old dropped candidates. Returns (summaries written, tokens in, tokens out)."""
+    written = tokens_in = tokens_out = 0
+    for area_id in sorted(touched):
+        try:
+            with store.unit_of_work() as uow:
+                done = summarize_area(judge, uow=uow, area_memory_id=uuid.UUID(area_id), retries=settings.extraction.retries)
+        except Exception:
+            log.warning("area summary failed: area=%s", area_id, exc_info=True)
+            continue
+        written += done.written
+        tokens_in += done.tokens_in
+        tokens_out += done.tokens_out
+    with store.unit_of_work() as uow:
+        uow.runs.purge_dropped(retention_days=settings.retention.dropped_days)
+    return written, tokens_in, tokens_out
