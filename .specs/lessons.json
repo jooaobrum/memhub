@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "promote_threshold": 2,
+  "window_days": 45,
+  "quarantine_threshold": 2,
+  "next_id": 9,
+  "lessons": [
+    {
+      "id": "L-001",
+      "key": "surviving_mutant::pin every comparison boundary a backend mirrors with a row exactly at the boundary",
+      "text": "Pin every comparison boundary a backend mirrors with a row exactly at the boundary.",
+      "signal": "surviving_mutant",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C24 / memory.py _stale (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-002",
+      "key": "surviving_mutant::test each column of a composite uniqueness key by varying that column alone",
+      "text": "Test each column of a composite uniqueness key by varying that column alone.",
+      "signal": "surviving_mutant",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C21 / memory.py _check_unique (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-003",
+      "key": "ac_gap::compare json keys the way the database extracts them text not as python values",
+      "text": "Compare JSON keys the way the database extracts them (->> text), not as Python values.",
+      "signal": "ac_gap",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C29 / memory.py _check_unique (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-004",
+      "key": "ac_gap::scope a shared in process store by every setting that separates tables in the real database table prefix included",
+      "text": "Scope a shared in-process store by every setting that separates tables in the real database, table prefix included.",
+      "signal": "ac_gap",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C30 / storage/__init__.py open_backend (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-005",
+      "key": "ac_gap::normalize naive datetimes to utc wherever a backend stands in for timestamptz",
+      "text": "Normalize naive datetimes to UTC wherever a backend stands in for timestamptz.",
+      "signal": "ac_gap",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C31 / memory.py add_memory (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-006",
+      "key": "ac_gap::refuse a nested unit of work on a snapshot store instead of letting the outer commit discard it",
+      "text": "Refuse a nested unit of work on a snapshot store instead of letting the outer commit discard it.",
+      "signal": "ac_gap",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C32 / memory.py unit_of_work (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-007",
+      "key": "spec_precision_gap::enforce each declared capability at the call that needs it and run the lacking branch against a stub backend",
+      "text": "Enforce each declared capability at the call that needs it, and run the lacking branch against a stub backend.",
+      "signal": "spec_precision_gap",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C33 / base.py NEEDS (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-008",
+      "key": "spec_precision_gap::prove backend parity through ingest over merge conflict and candidate writes not create and drop only",
+      "text": "Prove backend parity through ingest over merge, conflict and candidate writes, not create and drop only.",
+      "signal": "spec_precision_gap",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "storage-ports"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C25 / contract.py ingest (storage)"
+      ],
+      "created": "2026-11-11T17:57:06Z",
+      "last_seen": "2026-11-11T17:57:06Z"
+    }
+  ]
+}
