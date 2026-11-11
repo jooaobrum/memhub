@@ -142,6 +142,6 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_
 ## Handoff
 
 - **Settled mid-build:** user chose "Own worktree": PR 3 builds in `~/worktrees/memhub-storage`; the PR 1 fix `2a58e6c` is its base, so C7, C10, C11 compare against `2a58e6c` (the last commit before the ports) instead of `fdec080`
-- **Dispatched:** none yet
+- **Dispatched:** Verifier at `77f11ce` (diff `2a58e6c..77f11ce`) - sent
 - **Boundary:** C1-C28 closed at `21e2f48` (refactor `b8f70ae`, backend and suites `21e2f48`); full suite on Postgres 602 passed before the new tests; N4 bench: ratio 0.954 and 0.998 (interleaved, 5 rounds)
 - **Abandoned:** a bench that ran base then tree once (ratios 1.19 / 1.12 / 0.97: the second side always met a fuller database); replaced by interleaved rounds
