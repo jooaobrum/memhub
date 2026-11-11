@@ -97,8 +97,8 @@ Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Handoff
 
-- **Settled mid-build:** none
-- **Dispatched:** none yet
-- **Boundary:** none yet
+- **Settled mid-build:** user: "Any question you need from me, I'll let you decide the best decision" - `infer` defaults to `False` (AD-019); `MERGE` appears in results and the result is an `AddResult` (AD-020)
+- **Dispatched:** Verifier at `60bac4d`, diff `d75b205..60bac4d` (no screens sub-agent: no capture)
+- **Boundary:** C1-C17 closed at `60bac4d`; PR 1's `test_infer_true_not_implemented` removed with the claim it proved
 - **Abandoned:** none
 - **Walked:** n/a - no screen
