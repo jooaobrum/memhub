@@ -29,7 +29,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from memhub.connection import ConnectionSource, advisory_lock, advisory_unlock, connection_source
-from memhub.storage.base import BoundUnitOfWork, Capability
+from memhub.storage.base import FIXES, BoundUnitOfWork, Capability, require
 from memhub.storage.rules import (
     ACTIVE_STATUSES,
     NO_TABLES,
@@ -134,13 +134,14 @@ class MemoryStore:
                 raise EmbeddingMismatch(NO_TABLES) from exc
 
         return BoundUnitOfWork(
-            self, cur, {"iter_for_reembed": iter_for_reembed, "check_embedding_config": check_embedding_config}
+            self, cur, {"iter_for_reembed": iter_for_reembed, "check_embedding_config": check_embedding_config}, self,
         )
 
     @contextmanager
     def thread_lock(self, source: str, thread_id: str) -> Iterator[bool]:
         """Held while one worker ingests a thread; False when another worker (or cron overlap) already holds it.
         A session advisory lock, released on exit (and with the connection, so a crash frees it)."""
+        require(self, Capability.PARALLEL_INGEST, FIXES[Capability.PARALLEL_INGEST])
         key = f"{self.schema}.{self.prefix}:{source}:{thread_id}"
         with self.source.lock_connection() as conn:
             got = advisory_lock(conn, key)

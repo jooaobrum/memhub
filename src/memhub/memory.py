@@ -26,6 +26,7 @@ from memhub.config import EmbeddingConfig, Settings, TypeConfig, read_config
 from memhub.middleware import MemoryMiddleware
 from memhub.service import MemoryService, NotFound, ValidationError
 from memhub.storage import Capability, open_backend, require
+from memhub.storage.base import FIXES
 from memhub.storage.rules import Actor, EmbeddingMismatch, Row
 from memhub.toolkit import MemoryToolkit
 from memhub.types import BUILTIN_TYPES
@@ -172,10 +173,8 @@ class Memory:
         self.settings = _settings(config)
         self.store = open_backend(db, self.settings.project_prefix, self.settings.database_schema)
         self.source = getattr(self.store, "source", None)  # Postgres: where connections come from
-        for capability in _NEEDED:
-            require(self.store, capability, "use Postgres")
-        if self.settings.database_schema:
-            require(self.store, Capability.SCHEMAS, "remove database_schema from the config, or use Postgres")
+        for capability in (*_NEEDED, *((Capability.SCHEMAS,) if self.settings.database_schema else ())):
+            require(self.store, capability, FIXES[capability])
         self.llm = llm
         self.judge = judge if judge is not None else llm
         self.embedder = embedder

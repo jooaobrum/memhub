@@ -1,0 +1,23 @@
+[
+  {
+    "file": "src/memhub/storage/memory.py",
+    "old": "row[\"valid_until\"] is not None and row[\"valid_until\"] < at",
+    "new": "row[\"valid_until\"] is not None and row[\"valid_until\"] <= at",
+    "proof": ".venv/bin/python -m pytest tests/test_contract_memory.py -k \"test_search_filters or test_search_boosts\"",
+    "label": "C24: in-memory stale boundary valid_until < now -> <= (Postgres keeps `<`)"
+  },
+  {
+    "file": "src/memhub/storage/memory.py",
+    "old": "other[c] == row[c] for c in (\"workspace_id\", \"scope\", \"type\")",
+    "new": "other[c] == row[c] for c in (\"scope\", \"type\")",
+    "proof": ".venv/bin/python -m pytest tests/test_contract_memory.py::test_one_active_row_per_memory_and_per_keyed_slot",
+    "label": "C21: keyed-slot uniqueness ignores workspace_id"
+  },
+  {
+    "file": "src/memhub/storage/memory.py",
+    "old": "working = copy.deepcopy(self._tables)",
+    "new": "working = self._tables",
+    "proof": ".venv/bin/python -m pytest tests/test_contract_memory.py::test_commit_is_visible_and_an_exception_rolls_back",
+    "label": "C3: unit of work writes the live tables (no snapshot, no rollback)"
+  }
+]

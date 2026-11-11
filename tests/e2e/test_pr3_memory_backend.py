@@ -66,6 +66,18 @@ def test_memory_urls_isolate_or_share_by_name(no_postgres):
     assert b.get_all(workspace_id="w", user_id="u", run_id="r") == []
 
 
+def test_a_named_url_keeps_one_ledger_per_table_prefix(no_postgres):
+    def named(prefix: str) -> Memory:
+        return Memory(db=MEM + "x", llm=FakeChatModel(), embedder=FakeEmbeddings(), config={"project_prefix": prefix})
+
+    app_a, app_b, app_a_again = named("appa"), named("appb"), named("appa")
+    for m in (app_a, app_b):
+        m.init()
+    app_a.add("only in appa", workspace_id="w", user_id="u", run_id="r")
+    assert app_b.get_all(workspace_id="w", user_id="u", run_id="r") == []
+    assert [r["content"] for r in app_a_again.get_all(workspace_id="w", user_id="u", run_id="r")] == ["only in appa"]
+
+
 def test_init_required_and_dims_checked(no_postgres):
     fresh = _memory()
     with pytest.raises(EmbeddingMismatch, match=r"init\(\)"):

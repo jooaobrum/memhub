@@ -41,6 +41,20 @@ METHODS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The methods that need more than `transactions`, and what to do on a backend that lacks it.
+NEEDS: dict[str, Capability] = {
+    "search": Capability.VECTOR_SEARCH, "top_similar": Capability.VECTOR_SEARCH, "nearest_area": Capability.VECTOR_SEARCH,
+    "linked_rows": Capability.JSON_LOOKUP, "move_area_links": Capability.JSON_LOOKUP, "add_link": Capability.JSON_LOOKUP,
+}
+FIXES: dict[Capability, str] = {
+    Capability.TRANSACTIONS: "use Postgres",
+    Capability.VECTOR_SEARCH: "install a vector extension for this database, or use Postgres",
+    Capability.JSON_LOOKUP: "use a database with JSON queries, or Postgres",
+    Capability.PARALLEL_INGEST: "run one ingest worker, or use Postgres",
+    Capability.SCHEMAS: "remove database_schema from the config, or use Postgres",
+}
+
+
 class MemoryRepository(Protocol):
     """Memory rows: versions, lifecycle, review, areas. Methods: `METHODS["memories"]`."""
 
@@ -110,12 +124,16 @@ class Repository:
 
 
 class BoundUnitOfWork:
-    """A unit of work whose methods are `target`'s, with `first` (a cursor, a transaction) passed first."""
+    """A unit of work whose methods are `target`'s, with `first` (a cursor, a transaction) passed first. A method
+    that `NEEDS` a capability `backend` lacks raises the capability error when it is looked up."""
 
-    def __init__(self, target: Any, first: Any, overrides: dict[str, Callable[..., Any]] | None = None) -> None:
+    def __init__(self, target: Any, first: Any, overrides: dict[str, Callable[..., Any]] | None = None,
+                 backend: Backend | None = None) -> None:
         overrides = overrides or {}
 
         def resolve(name: str) -> Callable[..., Any]:
+            if backend is not None and name in NEEDS:
+                require(backend, NEEDS[name], FIXES[NEEDS[name]])
             return overrides[name] if name in overrides else functools.partial(getattr(target, name), first)
 
         self.memories = Repository("memories", resolve)

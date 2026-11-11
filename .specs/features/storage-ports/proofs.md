@@ -1,8 +1,8 @@
 # storage-ports proofs
 
-**HEAD**: 77f11ce
+**HEAD**: cc32367
 **Tree**: clean
-**Result**: 40 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 40 pass, 0 fail; mutations 1 killed, 2 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -46,3 +46,11 @@
 | C28 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_a_call_before_init_names_init` | 1 | 1 | pass |
 | C28 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_before_init_names_init` | 1 | 1 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| C24: in-memory stale boundary valid_until < now -> <= (Postgres keeps `<`) | `src/memhub/storage/memory.py:129` | no |
+| C21: keyed-slot uniqueness ignores workspace_id | `src/memhub/storage/memory.py:116` | no |
+| C3: unit of work writes the live tables (no snapshot, no rollback) | `src/memhub/storage/memory.py:655` | yes |
