@@ -1,6 +1,6 @@
 # config-and-cli proofs
 
-**HEAD**: fa9a5ac
+**HEAD**: 957e9ee
 **Tree**: dirty - .claude/
 **Result**: 63 pass, 0 fail; mutations 5 killed, 0 not
 
