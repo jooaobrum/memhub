@@ -248,11 +248,11 @@ class RetentionConfig(BaseModel):
 
 class Settings(BaseModel):
     project_prefix: str  # table prefix: several projects can share one database
-    database_url: str
+    database_url: str | None = None  # the CLI needs it; `Memory(db=...)` takes the app's own connection instead
     database_schema: str | None = None  # Postgres schema for the tables (created if missing); default: the search_path
     workspace_default: str
-    llm: LLMConfig
-    embeddings: EmbeddingConfig
+    llm: LLMConfig | None = None  # the CLI builds models from these; `Memory(llm=, embedder=)` takes the app's own
+    embeddings: EmbeddingConfig | None = None
     entity_types: list[str] = Field(default_factory=list)
     scopes: list[str] = Field(default_factory=lambda: ["user"])
     types: dict[str, TypeConfig]
@@ -340,14 +340,17 @@ class Settings(BaseModel):
         return registry
 
 
-def load_config(path: str | Path) -> Settings:
+def read_config(path: str | Path) -> dict[str, Any]:
+    """The yaml as a dict, `${VAR}` interpolated; its folder goes on `sys.path` for the project's own classes."""
     raw = Path(path).read_text()
     for folder in (Path(path).resolve().parent, Path.cwd()):  # a project's own type classes and source adapters sit next to its yaml
         if str(folder) not in sys.path:
             sys.path.append(str(folder))
-    interpolated = _interpolate_env(raw)
-    data = yaml.safe_load(interpolated)
-    return Settings.model_validate(data)
+    return yaml.safe_load(_interpolate_env(raw)) or {}
+
+
+def load_config(path: str | Path) -> Settings:
+    return Settings.model_validate(read_config(path))
 
 
 # --- Model construction -----------------------------------------------------

@@ -134,6 +134,8 @@ class MemoryService:
         user_id: str | None = None,
         reference: str | None = None,
         observed_at: datetime | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
     ) -> Row:
         self._check_scope(scope)
         instance = self._validate(type, fields)
@@ -176,9 +178,14 @@ class MemoryService:
                 verified=verified,
                 created_by=actor.id,
                 observed_at=observed_at,
+                run_id=run_id,
+                agent_id=agent_id,
             )
 
-    def edit(self, actor: Actor, memory_id: uuid.UUID, fields: dict[str, Any]) -> Row:
+    def edit(
+        self, actor: Actor, memory_id: uuid.UUID, fields: dict[str, Any], *,
+        run_id: str | None = None, agent_id: str | None = None,
+    ) -> Row:
         with self.store.connect() as conn, conn.cursor() as cur:
             active = self.store.get_active(cur, memory_id)
             if active is None:
@@ -203,6 +210,8 @@ class MemoryService:
                 verified=True,  # a person confirmed or edited it: the extractor never supersedes it
                 created_by=actor.id,
                 as_candidate=False,
+                run_id=run_id,
+                agent_id=agent_id,
             )
 
     def history(self, actor: Actor, memory_id: uuid.UUID) -> list[Row]:
@@ -264,7 +273,9 @@ class MemoryService:
         with self.store.connect() as conn, conn.cursor() as cur:
             return self.store.reject(cur, id, reviewed_by=actor.id, note=note)
 
-    def promote(self, actor: Actor, memory_id: uuid.UUID) -> Row:
+    def promote(
+        self, actor: Actor, memory_id: uuid.UUID, *, run_id: str | None = None, agent_id: str | None = None,
+    ) -> Row:
         """Copy a user-scope memory into the workspace review queue as a new candidate."""
         with self.store.connect() as conn, conn.cursor() as cur:
             active = self.store.get_active(cur, memory_id)
@@ -295,6 +306,8 @@ class MemoryService:
                 durability=active["durability"],
                 assertion=active["assertion"],
                 links=active["links"],
+                run_id=run_id,
+                agent_id=agent_id,
             )
 
     # --- reads -----------------------------------------------------------------
@@ -509,6 +522,8 @@ class MemoryService:
         evidence: list[dict[str, Any]],
         workspace_id: str | None = None,
         user_id: str | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
     ) -> Row:
         """Like `add`, but always a `candidate` (never active), even for user scope."""
         self._check_scope(scope)
@@ -533,6 +548,8 @@ class MemoryService:
                 status="candidate",
                 verified=False,
                 created_by=actor.id,
+                run_id=run_id,
+                agent_id=agent_id,
             )
 
     # --- maintenance -------------------------------------------------------------

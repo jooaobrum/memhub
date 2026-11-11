@@ -21,6 +21,7 @@ from langchain.tools import ToolRuntime
 from langchain_core.tools import tool
 
 from memhub.service import Actor, MemoryService, ServiceError
+from memhub.toolkit import proposal_result
 
 log = logging.getLogger(__name__)
 
@@ -211,6 +212,6 @@ class MemoryMiddleware(AgentMiddleware):
                 )
             except ServiceError as exc:
                 return f"rejected: {exc}"
-            return f"proposed as candidate {row['id']}"
+            return json.dumps(proposal_result(row))
 
         return propose_memory

@@ -25,7 +25,8 @@ import psycopg
 from psycopg.cursor import Cursor
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-from pgvector.psycopg import register_vector
+
+from memhub.connection import ConnectionSource, advisory_lock, advisory_unlock, connection_source
 
 Row = dict[str, Any]
 
@@ -90,6 +91,8 @@ ADDED_COLUMNS: tuple[tuple[str, str, str | None, bool], ...] = (
     ("durability", "text", None, False),  # stable | ongoing | temporary
     ("assertion", "text DEFAULT 'stated'", "'stated'", True),  # stated | inferred
     ("links", "jsonb DEFAULT '[]'::jsonb", "'[]'::jsonb", True),  # [{kind, memory_id}]; ticket 29 writes area links
+    ("run_id", "text", None, False),  # the app's run (request, trace) that wrote this row; null for ingest and old rows
+    ("agent_id", "text", None, False),  # the app's agent that wrote this row, when it said
 )
 
 _UNSET: Any = object()  # "leave the column alone", as opposed to None (= null)
@@ -131,8 +134,9 @@ class Actor:
 
 
 class MemoryStore:
-    def __init__(self, database_url: str, prefix: str, schema: str | None = None) -> None:
-        self.database_url = database_url
+    def __init__(self, database_url: "str | ConnectionSource", prefix: str, schema: str | None = None) -> None:
+        self.source = connection_source(database_url)
+        self.database_url = database_url if isinstance(database_url, str) else None
         self.prefix = prefix
         self.schema = schema  # None: whatever the connection's search_path says
 
@@ -141,34 +145,25 @@ class MemoryStore:
 
     @contextmanager
     def connect(self, *, vector: bool = True, schema: bool = True) -> Iterator[psycopg.Connection]:
-        """Open a connection for one transaction: commits on a clean exit,
-        rolls back on any exception. `vector=False` skips registering the
-        pgvector adapter, which is needed exactly once, before the `vector`
-        extension exists (see `init`)."""
-        conn = psycopg.connect(self.database_url, row_factory=dict_row, autocommit=False)
-        try:
-            if self.schema and schema:  # `public` stays on the path: that is where the vector extension usually lives
-                conn.execute(f"SET search_path TO {self.schema}, public")
-            if vector:
-                register_vector(conn)
+        """A connection for one transaction: commits on a clean exit, rolls back on any exception. Where the
+        connection comes from is the `ConnectionSource`'s business (a URL: opened and closed here; a pool or the
+        app's own connection: borrowed and handed back open). `vector=False` skips registering the pgvector
+        adapter, which is needed exactly once, before the `vector` extension exists (see `init`)."""
+        with self.source.transaction(vector=vector, schema=self.schema if schema else None) as conn:
             yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
 
     @contextmanager
     def thread_lock(self, source: str, thread_id: str) -> Iterator[bool]:
         """Held while one worker ingests a thread; False when another worker (or cron overlap) already holds it.
-        A session advisory lock on its own connection: it disappears with the connection, so a crash frees it."""
-        conn = psycopg.connect(self.database_url, autocommit=True)
-        try:
-            got = conn.execute("SELECT pg_try_advisory_lock(hashtextextended(%s, 0))", (f"{self.schema}.{self.prefix}:{source}:{thread_id}",)).fetchone()[0]
-            yield bool(got)
-        finally:
-            conn.close()
+        A session advisory lock, released on exit (and with the connection, so a crash frees it)."""
+        key = f"{self.schema}.{self.prefix}:{source}:{thread_id}"
+        with self.source.lock_connection() as conn:
+            got = advisory_lock(conn, key)
+            try:
+                yield got
+            finally:
+                if got and not conn.closed:
+                    advisory_unlock(conn, key)
 
     # --- init / meta / embedding-config guard -------------------------------
 
@@ -302,7 +297,7 @@ class MemoryStore:
     def check_embedding_config(self, cur: Cursor, *, model: str, dims: int) -> None:
         saved = self.get_meta(cur, "embedding")
         if saved is None:
-            raise EmbeddingMismatch("run `memhub init` first")
+            raise EmbeddingMismatch("the ledger has no tables yet: run `memhub init` (or `Memory.init()`) first")
         if saved.get("model") != model or saved.get("dims") != dims:
             raise EmbeddingMismatch(
                 f"config embedding is {model!r}/{dims}d but the ledger was built with "
@@ -340,25 +335,32 @@ class MemoryStore:
         durability: str | None = None,
         assertion: str = "stated",
         links: list[dict] | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
     ) -> Row:
-        """`observed_at` defaults to the newest evidence timestamp, else now."""
+        """`observed_at` defaults to the newest evidence timestamp, else now. `run_id` / `agent_id` are the app's
+        ids of the call that wrote the row; they are only written when given, so a ledger whose `init` predates
+        them keeps working for every caller that does not pass them."""
         row_id = uuid.uuid4()
         observed_at = observed_at or newest_observed_at(evidence)
         memory_id = memory_id or uuid.uuid4()
+        ids = run_id is not None or agent_id is not None
         cur.execute(
             f"""
             INSERT INTO {self._t('memory')}
               (id, memory_id, version, type, schema_version, scope, workspace_id, user_id,
                status, verified, content, payload, entities, embedding, evidence,
-               seen_count, score, conflicts_with, created_by, observed_at, valid_from, valid_until, durability, assertion, links)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s, COALESCE(%s, now()), %s,%s,%s,%s,%s)
+               seen_count, score, conflicts_with, created_by, observed_at, valid_from, valid_until, durability, assertion, links
+               {", run_id, agent_id" if ids else ""})
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s, COALESCE(%s, now()), %s,%s,%s,%s,%s
+               {", %s, %s" if ids else ""})
             RETURNING *
             """,
             (
                 row_id, memory_id, version, type, schema_version, scope, workspace_id, user_id,
                 status, verified, content, Jsonb(payload), Jsonb(entities), embedding, Jsonb(evidence),
                 seen_count, score, conflicts_with, created_by, observed_at, valid_from, valid_until, durability, assertion,
-                Jsonb(links or []),
+                Jsonb(links or []), *((run_id, agent_id) if ids else ()),
             ),
         )
         return cur.fetchone()
@@ -378,6 +380,8 @@ class MemoryStore:
         times: dict[str, Any] | None = None,
         links: list[dict] | None = None,
         evidence: list[dict] | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
     ) -> Row:
         """Insert version N+1 (active, or candidate when `as_candidate`), and
         (for the active path) mark version N superseded, atomically. Version N+1 inherits
@@ -397,7 +401,7 @@ class MemoryStore:
                 workspace_id=active["workspace_id"], user_id=active["user_id"], content=content,
                 payload=payload, entities=entities, embedding=embedding, evidence=evidence,
                 status="candidate", verified=False, created_by=created_by, memory_id=memory_id,
-                version=new_version, conflicts_with=None, links=links, **times,
+                version=new_version, conflicts_with=None, links=links, run_id=run_id, agent_id=agent_id, **times,
             )
         updated = self._supersede(cur, active["id"])
         if updated == 0:
@@ -407,7 +411,7 @@ class MemoryStore:
             workspace_id=active["workspace_id"], user_id=active["user_id"], content=content,
             payload=payload, entities=entities, embedding=embedding, evidence=evidence,
             status="active", verified=verified, created_by=created_by, memory_id=memory_id,
-            version=new_version, links=links, **times,
+            version=new_version, links=links, run_id=run_id, agent_id=agent_id, **times,
         )
 
     def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
