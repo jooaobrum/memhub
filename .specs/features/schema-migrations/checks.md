@@ -99,8 +99,8 @@ Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Handoff
 
-- **Settled mid-build:** none
-- **Dispatched:** none yet
-- **Boundary:** none yet
+- **Settled mid-build:** user: "Any question you need from me, I'll let you decide the best decision" - version 1 is the v0.1.0 schema (no row = 1); `init()` keeps upgrading (AD-002); doctor gains a `version` line, so PR 2's list of checks gains it (AD-009)
+- **Dispatched:** Verifier at `c6c206e`, diff `51ef4e5..c6c206e` (no screens sub-agent: no capture)
+- **Boundary:** C1-C17 closed at `c6c206e`
 - **Abandoned:** none
 - **Walked:** n/a - no screen
