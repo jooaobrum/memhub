@@ -1,6 +1,6 @@
 # sqlite-backend proofs
 
-**HEAD**: 7fe7bc7
+**HEAD**: b46e455
 **Tree**: clean
 **Result**: 37 pass, 0 fail; mutations 3 killed, 0 not
 
