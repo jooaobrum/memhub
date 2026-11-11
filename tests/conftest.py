@@ -26,6 +26,18 @@ from tests.fakes import FakeChatModel, FakeEmbeddings
 TEST_DIMS = 16
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config(monkeypatch, tmp_path_factory):
+    """memhub now finds `./memhub.yaml`, `$MEMHUB_CONFIG` and `~/.config/memhub`: no test sees the repo's own file,
+    the developer's home or the shell's `MEMHUB_*` variables."""
+    import os
+
+    monkeypatch.chdir(tmp_path_factory.mktemp("cwd"))
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+    for name in [n for n in os.environ if n.startswith("MEMHUB_")]:
+        monkeypatch.delenv(name)
+
+
 def _docker_available() -> bool:
     try:
         subprocess.run(["docker", "info"], capture_output=True, check=True, timeout=10)

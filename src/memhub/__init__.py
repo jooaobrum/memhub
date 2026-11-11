@@ -1,4 +1,5 @@
 """memhub: reviewed, typed, versioned long-term memory for agents."""
+from memhub.config import Config
 from memhub.memory import AddResult, CallContext, Dropped, Memory, MemoryEvent, ScopedMemory
 from memhub.service import (
     InjectionDetected,
@@ -15,6 +16,7 @@ __version__ = "0.1.0"
 __all__ = [
     "AddResult",
     "CallContext",
+    "Config",
     "Dropped",
     "EmbeddingMismatch",
     "InjectionDetected",
