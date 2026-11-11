@@ -82,6 +82,8 @@ None - no route. The consumed contract is the Python signature in Landing door 1
 | 2. Message ids | `message_id(workspace_id, user_id, thread_id, role, content, timestamp, n) = sha256("\x1f".join([workspace_id, user_id, thread_id, role, content, timestamp ISO or "", str(n)])).hexdigest()[:32]`, `n` = how many earlier messages of the same call have the same role, content and timestamp; stored in evidence and in run rows `first_message_id` / `last_message_id` | a random id per call - the same messages sent twice would be extracted twice; an id chained over every earlier message - a sliding window of the last N messages would never match the watermark |
 | 3. Source name and run id | run rows are written with `source = "push"` and `run_id = uuid.UUID(run_id)` when the app's `run_id` is a uuid, else `uuid.uuid5(uuid.NAMESPACE_URL, "memhub:push:" + run_id)`; evidence entries carry `source: "push"` | a configurable source name - a second place to keep in sync and a watermark that moves when it is renamed; a random uuid - `memhub runs` could not group the pushes of one app run |
 
+| 2b. Message ids, revised after verification (supersedes door 2's formula, AD-023) | `message_id(workspace_id, user_id, thread_id, role, content, timestamp, prev_role, prev_content, n) = sha256("\x1f".join([..., timestamp ISO or "", prev_role, prev_content, str(n)])).hexdigest()[:32]`; `prev_*` is the message before it in the call ("" for the first); `n` counts earlier messages of the call with all of these equal | door 2's call-wide counter - a window that cuts off an earlier copy of a repeated answer shifts `n`, so a new answer can take the watermark's id and the new turn is dropped (Verifier finding) |
+
 - Nothing else in this change is hard to reverse
 
 ## Criteria

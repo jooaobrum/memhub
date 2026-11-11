@@ -198,10 +198,15 @@ def test_only_messages_after_the_watermark(settings):
     six = conv("m1", "m2", "m3", "m4", "m5", "m6")
     ids = msg_ids(six)
     cases = {
-        "superset": (six[:4], six, (ids[4], ids[5])),
-        "window": (six[:4], six[2:], (ids[4], ids[5])),
-        "new turns only": (six[:2], six[2:4], (ids[2], ids[3])),
+        "superset": (six[:4], six, ("m5", "m6")),
+        "window": (six[:4], six[2:], ("m5", "m6")),
+        "new turns only": (six[:2], six[2:4], ("m3", "m4")),
     }
+    # a window that repeats an answer, no timestamps: the new turn after it is still extracted
+    first = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "Noted"},
+             {"role": "user", "content": "I live in Lyon"}, {"role": "assistant", "content": "Noted"}]
+    window = first[2:] + [{"role": "user", "content": "I work as a welder"}, {"role": "assistant", "content": "Noted"}]
+    cases["window with a repeated answer"] = (first, window, ("I work as a welder", "Noted"))
     for name, (before, after, expected) in cases.items():
         seen = []
 
@@ -218,24 +223,30 @@ def test_only_messages_after_the_watermark(settings):
         seen.clear()
         m.add(after, infer=True, **IDS)
         last = _runs(m)[-1]
-        assert (last["first_message_id"], last["last_message_id"]) == expected, name
-        new = {m_["content"] for m_ in after if msg_ids(after)[after.index(m_)] in ids[ids.index(expected[0]):ids.index(expected[1]) + 1]}
-        old = {m_["content"] for m_ in before}
-        assert all(t in seen[0] for t in new), name
-        assert not any(f"'{t}'" in seen[0] or f": {t}" in seen[0] for t in old - new), name
+        after_ids = msg_ids(after)  # the ids this call gave its messages
+        first_new = len(after) - 2  # in every case the two new messages close the call
+        assert tuple(m_["content"] for m_ in after[first_new:]) == expected, name
+        assert (last["first_message_id"], last["last_message_id"]) == (after_ids[first_new], after_ids[-1]), name
+        new = {m_["content"] for m_ in after[first_new:]}
+        assert seen and all(t in seen[0] for t in new), name
 
 
 def test_message_ids():
-    def formula(ws, user, thread, role, content, stamp, n):
-        return hashlib.sha256("\x1f".join([ws, user, thread, role, content, stamp, str(n)]).encode()).hexdigest()[:32]
+    def formula(ws, user, thread, role, content, stamp, prev_role, prev_content, n):
+        parts = [ws, user, thread, role, content, stamp, prev_role, prev_content, str(n)]
+        return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:32]
 
-    assert message_id("acme", "anna", "t", "user", "yes", "", 0) == formula("acme", "anna", "t", "user", "yes", "", 0)
+    assert message_id("acme", "anna", "t", "user", "yes", "", "", "", 0) == formula("acme", "anna", "t", "user", "yes", "", "", "", 0)
     two = msg_ids([{"role": "user", "content": "yes"}, {"role": "assistant", "content": "ok"}, {"role": "user", "content": "yes"}])
     assert two[0] != two[2]
-    assert two[0] == formula("acme", "anna", "run-1", "user", "yes", "", 0) and two[2] == formula("acme", "anna", "run-1", "user", "yes", "", 1)
+    assert two[0] == formula("acme", "anna", "run-1", "user", "yes", "", "", "", 0)
+    assert two[2] == formula("acme", "anna", "run-1", "user", "yes", "", "assistant", "ok", 0)
+    loop = msg_ids([{"role": "user", "content": "yes"}, {"role": "assistant", "content": "ok"}] * 2)
+    assert len(set(loop)) == 4  # the same pair twice: four messages
     one = [{"role": "user", "content": "yes"}]
     assert msg_ids(one) == msg_ids(one)
-    assert msg_ids(one) != msg_ids(one, user_id="bob") != msg_ids(one, thread_id="other")
+    assert msg_ids(one) != msg_ids(one, user_id="bob")
+    assert msg_ids(one) != msg_ids(one, thread_id="other")
     assert msg_ids(one) != msg_ids([{"role": "user", "content": "yes", "timestamp": at(0)}])
 
 def test_thread_defaults_to_the_run(settings):
@@ -401,3 +412,20 @@ def test_push_docs():
         text = (ROOT / doc).read_text()
         assert "infer=True" in text and "AddResult" in text, doc
         assert "infer` defaults to `False`" in text or "infer=False` is the default" in text, doc
+
+
+def test_a_new_version_waiting_for_review_is_pending(settings):
+    settings.types["preference"].scopes = ["workspace"]  # a reviewed, keyed workspace type
+    m = _memory(settings, FakeChatModel([], unrelated_by_default=True))
+    with m.store.unit_of_work() as uow:  # an active, unverified workspace value, as an older config may have left it
+        old = uow.memories.add_memory(
+            type="preference", schema_version=1, scope="workspace", workspace_id="acme", user_id=None,
+            content="Answers in English", payload={"content": "Answers in English", "key": "language"}, entities=[],
+            embedding=FakeEmbeddings(16).embed_query("Answers in English"), evidence=[], status="active", verified=False,
+            created_by="extractor",
+        )
+    said = [{"role": "user", "content": "From now on the team answers in Portuguese"}, {"role": "assistant", "content": "Ok"}]
+    m.llm.queue += [extraction(cand("Answers in Portuguese", "the team answers in Portuguese", msg_ids(said)[0],
+                                    type="preference", scope="workspace", key="language")), Verdict(verdict="updates")]
+    [event] = m.add(said, infer=True, **IDS).results
+    assert (event.event, event.status, event.version, event.id) == ("PENDING", "candidate", 2, str(old["memory_id"]))

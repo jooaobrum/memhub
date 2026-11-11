@@ -1,0 +1,23 @@
+[
+  {
+    "file": "src/memhub/pipeline/push.py",
+    "old": "return msgs[len(ids) - ids[::-1].index(last_message_id):]",
+    "new": "return msgs[len(ids) - 1 - ids[::-1].index(last_message_id):]",
+    "proof": ".venv/bin/python -m pytest tests/test_push.py::test_only_messages_after_the_watermark",
+    "label": "after_watermark keeps the watermark's own message (off by one)"
+  },
+  {
+    "file": "src/memhub/pipeline/push.py",
+    "old": "        seen[key] = n = seen.get(key, -1) + 1",
+    "new": "seen[key] = n = 0",
+    "proof": ".venv/bin/python -m pytest tests/test_push.py::test_message_ids",
+    "label": "message id repeat counter always 0"
+  },
+  {
+    "file": "src/memhub/memory.py",
+    "old": "    if row[\"status\"] == \"candidate\":\n        return \"PENDING\"\n    return \"UPDATE\" if outcome == \"superseded\" else \"ADD\"",
+    "new": "    if outcome == \"superseded\":\n        return \"UPDATE\"\n    if row[\"status\"] == \"candidate\":\n        return \"PENDING\"\n    return \"ADD\"",
+    "proof": ".venv/bin/python -m pytest tests/test_push.py::test_a_new_version_waiting_for_review_is_pending",
+    "label": "a new version waiting for review is reported UPDATE, not PENDING"
+  }
+]

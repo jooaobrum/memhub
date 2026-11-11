@@ -13,8 +13,9 @@ Plan: `.specs/features/push-ingestion/plan.md`
 **C1** - A push whose extraction yields a user fact, a workspace memory of a reviewed type and a candidate whose quote is not in the messages returns `AddResult(run_id=<caller's>)` with `ADD`/`active`/`user`, `PENDING`/`candidate`/`workspace`, and `dropped == [Dropped(content=<the candidate's content>, reason="ungrounded")]`; a conversation the extractor finds nothing in returns `results == []` (AC 1)
 Proof: `.venv/bin/python -m pytest tests/test_push.py::test_push_returns_events_and_drops`
 
-**C2** - Pushed against stored memories: the same fact again is `MERGE` with the stored `id` and version 1 kept; a new value of a keyed slot is `UPDATE` with `version` 2; a contradiction of a verified memory is `CONFLICT`, `candidate`, `conflicts_with` = that memory's id (AC 2)
+**C2** - Pushed against stored memories: the same fact again is `MERGE` with the stored `id` and version 1 kept; a new value of a keyed slot is `UPDATE` with `version` 2, or `PENDING` / `candidate` / version 2 when the new version of a reviewed workspace type waits for review; a contradiction of a verified memory is `CONFLICT`, `candidate`, `conflicts_with` = that memory's id (AC 2)
 Proof: `.venv/bin/python -m pytest tests/test_push.py::test_events_follow_the_reconcile_decision`
+Proof: `.venv/bin/python -m pytest tests/test_push.py::test_a_new_version_waiting_for_review_is_pending`
 
 **C3** - Every row a push writes has the caller's `run_id` and `agent_id` (`None` when not given) and `created_by == "extractor"`; each evidence entry has `source == "push"`, the thread id and the message's id; no `embedding` key in the result's `model_dump()` (AC 3)
 Proof: `.venv/bin/python -m pytest tests/test_push.py::test_rows_carry_the_call_ids_and_push_evidence`
@@ -33,10 +34,10 @@ Proof: `.venv/bin/python -m pytest tests/test_push.py::test_infer_defaults_to_fa
 **C7** - Pushing the same 4 messages twice: the second call makes 0 model calls, writes no memory row and no run row, and returns `results == []`, `dropped == []` (AC 7)
 Proof: `.venv/bin/python -m pytest tests/test_push.py::test_same_messages_twice_cost_nothing`
 
-**C8** - After [m1..m4]: [m1..m6] extracts m5..m6; the window [m3..m6] extracts m5..m6; [m1, m2] then [m3, m4] extracts m3..m4 - each read from the new run row's `first_message_id` / `last_message_id` and the messages the extractor saw (AC 8)
+**C8** - After [m1..m4]: [m1..m6] extracts m5..m6; the window [m3..m6] extracts m5..m6; [m1, m2] then [m3, m4] extracts m3..m4; after [hi, Noted, Lyon, Noted] with no timestamps, the window [Lyon, Noted, welder, Noted] extracts welder, Noted - each read from the new run row's `first_message_id` / `last_message_id` and the messages the extractor saw (AC 8)
 Proof: `.venv/bin/python -m pytest tests/test_push.py::test_only_messages_after_the_watermark`
 
-**C9** - `message_id` is the door 2 formula: "yes" twice in one call -> two ids; the same text from another user or another thread -> another id; with and without `timestamp` -> two ids; equal inputs -> equal ids; `thread_id` defaults to `run_id` (AC 9)
+**C9** - `message_id` is the door 2b formula: "yes" twice in one call -> two ids; the same text from another user or another thread -> another id; with and without `timestamp` -> two ids; equal inputs -> equal ids; `thread_id` defaults to `run_id` (AC 9)
 Proof: `.venv/bin/python -m pytest tests/test_push.py::test_message_ids`
 Proof: `.venv/bin/python -m pytest tests/test_push.py::test_thread_defaults_to_the_run`
 
@@ -97,8 +98,8 @@ Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Handoff
 
-- **Settled mid-build:** none
-- **Dispatched:** none yet
-- **Boundary:** none yet
+- **Settled mid-build:** user: "Any question you need from me, I'll let you decide the best decision" - `infer` defaults to `False` (AD-019); `MERGE` appears in results and the result is an `AddResult` (AD-020)
+- **Dispatched:** Verifier at `60bac4d`, diff `d75b205..60bac4d` (no screens sub-agent: no capture)
+- **Boundary:** C1-C17 closed at `60bac4d`; PR 1's `test_infer_true_not_implemented` removed with the claim it proved
 - **Abandoned:** none
 - **Walked:** n/a - no screen
