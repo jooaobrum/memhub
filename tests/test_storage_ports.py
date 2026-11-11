@@ -26,6 +26,7 @@ from tests.fakes import FakeEmbeddings
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "memhub"
 BEFORE_PORTS = "2a58e6c"
+PORTS_DONE = "9fdbf05"  # the last commit of PR 3: later PRs change old tests with their own claims (AD-021)
 SCHEMAS_MESSAGE = "schemas is not available on memory: remove database_schema from the config, or use Postgres"
 
 
@@ -151,7 +152,7 @@ _CALL_SITE = re.compile(r"cur=cur, store=((?:\w+\.)?store)\b")
 def test_old_test_files_change_only_at_pipeline_call_sites():
     old = set(subprocess.run(["git", "ls-tree", "--name-only", BEFORE_PORTS, "tests/"], cwd=ROOT, capture_output=True,
                              text=True, check=True).stdout.split())
-    diff = subprocess.run(["git", "diff", "-U0", BEFORE_PORTS, "--", *sorted(p for p in old if p.endswith(".py"))],
+    diff = subprocess.run(["git", "diff", "-U0", BEFORE_PORTS, PORTS_DONE, "--", *sorted(p for p in old if p.endswith(".py"))],
                           cwd=ROOT, capture_output=True, text=True, check=True).stdout
     removed = [l[1:] for l in diff.splitlines() if l.startswith("-") and not l.startswith("---")]
     added = [l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
