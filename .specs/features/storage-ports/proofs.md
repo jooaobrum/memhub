@@ -1,6 +1,6 @@
 # storage-ports proofs
 
-**HEAD**: 7752dd9
+**HEAD**: ab59ad0
 **Tree**: clean
 **Result**: 47 pass, 0 fail; mutations 3 killed, 0 not
 
