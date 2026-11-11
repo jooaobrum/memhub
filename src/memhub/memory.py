@@ -28,7 +28,8 @@ from memhub.middleware import MemoryMiddleware
 from memhub.service import MemoryService, NotFound, ValidationError
 from memhub.storage import Capability, open_backend, require
 from memhub.storage.base import FIXES
-from memhub.storage.rules import Actor, EmbeddingMismatch, Row
+from memhub.storage.migrations import check as check_schema
+from memhub.storage.rules import NO_TABLES, Actor, EmbeddingMismatch, Row
 from memhub.toolkit import MemoryToolkit
 
 __all__ = ["AddResult", "CallContext", "Dropped", "Memory", "MemoryEvent", "ScopedMemory"]
@@ -186,11 +187,24 @@ class Memory:
         self.store.init(embedding_model=emb.model, dims=emb.dims)
         self._checked = True
 
+    def migrate(self, *, dry_run: bool = False) -> list[str]:
+        """Bring the ledger to this memhub's schema version (`memhub migrate` from code). Returns the migrations
+        applied, or pending with `dry_run`. The next call of this instance checks the ledger again."""
+        self._check_capabilities()
+        done = self.store.migrate(dry_run=dry_run)
+        self._checked = False
+        return done
+
     def _ready(self) -> None:
-        """Once per instance: the ledger exists and was built with this embedder."""
+        """Once per instance: the ledger exists, is at this memhub's schema version, and was built with this
+        embedder. An older ledger raises `SchemaOutdated` naming `memhub migrate` before any other read or write."""
         if self._checked:
             return
         self._check_capabilities()
+        version = self.store.schema_version()
+        if version is None:
+            raise EmbeddingMismatch(NO_TABLES)
+        check_schema(version)
         emb = self._probe()
         with self.store.unit_of_work() as uow:  # no tables yet: EmbeddingMismatch naming `init()`, on every backend
             uow.meta.check_embedding_config(model=emb.model, dims=emb.dims)

@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
 from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not_available, require
+from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.rules import (
     MEMORY_COLUMNS,
     NO_TABLES,
@@ -667,6 +668,25 @@ class InMemoryBackend:
                 self._tables.dims = dims
             self._tables.meta.setdefault("embedding", {"model": embedding_model, "dims": dims})
             _Tx(self._tables).check_embedding_config(model=embedding_model, dims=dims)
+        self.migrate()
+
+    def schema_version(self) -> int | None:
+        """None when `init` never ran; 1 when no version is recorded; else the recorded one."""
+        with self._own_unit():
+            return None if self._tables.dims is None else int(self._tables.meta.get(SCHEMA_KEY, 1))
+
+    def migrate(self, *, dry_run: bool = False) -> list[str]:
+        """Nothing to alter in memory: record the version the migrations reach. Returns their names."""
+        with self._own_unit():
+            if self._tables.dims is None:
+                raise EmbeddingMismatch(NO_TABLES)
+            version = int(self._tables.meta.get(SCHEMA_KEY, 1))
+            if version > SCHEMA_VERSION:
+                check(version)
+            todo = pending(self.name, version)
+            if not dry_run and version != SCHEMA_VERSION:
+                self._tables.meta[SCHEMA_KEY] = SCHEMA_VERSION
+            return [m.name for m in todo]
 
     @contextmanager
     def _own_unit(self) -> Iterator[None]:

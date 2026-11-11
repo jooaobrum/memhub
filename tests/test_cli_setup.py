@@ -327,7 +327,7 @@ def test_doctor_prints_checks_and_exit_code(pg_dsn):
     _ledger(pg_dsn, p)
     result, lines = _doctor(p, db=pg_dsn, embedder=FakeEmbeddings(16), llm=PingChat())
     assert result.exit_code == 0, result.output
-    assert [c for _, c, _ in _lines(result.output)] == ["config", "db", "chat", "embedder", "dims", "schema"]
+    assert [c for _, c, _ in _lines(result.output)] == ["config", "db", "chat", "embedder", "dims", "schema", "version"]  # version: PR 6 (AD-009)
     assert all(s == "ok" for s, _ in lines.values())
     result, lines = _doctor(p, db=pg_dsn, embedder=FakeEmbeddings(16), llm=BrokenChat())
     assert result.exit_code == 1 and lines["chat"][0] == "fail" and "quota" in lines["chat"][1]
@@ -496,7 +496,7 @@ def _all_commands(uid: str) -> dict[str, list[str]]:
         "edit": ["edit", uid, "-f", "m.json"], "history": ["history", uid], "archive": ["archive", uid],
         "delete": ["delete", uid], "promote": ["promote", uid], "page": ["page"], "runs": ["runs"], "areas": ["areas"],
         "areas merge": ["areas", "merge", uid, uid], "config show": ["config", "show"],
-        "config set": ["config", "set", "project", "x1"], "doctor": ["doctor"],
+        "config set": ["config", "set", "project", "x1"], "doctor": ["doctor"], "migrate": ["migrate"],
     }
 
 

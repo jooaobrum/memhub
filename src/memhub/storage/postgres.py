@@ -30,6 +30,7 @@ from psycopg.types.json import Jsonb
 
 from memhub.connection import ConnectionSource, advisory_lock, advisory_unlock, connection_source
 from memhub.storage.base import FIXES, BoundUnitOfWork, Capability, require
+from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.rules import (
     ACTIVE_STATUSES,
     NO_TABLES,
@@ -60,7 +61,8 @@ def _valid_until_args(valid_until: Any) -> tuple:
     return () if valid_until is _UNSET else (valid_until, valid_until)
 
 
-# Columns added after v1. `init` adds each with ADD COLUMN IF NOT EXISTS, backfills existing rows, and
+# Columns added before schema versions existed (all part of version 1, the v0.1.0 schema); later columns are numbered
+# migrations in `storage/migrations/postgres/`. `init` adds each with ADD COLUMN IF NOT EXISTS, backfills existing rows, and
 # only then applies NOT NULL, so it upgrades an old ledger and is a no-op on a current one.
 # (name, type, backfill SQL expression for existing rows or None, NOT NULL)
 ADDED_COLUMNS: tuple[tuple[str, str, str | None, bool], ...] = (
@@ -70,8 +72,6 @@ ADDED_COLUMNS: tuple[tuple[str, str, str | None, bool], ...] = (
     ("durability", "text", None, False),  # stable | ongoing | temporary
     ("assertion", "text DEFAULT 'stated'", "'stated'", True),  # stated | inferred
     ("links", "jsonb DEFAULT '[]'::jsonb", "'[]'::jsonb", True),  # [{kind, memory_id}]; ticket 29 writes area links
-    ("run_id", "text", None, False),  # the app's run (request, trace) that wrote this row; null for ingest and old rows
-    ("agent_id", "text", None, False),  # the app's agent that wrote this row, when it said
 )
 
 # `valid_until` on a merge: the later of the two, with null (never expires) the latest.
@@ -267,6 +267,40 @@ class MemoryStore:
                 )
         except psycopg.Error:
             pass
+        self.migrate()  # a new ledger, or one an older memhub made, ends at this memhub's schema version
+
+    # --- schema version ----------------------------------------------------------------------------------------
+
+    def _version(self, cur: Cursor) -> int | None:
+        cur.execute("SELECT to_regclass(%s) AS t", (self._t("memhub_meta"),))
+        if cur.fetchone()["t"] is None:
+            return None
+        saved = self.get_meta(cur, SCHEMA_KEY)
+        return 1 if saved is None else int(saved)
+
+    def schema_version(self) -> int | None:
+        """The ledger's schema version: None when there is no ledger, 1 when it has none recorded (v0.1.0)."""
+        with self.connect(vector=False) as conn, conn.cursor() as cur:
+            return self._version(cur)
+
+    def migrate(self, *, dry_run: bool = False) -> list[str]:
+        """Apply the pending migrations in one transaction, under a transaction-level advisory lock so two
+        `migrate` runs apply each once. Returns their names (pending ones with `dry_run`, nothing applied)."""
+        with self.connect(vector=False) as conn, conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"memhub-migrate:{self.schema}.{self.prefix}",))
+            version = self._version(cur)
+            if version is None:
+                raise EmbeddingMismatch(NO_TABLES)
+            if version > SCHEMA_VERSION:
+                check(version)
+            todo = pending(self.name, version)
+            if not dry_run:
+                for migration in todo:
+                    for statement in migration.statements(self.prefix):
+                        cur.execute(statement)
+                if version != SCHEMA_VERSION:
+                    self.set_meta(cur, SCHEMA_KEY, SCHEMA_VERSION)
+            return [m.name for m in todo]
 
     def get_meta(self, cur: Cursor, key: str) -> Any | None:
         cur.execute(f"SELECT value FROM {self._t('memhub_meta')} WHERE key = %s", (key,))

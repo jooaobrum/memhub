@@ -133,6 +133,7 @@ def test_init_upgrades_previous_ledger(pg_dsn, pool):
     old.init(embedding_model="FakeEmbeddings", dims=16)
     with old.connect() as conn, conn.cursor() as cur:
         cur.execute(f"ALTER TABLE {prefix}_memory DROP COLUMN run_id, DROP COLUMN agent_id")
+        cur.execute(f"DELETE FROM {prefix}_memhub_meta WHERE key = 'schema_version'")  # a previous ledger records none (PR 6)
         old.add_memory(
             cur, type="fact", schema_version=1, scope="user", workspace_id=WS, user_id="alice", content="old row",
             payload={"content": "old row"}, entities=[], embedding=FakeEmbeddings(16).embed_query("old row"),
