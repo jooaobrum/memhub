@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from memhub.types import TypeRegistry
 
@@ -246,13 +246,43 @@ class RetentionConfig(BaseModel):
     dropped_days: int = 90
 
 
-class Settings(BaseModel):
+class ModelsConfig(BaseModel):
+    """Models as `provider:model` strings, built with LangChain's `init_chat_model` / `init_embeddings`."""
+
+    chat: str | None = None  # extractor and, unless `judge` is set, judge
+    judge: str | None = None
+    embeddings: str | None = None
+
+
+# `project` and `db` are the short names `memhub init` writes; the long ones stay valid.
+KEY_ALIASES = {"project": "project_prefix", "db": "database_url"}
+
+
+def canonical_keys(data: Any, where: str = "config") -> Any:
+    """Rewrite alias keys to their canonical name; a mapping holding both is a mistake."""
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    for alias, name in KEY_ALIASES.items():
+        if alias in out:
+            if name in out:
+                raise ConfigError(f"{where} sets both `{alias}` and `{name}`: they are the same key, keep one")
+            out[name] = out.pop(alias)
+    return out
+
+
+class Config(BaseModel):
+    """memhub's configuration (it was `Settings`). Built by `memhub.settings.resolve`, or directly."""
+
     project_prefix: str  # table prefix: several projects can share one database
     database_url: str | None = None  # the CLI needs it; `Memory(db=...)` takes the app's own connection instead
     database_schema: str | None = None  # Postgres schema for the tables (created if missing); default: the search_path
     workspace_default: str
     llm: LLMConfig | None = None  # the CLI builds models from these; `Memory(llm=, embedder=)` takes the app's own
     embeddings: EmbeddingConfig | None = None
+    preset: str | None = None  # a packaged preset (memhub/presets/<name>.yaml) under this file's own keys
+    connect: str | None = None  # "package.module:function" returning {db, embedder, llm?, judge?}: the app's own objects
+    models: ModelsConfig | None = None  # `provider:model` strings, used when `connect` is absent and no `llm` / `embeddings` block
     entity_types: list[str] = Field(default_factory=list)
     scopes: list[str] = Field(default_factory=lambda: ["user"])
     types: dict[str, TypeConfig]
@@ -271,6 +301,19 @@ class Settings(BaseModel):
     areas: AreasConfig = Field(default_factory=AreasConfig)
     terms: TermsConfig = Field(default_factory=TermsConfig)
 
+    _raw: dict | None = PrivateAttr(default=None)  # the file layers before `${VAR}` interpolation: what `save` writes back
+
+    @model_validator(mode="before")
+    @classmethod
+    def _aliases(cls, data: Any) -> Any:
+        return canonical_keys(data)
+
+    def save(self, path: str | Path) -> None:
+        """Write this config as yaml: `${VAR}` references only, never a literal secret."""
+        from memhub.settings import save_config
+
+        save_config(self, path)
+
     @field_validator("project_prefix", "database_schema")
     @classmethod
     def _identifier(cls, v: str | None) -> str | None:
@@ -280,7 +323,7 @@ class Settings(BaseModel):
         return v.lower() if v is not None else v
 
     @model_validator(mode="after")
-    def _type_scopes_are_enabled(self) -> "Settings":
+    def _type_scopes_are_enabled(self) -> "Config":
         for name, cfg in self.types.items():
             if cfg.scopes is not None and (not cfg.scopes or not set(cfg.scopes) <= set(self.scopes)):
                 raise ValueError(f"type {name!r} scopes {cfg.scopes} must be a non-empty subset of scopes {self.scopes}")
@@ -340,6 +383,9 @@ class Settings(BaseModel):
         return registry
 
 
+Settings = Config  # the old name
+
+
 def read_config(path: str | Path) -> dict[str, Any]:
     """The yaml as a dict, `${VAR}` interpolated; its folder goes on `sys.path` for the project's own classes."""
     raw = Path(path).read_text()
@@ -349,8 +395,10 @@ def read_config(path: str | Path) -> dict[str, Any]:
     return yaml.safe_load(_interpolate_env(raw)) or {}
 
 
-def load_config(path: str | Path) -> Settings:
-    return Settings.model_validate(read_config(path))
+def load_config(path: str | Path) -> Config:
+    from memhub.settings import resolve
+
+    return resolve(config=path).config
 
 
 # --- Model construction -----------------------------------------------------

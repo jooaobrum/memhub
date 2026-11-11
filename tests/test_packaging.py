@@ -39,3 +39,38 @@ def test_core_imports_no_azure():
             names = [a.name for a in node.names] if isinstance(node, ast.Import) else (
                 [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
             assert not any(n == "azure" or n.startswith("azure.") or n.startswith("langchain_openai") for n in names), path
+
+
+def test_wheel_contains_presets(tmp_path, monkeypatch):
+    import zipfile
+
+    monkeypatch.chdir(ROOT)  # hatchling reads pyproject.toml from the cwd
+    from hatchling.build import build_wheel
+
+    wheel = tmp_path / build_wheel(str(tmp_path))
+    names = zipfile.ZipFile(wheel).namelist()
+    for preset in ("maintenance", "support", "assistant"):
+        assert f"memhub/presets/{preset}.yaml" in names, preset
+
+
+def test_readme_quickstart_commands():
+    from typer.testing import CliRunner
+
+    from memhub import cli
+
+    readme = (ROOT / "README.md").read_text()
+    quick = readme.split("## Quickstart", 1)[1].split("\n## ", 1)[0]
+    for needle in ("memhub init --preset", "memhub add", "memhub search", "Memory()"):
+        assert needle in quick, needle
+    commands = set()
+    for block in re.findall(r"```bash\n(.*?)```", quick, re.S):
+        for line in block.replace("\\\n", " ").splitlines():
+            for part in line.split("#")[0].split("&&"):
+                words = part.split()
+                if words[:1] == ["memhub"]:
+                    name = [words[1]] + ([words[2]] if words[1] in ("config", "areas") and not words[2].startswith("-") else [])
+                    commands.add(tuple(name))
+    assert {c[0] for c in commands} >= {"init", "add", "search", "doctor"}
+    for command in commands:
+        result = CliRunner().invoke(cli.app, [*command, "--help"])
+        assert result.exit_code == 0, (command, result.output)

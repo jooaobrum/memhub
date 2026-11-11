@@ -1,0 +1,22 @@
+# Preset: a maintenance agent. Workspace-scoped machine knowledge and the fixes that worked (an `incident`).
+# Built from examples/maintenance; use it with `preset: maintenance` and edit with a `types:` block.
+scopes:
+- workspace
+entity_types:
+- machine
+types:
+  incident:
+    fields:
+      equipment: str
+      fault_code: str
+      fix: str
+    content_template: '{equipment} fault {fault_code}: {fix}'
+    scopes:
+    - workspace
+    on_remember: true
+extraction:
+  retries: 4
+  instructions: 'Maintenance assistant. Keep durable knowledge about machines: model, location, known quirks, and fixes that
+    worked (an `incident`). Never keep questions, greetings or measurements that only describe the moment.
+
+    '
