@@ -1,0 +1,23 @@
+[
+  {
+    "file": "src/memhub/storage/sqlite.py",
+    "old": "    return value.astimezone(timezone.utc).isoformat(timespec=\"microseconds\")",
+    "new": "    return value.isoformat(timespec=\"microseconds\")",
+    "proof": ".venv/bin/python -m pytest tests/test_sqlite_backend.py::test_row_values_round_trip",
+    "label": "timestamps stored in their own offset, not UTC (text order != time order)"
+  },
+  {
+    "file": "src/memhub/storage/sqlite.py",
+    "old": "self._nearest(\" AND \".join(clauses), params, query_embedding, max(k * 4, 20))",
+    "new": "self._nearest(\" AND \".join(clauses), params, query_embedding, k)",
+    "proof": ".venv/bin/python -m pytest tests/test_contract_sqlite.py::test_search_boosts_rows_ranked_below_k",
+    "label": "search ranks only the top k before boosts (no over-fetch for apply_boosts)"
+  },
+  {
+    "file": "src/memhub/storage/sqlite_schema.sql",
+    "old": "  ON {prefix}_memory (workspace_id, scope, COALESCE(user_id, ''), type,",
+    "new": "  ON {prefix}_memory (workspace_id, scope, user_id, type,",
+    "proof": ".venv/bin/python -m pytest tests/test_contract_sqlite.py::test_one_active_row_per_memory_and_per_keyed_slot",
+    "label": "keyed slot index without COALESCE: workspace rows (user_id NULL) never collide"
+  }
+]

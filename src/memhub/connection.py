@@ -228,7 +228,7 @@ def sqlite_path(url: str) -> str:
     """The file a `sqlite:` URL names: `sqlite:///m.db` -> `m.db`, `sqlite:////tmp/m.db` -> `/tmp/m.db`,
     `sqlite:///:memory:` -> `:memory:`. Any other shape is a `TypeError`."""
     path = url[len("sqlite:///"):] if url.startswith("sqlite:///") else ""
-    if not path:
+    if not path.strip() or path.strip() == "/":  # no file named: "sqlite:///", "sqlite:////", blanks
         raise TypeError(f"unsupported SQLite URL {url!r}; db must be {SQLITE_FORMS}")
     return path
 

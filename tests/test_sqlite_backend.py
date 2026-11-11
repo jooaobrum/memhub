@@ -101,7 +101,7 @@ def test_sqlite_url_forms(tmp_path, monkeypatch):
     relative = _memory("sqlite:///m.db")
     relative.init()
     assert (tmp_path / "m.db").exists()
-    for bad in ("sqlite://", "sqlite:m.db", "sqlite:///", "sqlite://m.db"):
+    for bad in ("sqlite://", "sqlite:m.db", "sqlite:///", "sqlite://m.db", "sqlite:////", "sqlite:///  "):
         with pytest.raises(TypeError, match="sqlite:///path"):
             open_backend(bad)
         with pytest.raises(TypeError, match="sqlite:///path"):
@@ -231,6 +231,11 @@ def test_row_values_round_trip(tmp_path):
     with backend.unit_of_work() as uow:
         again = uow.memories.get_by_id(row["id"])
         watermark = uow.runs.get_watermark(source="jsonl", thread_id="t")
+    with sqlite3.connect(tmp_path / "m.db") as raw:  # door 3: stored as UTC text, so text order is time order
+        stored = raw.execute("SELECT valid_until, observed_at FROM t_memory WHERE id = ?", (str(row["id"]),)).fetchone()
+    assert stored == (until.astimezone(timezone.utc).isoformat(timespec="microseconds"),
+                      NOW.isoformat(timespec="microseconds"))
+    assert stored[0].endswith("+00:00")
     for got in (row, again):
         assert set(got) == set(MEMORY_COLUMNS)
         for col in ("payload", "entities", "evidence", "links", "score", "run_id", "agent_id", "durability"):
@@ -530,3 +535,18 @@ def test_doctor_reports_the_vector_path(tmp_path, monkeypatch):
         vector = [line for line in lines if line[1:2] == ["vector"]]
         assert len(vector) == 1 and vector[0][0] == "ok" and vector[0][2].startswith(path), out.output
         assert any(line[:2] == ["ok", "schema"] for line in lines), out.output
+
+
+def test_stale_filter_compares_times_not_offsets(tmp_path, monkeypatch):
+    """`valid_until` written in +02:00 and `now` in -05:00, an hour apart: text order must be time order."""
+    plus2, minus5 = timezone(timedelta(hours=2)), timezone(timedelta(hours=-5))
+    now = datetime(2026, 3, 1, 12, 0, tzinfo=minus5)  # 17:00 UTC
+    for path, backend in _by_path(tmp_path, monkeypatch).items():
+        with backend.unit_of_work() as uow:
+            add(uow, "expired an hour ago", vec(0.9), valid_until=(now - timedelta(hours=1)).astimezone(plus2))
+            add(uow, "expires in an hour", vec(0.8), valid_until=(now + timedelta(hours=1)).astimezone(plus2))
+        with backend.unit_of_work() as uow:
+            found = contents(uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id="alice", now=now))
+            stale = {r["content"] for r in uow.memories.list_memories(stale=True, now=now)}
+        assert found == ["expires in an hour"], path
+        assert stale == {"expired an hour ago"}, path
