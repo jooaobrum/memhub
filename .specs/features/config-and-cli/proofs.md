@@ -1,8 +1,8 @@
 # config-and-cli proofs
 
-**HEAD**: 5d66262
+**HEAD**: cbe7b04
 **Tree**: dirty - .claude/
-**Result**: 63 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 63 pass, 0 fail; mutations 4 killed, 1 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -69,3 +69,13 @@
 | C59 | `.venv/bin/python -m pytest tests/test_packaging.py::test_readme_quickstart_commands` | 1 | 1 | pass |
 | C60 | `.venv/bin/python -m pytest tests/e2e/test_pr2_init.py::test_pr2_demo` | 1 | 1 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| env layer placed above code layer | `src/memhub/settings.py:298` | yes |
+| types null keeps the type instead of removing it | `src/memhub/settings.py:226` | yes |
+| config set no longer refuses a literal secret key | `src/memhub/settings.py:411` | no |
+| pool warning bound >= 3600 -> > 3600 | `src/memhub/cli_setup.py:271` | yes |
+| context file beats MEMHUB_WORKSPACE | `src/memhub/cli.py:97` | yes |
