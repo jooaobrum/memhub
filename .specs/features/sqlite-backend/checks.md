@@ -95,6 +95,7 @@ Proof: `.venv/bin/python -m pytest tests/e2e/test_pr4_sqlite_ingest.py::test_ini
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_ingest_matches_the_in_memory_backend`
 Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_failed_segment_leaves_nothing_and_is_retried`
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_packaging.py::test_sqlite_vec_is_an_extra_not_a_core_dependency`
+Proof: `.venv/bin/python -m pytest tests/test_sqlite_packaging.py::test_wheel_contains_the_sqlite_schema`
 Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Coverage
