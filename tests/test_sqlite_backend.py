@@ -503,7 +503,7 @@ def test_ingest_matches_the_in_memory_backend(tmp_path, settings, registry, monk
     for name, backend in {"memory": memory, **_by_path(tmp_path, monkeypatch)}.items():
         summary = _ingest(backend, settings, registry, tmp_path, lines, answers)
         ledgers[name] = (_ledger(backend), summary.created, summary.candidates_proposed, summary.dropped_by_reason)
-    assert ledgers["memory"][0][0] == [("fact", "user", "active", "User is a welder"), ("fact", "user", "active", "User lives in Lyon")]
+    assert [m[:4] for m in ledgers["memory"][0][0]] == [("fact", "user", "active", "User is a welder"), ("fact", "user", "active", "User lives in Lyon")]
     assert ledgers["memory"][0][1] == [("c1", 2, 2, []), ("c2", 1, 0, ["ungrounded"]), ("c3", 0, 0, [])]
     assert ledgers["sqlite-vec"] == ledgers["memory"]
     assert ledgers["python"] == ledgers["memory"]

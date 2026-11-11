@@ -184,4 +184,25 @@ def test_memory_contract_skips_nothing():
     out = subprocess.run([sys.executable, "-m", "pytest", "-q", "-rs", "-p", "no:cacheprovider",
                           "tests/test_contract_memory.py"], cwd=ROOT, capture_output=True, text=True)
     assert out.returncode == 0, out.stdout[-2000:]
-    assert "skipped" not in out.stdout and re.search(r"\b2\d passed\b", out.stdout), out.stdout[-500:]
+    assert "skipped" not in out.stdout and "failed" not in out.stdout and re.search(r"\b\d+ passed\b", out.stdout), out.stdout[-500:]
+
+
+class _Lacking(InMemoryBackend):
+    """A backend with transactions only: every other capability must fail loudly, never skip."""
+
+    name = "lacking"
+    capabilities = frozenset({Capability.TRANSACTIONS})
+
+
+def test_contract_capability_tests_assert_the_error_on_a_backend_that_lacks_them(monkeypatch):
+    from memhub.storage import contract
+
+    backend = _Lacking()
+    backend.init(embedding_model=contract.MODEL, dims=contract.DIMS)
+    contract.test_vector_search_capability(backend)
+    contract.test_json_lookup_capability(backend)
+    contract.test_parallel_ingest_capability(backend)
+    contract.test_schemas_capability(lambda schema: _Lacking(schema=schema))
+    monkeypatch.setattr("memhub.memory.open_backend", lambda *a, **kw: _Lacking())
+    with pytest.raises(NotImplementedError, match="^vector_search is not available on lacking: "):
+        Memory(db="memory" + "://", embedder=FakeEmbeddings())

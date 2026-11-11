@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub`
 Plan: `.specs/features/storage-ports/plan.md`
 
-28 checks in 3 slices · 4 one-way doors · 0 open
+33 checks in 3 slices · 4 one-way doors · 0 open
 
 ## Checks
 
@@ -109,22 +109,39 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_reembed
 Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py::test_a_call_before_init_names_init`
 Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_before_init_names_init`
 
+**C29** - A keyed slot compares `payload.key` as `->>` text on both backends: `"1"` then `1` raises the unique error; `true` and `1` are two slots (AC 19; appended from verification finding 3)
+Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py::test_keyed_slot_compares_keys_as_json_text`
+Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_keyed_slot_compares_keys_as_json_text`
+
+**C30** - `MEM + "x"` with `project_prefix` `appa` and `appb` are two ledgers; a second `appa` sees the first one's row (AC 14; appended from verification finding 4)
+Proof: `.venv/bin/python -m pytest tests/e2e/test_pr3_memory_backend.py::test_a_named_url_keeps_one_ledger_per_table_prefix`
+
+**C31** - A naive `valid_until`, `valid_from`, `observed_at` or `last_message_at` comes back aware and equal to the same wall time in UTC, on both backends (AC 16; appended from verification finding 5)
+Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py::test_naive_datetimes_are_stored_as_utc`
+Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_naive_datetimes_are_stored_as_utc`
+
+**C32** - Opening a unit of work on the in-memory backend inside another in the same thread raises `StoreError` ("already open in this thread") and the outer one's writes commit (AC 18; appended from verification finding 6)
+Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py::test_a_unit_of_work_inside_another_in_one_thread_is_refused`
+
+**C33** - On a backend with `transactions` only, `vectors.search` / `top_similar` / `nearest_area` raise `vector_search is not available on lacking: ...`, `linked_rows` / `move_area_links` / `add_link` raise the `json_lookup` error, `thread_lock` the `parallel_ingest` error, a schema the `schemas` error, and `Memory(...)` refuses it at `__init__` (AC 10, 12; appended from verification finding 7)
+Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_contract_capability_tests_assert_the_error_on_a_backend_that_lacks_them`
+
 ## Coverage
 
 | Set (size) | Member -> proof | Unproven |
 | --- | --- | --- |
 | Landing doors (4) | ports C1 C2 · capability error C12 C13 · `memory` URL C16 · `memhub.store` shim C7 | - |
-| capabilities (5) x backends (2) | `transactions` C3 · `vector_search` C23 C24 · `json_lookup` C24 (entity boost) C25 · `parallel_ingest` C22 · `schemas` C14 (memory lacks) C12 | - |
+| capabilities (5), present and lacking | `transactions` C3 · `vector_search` C23 C24 C33 · `json_lookup` C24 C25 C33 · `parallel_ingest` C22 C33 · `schemas` C12 C14 C33 | - |
 | repository methods (37) | C2, table-driven over all 37 on both backends; behaviour by the contract suite C3 C18-C27 | - |
 | `db` kinds for Postgres capabilities (4) | pool C4 · connection C4 · callable C4 · URL C4 | - |
 | modules that must not touch psycopg (6) | `service.py` C6 · `memory.py` C6 · `cli.py` C6 · `middleware.py` C6 · `toolkit.py` C6 · `pipeline/*.py` C6 - one AST walk over all | - |
 | unit-of-work outcomes (2) | clean exit C3 · exception C3 C26 | - |
-| AC 14 URL pairs (3) | `MEM` x2 C16 · `shared` x2 C16 · `a` / `b` C16 | - |
+| AC 14 URL pairs (4) | `MEM` x2 C16 · `shared` x2 C16 · `a` / `b` C16 · one name, two prefixes C30 | - |
 | AC 15 examples (3) | before init C17 C28 · other dims C17 · fresh Postgres database C28 | - |
 | AC 18 examples (2) | commit -> seen C20 · raise -> nothing C20 | - |
-| AC 19 uniqueness (2) | same `memory_id` C21 · same keyed slot C21 | - |
+| AC 19 uniqueness (4) | same `memory_id` C21 · same keyed slot C21 · other workspace / workspace scope C21 · key as JSON text C29 | - |
 | AC 21 search examples (8) | cosine order C23 · stale C24 · other user C24 · other workspace C24 · candidate C24 · area/type C24 · `k` C24 · boosts C24 | - |
-| row tables (3) | memory C18 · runs C18 · meta C18 | - |
+| row tables (3) | memory C18 C31 · runs C18 C31 · meta C18 | - |
 | startup config: backend selection (2 assemblies) | `Memory.__init__` C13 C15 · `memhub` CLI (Postgres URL) C9 | - |
 
 ## Swept
@@ -133,7 +150,7 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_
 - failure modes: C3, C26 (rollback per unit of work and per segment)
 - idempotency: C25 (watermark and run rows the same as Postgres); existing - `test_ingest_e2e.py` re-runs on Postgres
 - authorization: existing - `MemoryService` and `Memory._visible` are unchanged and run on both backends; C15 exercises promote/approve as admin
-- concurrency: C20, C22
+- concurrency: C20, C22, C32
 - data lifecycle: C15 (`delete_all`), C17, C19; `memory` rows are gone with the process by design (Out of scope)
 - dependency failure: C15 (no Postgres reachable)
 - state transitions: C21; existing - `test_store.py` lifecycle tests on Postgres; contract suite runs approve / reject / archive / supersede on memory
@@ -142,6 +159,6 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_
 ## Handoff
 
 - **Settled mid-build:** user chose "Own worktree": PR 3 builds in `~/worktrees/memhub-storage`; the PR 1 fix `2a58e6c` is its base, so C7, C10, C11 compare against `2a58e6c` (the last commit before the ports) instead of `fdec080`
-- **Dispatched:** none yet
+- **Dispatched:** Verifier at `77f11ce` (diff `2a58e6c..77f11ce`) - returned: FAIL, 8 findings, mutations 1 killed / 2 not
 - **Boundary:** C1-C28 closed at `21e2f48` (refactor `b8f70ae`, backend and suites `21e2f48`); full suite on Postgres 602 passed before the new tests; N4 bench: ratio 0.954 and 0.998 (interleaved, 5 rounds)
 - **Abandoned:** a bench that ran base then tree once (ratios 1.19 / 1.12 / 0.97: the second side always met a fuller database); replaced by interleaved rounds

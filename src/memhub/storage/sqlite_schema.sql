@@ -46,8 +46,11 @@ CREATE INDEX IF NOT EXISTS {prefix}_memory_scope_idx
 CREATE INDEX IF NOT EXISTS {prefix}_memory_user_idx
   ON {prefix}_memory (user_id) WHERE user_id IS NOT NULL;
 
+-- the key as Postgres `payload->>'key'` reads it: a string as it is, any other JSON value as its JSON text
+-- (1 -> '1', true -> 'true'), so "1" and 1 are one slot and true and 1 are two
 CREATE UNIQUE INDEX IF NOT EXISTS {prefix}_memory_key_uidx
-  ON {prefix}_memory (workspace_id, scope, COALESCE(user_id, ''), type, json_extract(payload, '$.key'))
+  ON {prefix}_memory (workspace_id, scope, COALESCE(user_id, ''), type,
+      CASE WHEN json_type(payload, '$.key') = 'text' THEN json_extract(payload, '$.key') ELSE payload -> '$.key' END)
   WHERE status = 'active' AND json_extract(payload, '$.key') IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS {prefix}_memory_runs (

@@ -77,14 +77,28 @@ Extras pick your LLM provider and sources; combine them as needed (`".[openai,ml
 ## Quickstart
 
 ```bash
-docker compose up -d                                                        # Postgres + pgvector on port 5433
-export MEMHUB_DATABASE_URL=postgresql://memhub:memhub@localhost:5433/memhub
-cp memhub.example.yaml memhub.yaml                                          # edit sources, types and models
-echo "OPENAI_API_KEY=..." > .env                                            # git-ignored; keys are read from here
-memhub init                                                                 # create the tables
-memhub ingest --source jsonl                                                # extract memories from your traces
-memhub list && memhub queue                                                 # browse, then review what waits for approval
+docker compose up -d                                           # Postgres + pgvector on port 5433
+export PGPASSWORD=memhub OPENAI_API_KEY=...                    # or put them in a git-ignored .env
+memhub init --preset support --project support \
+  --db 'postgresql://memhub:${PGPASSWORD}@localhost:5433/memhub' \
+  --embeddings openai:text-embedding-3-small                   # writes memhub.yaml, checks the model, creates the tables
+echo '{"content": "Compressor C3 trips when the inlet filter is clogged"}' > fact.json
+memhub add --type fact --scope workspace --ws acme -f fact.json
+memhub search "inlet filter" --ws acme                         # no -c: memhub.yaml is found by itself
+memhub doctor                                                  # db, models, embedding dims, tables
 ```
+
+The same `memhub.yaml` configures your code:
+
+```python
+from memhub import Memory
+
+m = Memory()                                                   # memhub.yaml, MEMHUB_* env, or your own connect: function
+me = m.scope(workspace_id="acme", user_id="anna", run_id="run-1")
+me.search("inlet filter")
+```
+
+`memhub.yaml` is only memhub's own behaviour, a few lines. It is looked up in `./memhub.yaml`, `$MEMHUB_CONFIG`, then `~/.config/memhub/memhub.yaml`; `MEMHUB_*` environment variables (`MEMHUB_PRESET`, `MEMHUB_DB`, nested keys with `__`) and `Memory(config=, overrides=)` override it. `memhub config show` prints every setting with where it came from, `memhub config set KEY VALUE` edits it, and `memhub use acme --user anna` sets the workspace and user for the next commands. Presets: `maintenance`, `support`, `assistant`; a `types:` block replaces or adds to a preset's types. To reuse your app's own pool and models, point `connect: "your_app.memory:build"` at a function returning `{"db": ..., "embedder": ..., "llm": ...}`.
 
 Run the tests with `pip install -e ".[dev]"` and `pytest` (needs Docker; the pgvector container is started by the fixtures).
 
@@ -119,7 +133,7 @@ Connect your agent in steps: **A** offline extraction only, **B** your agent cal
 
 | Group | Commands |
 |---|---|
-| Setup | `init`, `reembed` |
+| Setup | `init`, `config show`, `config set`, `doctor`, `use`, `reembed` |
 | Ingest | `ingest`, `add`, `runs` |
 | Browse | `list`, `search`, `history`, `page` |
 | Review | `queue`, `approve`, `reject`, `edit`, `promote` |
@@ -129,7 +143,7 @@ Run `memhub <command> --help` for options.
 
 ## Configuration
 
-Everything lives in `memhub.yaml` (start from [memhub.example.yaml](memhub.example.yaml)).
+Everything lives in `memhub.yaml`: `memhub init` writes a small one, or start from [memhub.example.yaml](memhub.example.yaml). Every key of the full examples stays valid.
 
 - **Your database:** `database_schema`, `sources.<x>.kind: sql`
 - **Your tenants:** `fields.workspace_id`

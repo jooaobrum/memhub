@@ -213,6 +213,6 @@ Proof: `.venv/bin/python -m pytest tests/test_memory_api.py::test_ingest_through
 ## Handoff
 
 - **Settled mid-build:** user: "push to the branch of the issue" - pushed to `1-memhub-as-a-pluggable-memory-package` (created linked to #1 with `gh issue develop`)
-- **Dispatched:** Verifier at `da0aa17` (code at `fdec080`), diff `e93c070..da0aa17` - returned FAIL, 7 findings
-- **Boundary:** C1-C48 closed in the feature commit on `feat/memory-facade`; full suite 598 passed (398 existing + 200 new)
+- **Dispatched:** Verifier at `da0aa17` (code at `fdec080`), diff `e93c070..da0aa17` - returned FAIL, 7 findings, all closed at `2a58e6c`; proofs 59/59 and 3/3 mutations killed at `2a58e6c` (worktree with `PYTHONPATH` on its own `src`: the shared `.venv` installs memhub editable from the main folder)
+- **Boundary:** C1-C48 closed at `fdec080`, C49-C50 at `2a58e6c`; C1-C48 first committed on `feat/memory-facade`; full suite 598 passed (398 existing + 200 new)
 - **Abandoned:** `conn.transaction()` for connections memhub opens itself - it forbids the explicit `conn.rollback()` existing code does inside `store.connect()` (`test_reembed_retypes_the_column_and_clears_old_vectors`); owned connections keep today's commit/rollback

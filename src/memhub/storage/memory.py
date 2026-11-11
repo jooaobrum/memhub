@@ -11,6 +11,7 @@ name in `storage/postgres.py`, `now()` included: one timestamp per transaction.
 from __future__ import annotations
 
 import copy
+import json
 import math
 import threading
 import uuid
@@ -18,7 +19,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
-from memhub.storage.base import METHODS, BoundUnitOfWork, Capability, not_available
+from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not_available, require
 from memhub.storage.rules import (
     MEMORY_COLUMNS,
     NO_TABLES,
@@ -36,9 +37,9 @@ from memhub.storage.rules import (
     newest_observed_at,
 )
 
-SCHEMAS_FIX = "remove database_schema from the config, or use Postgres"
+SCHEMAS_FIX = FIXES[Capability.SCHEMAS]
 
-_named: dict[str, "InMemoryBackend"] = {}
+_named: dict[tuple[str, str], "InMemoryBackend"] = {}  # (name, table prefix) -> ledger
 _named_lock = threading.Lock()
 
 
@@ -52,6 +53,21 @@ def _cosine(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else math.nan
+
+
+def _utc(value: Any) -> Any:
+    """A `timestamptz` as Postgres returns it: aware; a naive datetime is read as UTC."""
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _key_text(payload: dict) -> str | None:
+    """`payload->>'key'`: a string as it is, any other JSON value as its JSON text (1 -> '1', true -> 'true')."""
+    key = payload.get("key")
+    if key is None:
+        return None
+    return key if isinstance(key, str) else json.dumps(key)
 
 
 def _newest_first(rows: list[Row], *keys: str) -> list[Row]:
@@ -111,14 +127,15 @@ class _Tx:
                 continue
             if other["memory_id"] == row["memory_id"]:
                 raise Conflict(f"memory {row['memory_id']} already has an active version")
-            key = row["payload"].get("key")
-            if key is not None and other["payload"].get("key") == key and all(
+            key = _key_text(row["payload"])
+            if key is not None and _key_text(other["payload"]) == key and all(
                 other[c] == row[c] for c in ("workspace_id", "scope", "type")
             ) and (other["user_id"] or "") == (row["user_id"] or ""):
                 raise Conflict(f"an active {row['type']} with key {key!r} exists for this owner")
 
     def _set(self, id: Any, **cols: Any) -> Row:
         row = self._mem()[id]
+        cols = {k: _utc(v) for k, v in cols.items()}
         candidate = {**row, **cols}
         if cols.get("status") == "active" or "payload" in cols:
             self._check_unique(candidate)
@@ -126,7 +143,7 @@ class _Tx:
         return row
 
     def _stale(self, row: Row, at: datetime) -> bool:
-        return row["status"] == "active" and row["valid_until"] is not None and row["valid_until"] < at
+        return row["status"] == "active" and row["valid_until"] is not None and row["valid_until"] < _utc(at)
 
     # --- meta -----------------------------------------------------------------------------------------------
 
@@ -190,8 +207,8 @@ class _Tx:
             verified=verified, content=content, payload=copy.deepcopy(payload), entities=copy.deepcopy(entities),
             embedding=self._vector(embedding), evidence=copy.deepcopy(evidence), seen_count=seen_count, score=score,
             conflicts_with=conflicts_with, created_by=created_by, created_at=self.now,
-            observed_at=observed_at or newest_observed_at(evidence) or self.now, valid_from=valid_from,
-            valid_until=valid_until, durability=durability, assertion=assertion, links=copy.deepcopy(links or []),
+            observed_at=_utc(observed_at or newest_observed_at(evidence) or self.now), valid_from=_utc(valid_from),
+            valid_until=_utc(valid_until), durability=durability, assertion=assertion, links=copy.deepcopy(links or []),
             run_id=run_id, agent_id=agent_id,
         )
         self._check_unique(row)
@@ -309,10 +326,10 @@ class _Tx:
         cols: dict[str, Any] = {
             "evidence": [*row["evidence"], *copy.deepcopy(new_evidence)],
             "seen_count": row["seen_count"] + increment,
-            "observed_at": max(row["observed_at"], newest) if newest is not None else row["observed_at"],
+            "observed_at": max(row["observed_at"], _utc(newest)) if newest is not None else row["observed_at"],
         }
         if valid_until is not UNSET:  # the later of the two, with null (never expires) the latest
-            cols["valid_until"] = None if row["valid_until"] is None or valid_until is None else max(row["valid_until"], valid_until)
+            cols["valid_until"] = None if row["valid_until"] is None or valid_until is None else max(row["valid_until"], _utc(valid_until))
         return self._out(self._set(row["id"], **cols))
 
     def merge_evidence(
@@ -561,7 +578,7 @@ class _Tx:
         row.update(
             id=uuid.uuid4(), run_id=run_id, source=source, thread_id=thread_id, workspace_id=workspace_id,
             user_id=user_id, first_message_id=first_message_id, last_message_id=last_message_id,
-            last_message_at=last_message_at, final_pass=final_pass, signals=copy.deepcopy(signals or []),
+            last_message_at=_utc(last_message_at), final_pass=final_pass, signals=copy.deepcopy(signals or []),
             dropped=copy.deepcopy(dropped or []), status=status, candidates_proposed=candidates_proposed,
             created=created, merged=merged, tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost_usd,
             processed_at=self.now,
@@ -623,42 +640,60 @@ class InMemoryBackend:
         if schema:
             raise not_available(Capability.SCHEMAS, self.name, SCHEMAS_FIX)
         self._tables = _Tables()
-        self._tx_lock = threading.RLock()  # one unit of work at a time: the process lock
+        self._tx_lock = threading.Lock()  # one unit of work at a time: the process lock
+        self._open = threading.local()  # whether this thread has a unit of work open
         self._thread_locks: dict[tuple[str, str], threading.Lock] = {}
         self._thread_locks_guard = threading.Lock()
 
     @classmethod
-    def for_url(cls, url: str, *, schema: str | None = None) -> "InMemoryBackend":
-        """`memory://` -> a new ledger; `memory://<name>` -> the one ledger of that name in this process."""
+    def for_url(cls, url: str, *, prefix: str = "memhub", schema: str | None = None) -> "InMemoryBackend":
+        """`memory://` -> a new ledger; `memory://<name>` -> the one ledger of that name and table prefix in this
+        process (two prefixes are two sets of tables, as on Postgres)."""
         name = url.split("://", 1)[1]
         if not name:
             return cls(schema)
         if schema:
             raise not_available(Capability.SCHEMAS, cls.name, SCHEMAS_FIX)
         with _named_lock:
-            if name not in _named:
-                _named[name] = cls()
-            return _named[name]
+            if (name, prefix) not in _named:
+                _named[(name, prefix)] = cls()
+            return _named[(name, prefix)]
 
     def init(self, *, embedding_model: str, dims: int) -> None:
         """Create the tables (idempotent): the first `init` stores the embedding model and dims, a later one with
         others is refused with `EmbeddingMismatch`, as on Postgres."""
-        with self._tx_lock:
+        with self._own_unit():
             if self._tables.dims is None:
                 self._tables.dims = dims
             self._tables.meta.setdefault("embedding", {"model": embedding_model, "dims": dims})
             _Tx(self._tables).check_embedding_config(model=embedding_model, dims=dims)
 
     @contextmanager
-    def unit_of_work(self) -> Iterator[BoundUnitOfWork]:
+    def _own_unit(self) -> Iterator[None]:
+        """The process lock, refused to a thread that already holds it: a unit of work opened inside another would
+        copy the committed tables and lose its writes when the outer one commits."""
+        if getattr(self._open, "active", False):
+            raise StoreError("a unit of work is already open in this thread: pass its `uow` instead of opening another")
         with self._tx_lock:
+            self._open.active = True
+            try:
+                yield
+            finally:
+                self._open.active = False
+
+    @contextmanager
+    def unit_of_work(self) -> Iterator[BoundUnitOfWork]:
+        with self._own_unit():
             working = copy.deepcopy(self._tables)
             tx = _Tx(working)
-            yield BoundUnitOfWork(tx, None, {name: getattr(tx, name) for names in METHODS.values() for name in names})
+            yield BoundUnitOfWork(
+                tx, None, {name: getattr(tx, name) for names in METHODS.values() for name in names}, self,
+            )
             self._tables = working  # reached only on a clean exit: an exception leaves the old tables
 
     @contextmanager
     def thread_lock(self, source: str, thread_id: str) -> Iterator[bool]:
+        require(self, Capability.PARALLEL_INGEST, FIXES[Capability.PARALLEL_INGEST])
         with self._thread_locks_guard:
             lock = self._thread_locks.setdefault((source, thread_id), threading.Lock())
         got = lock.acquire(blocking=False)

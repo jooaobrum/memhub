@@ -27,8 +27,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from memhub.connection import SqliteSource
-from memhub.storage.base import METHODS, BoundUnitOfWork, Capability, not_available
-from memhub.storage.memory import SCHEMAS_FIX, _contains, _cosine
+from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not_available
+from memhub.storage.memory import _contains, _cosine
 from memhub.storage.rules import (
     MEMORY_COLUMNS,
     NO_TABLES,
@@ -48,7 +48,7 @@ from memhub.storage.rules import (
 
 VEC_ENV = "MEMHUB_SQLITE_VEC"
 VEC_FIX = "install memhub[sqlite] (sqlite-vec) on a Python whose sqlite3 can load extensions, or unset MEMHUB_SQLITE_VEC"
-LOCK_FIX = "run one ingest worker or use Postgres"
+LOCK_FIX = FIXES[Capability.PARALLEL_INGEST]
 
 _SCHEMA = Path(__file__).with_name("sqlite_schema.sql")
 _MEM_JSON = ("payload", "entities", "evidence", "links")
@@ -748,7 +748,7 @@ class SqliteBackend:
 
     def __init__(self, db: Any, prefix: str = "memhub", schema: str | None = None) -> None:
         if schema:
-            raise not_available(Capability.SCHEMAS, self.name, SCHEMAS_FIX)
+            raise not_available(Capability.SCHEMAS, self.name, FIXES[Capability.SCHEMAS])
         self.source = db if isinstance(db, SqliteSource) else SqliteSource(db)
         self.prefix = prefix
         self.vector_path = choose_vector_path()  # "sqlite-vec" | "python"; decided once, on a scratch connection
@@ -777,9 +777,9 @@ class SqliteBackend:
         later one with others is refused with `EmbeddingMismatch`, as on Postgres."""
         with self._transaction() as conn:
             try:
-                conn.execute("SELECT json_extract('{\"a\": 1}', '$.a')")
+                conn.execute("SELECT '{\"a\": 1}' -> '$.a'")
             except sqlite3.OperationalError as exc:
-                raise StoreError(f"this SQLite ({sqlite3.sqlite_version}) has no JSON functions; memhub needs them") from exc
+                raise StoreError(f"this SQLite ({sqlite3.sqlite_version}) lacks the JSON functions memhub needs (3.38 or newer)") from exc
             ddl = "\n".join(line for line in _SCHEMA.read_text().splitlines() if not line.startswith("--"))
             for statement in ddl.replace("{prefix}", self.prefix).split(";"):
                 if statement.strip():

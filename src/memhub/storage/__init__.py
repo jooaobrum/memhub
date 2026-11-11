@@ -25,7 +25,7 @@ def open_backend(db: Any, prefix: str = "memhub", schema: str | None = None) -> 
     if isinstance(db, str) and db.startswith(MEMORY_SCHEME):
         from memhub.storage.memory import InMemoryBackend
 
-        return InMemoryBackend.for_url(db, schema=schema)
+        return InMemoryBackend.for_url(db, prefix=prefix, schema=schema)
     from memhub.connection import ConnectionSource, _is_pool, is_sqlite
 
     if is_sqlite(db):

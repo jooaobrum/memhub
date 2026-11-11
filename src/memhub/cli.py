@@ -14,8 +14,10 @@ from typing import Any, Optional
 import typer
 from dotenv import find_dotenv, load_dotenv
 
-from memhub.config import Settings, build_chat_model, build_embeddings, load_config
+from memhub import cli_setup
+from memhub.config import Config, ConfigError, EmbeddingConfig, build_chat_model, build_embeddings
 from memhub.service import MemoryService, ServiceError
+from memhub.settings import SEARCH_PLACES, Parts, Resolved, embedding_model_id, read_context, resolve
 from memhub.sources import build_source
 from memhub.storage.postgres import MemoryStore
 from memhub.storage.rules import Actor, StoreError
@@ -30,24 +32,46 @@ def _actor() -> Actor:
     return Actor(id=f"cli:{getpass.getuser()}", roles=roles)
 
 
-def _settings(config: Path) -> Settings:
-    if not config.exists():
-        typer.secho(f"config file not found: {config}", fg=typer.colors.RED, err=True)
+def _resolve(config: Optional[Path]) -> Resolved:
+    """The config the command runs on: `-c FILE`, else the yaml found in `.`, `$MEMHUB_CONFIG`, `~/.config/memhub`."""
+    try:
+        resolved = resolve(config)
+    except ConfigError as exc:
+        _fail(exc)
+    if config is None and resolved.path is None:
+        typer.secho(f"no memhub.yaml found (looked in {SEARCH_PLACES}): run `memhub init`", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
-    settings = load_config(config)
-    # The CLI builds its own connection and models, so it needs what `Memory(db=, llm=, embedder=)` does not.
-    for key in ("database_url", "embeddings"):
-        if getattr(settings, key) is None:
-            typer.secho(f"{config} is missing `{key}`: the CLI needs it to reach the ledger", fg=typer.colors.RED, err=True)
-            raise typer.Exit(1)
-    return settings
+    return resolved
 
 
-def _service(config: Path, *, check_embedding: bool = True) -> MemoryService:
+def _parts(resolved: Resolved) -> Parts:
+    # the builders are looked up when called, so a test (or a project) can replace `build_embeddings` / `build_chat_model` here
+    return Parts(resolved, build_chat=lambda cfg: build_chat_model(cfg), build_embed=lambda cfg: build_embeddings(cfg))
+
+
+def _require_db_and_embedder(resolved: Resolved) -> None:
+    """The CLI builds its own connection and models, so it needs what `Memory(db=, llm=, embedder=)` does not."""
+    settings, where = resolved.config, resolved.path or "the configuration"
+    if not (settings.connect or settings.database_url):
+        _fail_missing(where, "database_url", "set `db`, `database_url` or `connect`")
+    if not (settings.connect or settings.embeddings or (settings.models and settings.models.embeddings)):
+        _fail_missing(where, "embeddings", "set `models.embeddings`, `embeddings` or `connect`")
+
+
+def _service(config: Optional[Path], *, check_embedding: bool = True) -> MemoryService:
     """Build the service. Every command except `init`/`reembed` first checks that the
-    configured embedding model/dims still match what `init` saved."""
-    settings = _settings(config)
-    store = MemoryStore(settings.database_url, settings.project_prefix, settings.database_schema)
+    embedding model is the one the ledger was built with."""
+    resolved = _resolve(config)
+    settings = resolved.config
+    parts = _parts(resolved)
+    _require_db_and_embedder(resolved)
+    try:
+        embeddings = parts.embedder
+        store = MemoryStore(parts.db, settings.project_prefix, settings.database_schema)
+        if settings.embeddings is None:  # `models:` / `connect:`: the dims are what the model answers
+            settings.embeddings = EmbeddingConfig(model=embedding_model_id(embeddings, settings), dims=len(embeddings.embed_query("memhub")))
+    except ConfigError as exc:
+        _fail(exc)
     if check_embedding:
         try:
             with store.unit_of_work() as uow:
@@ -55,9 +79,25 @@ def _service(config: Path, *, check_embedding: bool = True) -> MemoryService:
         except StoreError as exc:
             _fail(exc)
     registry = settings.build_registry()
-    embeddings = build_embeddings(settings.embeddings)
-    return MemoryService(store=store, settings=settings, registry=registry, embeddings=embeddings)
+    service = MemoryService(store=store, settings=settings, registry=registry, embeddings=embeddings)
+    service.parts = parts  # the models ingest needs, built only if it runs
+    service.resolved = resolved
+    return service
 
+def _fail_missing(where: Any, key: str, hint: str) -> None:
+    typer.secho(f"{where} is missing `{key}`: the CLI needs it to reach the ledger ({hint})", fg=typer.colors.RED, err=True)
+    raise typer.Exit(1)
+
+def _ids(workspace: Optional[str], user: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Workspace and user of a command: the flag, else `MEMHUB_WORKSPACE` / `MEMHUB_USER`, else `memhub use`."""
+    try:
+        context = read_context()
+    except ConfigError as exc:
+        _fail(exc)
+    return (
+        workspace or os.environ.get("MEMHUB_WORKSPACE") or context["workspace"],
+        user or os.environ.get("MEMHUB_USER") or context["user"],
+    )
 
 def _print(obj: Any) -> None:
     typer.echo(json.dumps(obj, default=str, indent=2))
@@ -68,32 +108,30 @@ def _fail(exc: Exception) -> None:
     raise typer.Exit(1)
 
 
-ConfigOpt = typer.Option(Path("memhub.yaml"), "--config", "-c", help="Path to memhub.yaml")
+ConfigOpt = typer.Option(None, "--config", "-c", help="Path to memhub.yaml (default: ./memhub.yaml, $MEMHUB_CONFIG, ~/.config/memhub/memhub.yaml)")
 
 
 @app.command()
 def init(
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
+    project: Optional[str] = typer.Option(None, "--project", help="Table prefix (a project per prefix can share one database)"),
+    db: Optional[str] = typer.Option(None, "--db", help="Postgres URL (a `${VAR}` for the password keeps it out of the file)"),
+    chat: Optional[str] = typer.Option(None, "--chat", help="Chat model as provider:model (needed by `ingest`)"),
+    embeddings: Optional[str] = typer.Option(None, "--embeddings", help="Embedding model as provider:model"),
+    preset: Optional[str] = typer.Option(None, "--preset", help="maintenance | support | assistant"),
+    connect: Optional[str] = typer.Option(None, "--connect", help="module:function returning {db, embedder, llm?, judge?}: your app's own objects"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing memhub.yaml"),
     check_model: bool = typer.Option(True, "--check-model/--no-check-model", help="Embed one text to check the model answers with `embeddings.dims`"),
 ) -> None:
-    """Create the pgvector extension, both ledger tables and their indexes."""
-    settings = _settings(config)
-    if check_model:  # a wrong `dims` (or key, or endpoint) shows here, not on the first insert
-        try:
-            got = len(build_embeddings(settings.embeddings).embed_query("memhub"))
-        except Exception as exc:  # noqa: BLE001 - any provider error is a configuration problem here
-            typer.secho(f"embedding model {settings.embeddings.model!r} is not reachable: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(1)
-        if got != settings.embeddings.dims:
-            typer.secho(f"the model returns {got} dimensions but embeddings.dims is {settings.embeddings.dims}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(1)
-    store = MemoryStore(settings.database_url, settings.project_prefix, settings.database_schema)
-    store.init(embedding_model=settings.embeddings.model, dims=settings.embeddings.dims)
-    typer.echo(f"initialized {settings.project_prefix}_memory / {settings.project_prefix}_memory_runs")
-
+    """Write memhub.yaml (from flags, or asking), check the embedding model and create the tables. With `-c FILE`, or
+    with no flags and a yaml found, only create the tables from that file."""
+    cli_setup.init_command(
+        config=config, project=project, db=db, chat=chat, embeddings=embeddings, preset=preset, connect=connect,
+        force=force, check_model=check_model,
+    )
 
 @app.command()
-def reembed(config: Path = ConfigOpt, batch_size: int = 100) -> None:
+def reembed(config: Optional[Path] = ConfigOpt, batch_size: int = 100) -> None:
     """Recompute every active version's embedding after an embedding-model change."""
     service = _service(config, check_embedding=False)
     try:
@@ -104,16 +142,17 @@ def reembed(config: Path = ConfigOpt, batch_size: int = 100) -> None:
         typer.echo(f"reembedded {count} active memories")
 
 
-def _build_source(settings: Settings, name: str, config: Path):
+def _build_source(settings: Config, name: str, config: Optional[Path]):
+    """`config` is the yaml that was read: a source's relative paths are relative to its folder."""
     if name not in settings.sources:
         typer.secho(f"unknown source {name!r}; configured: {list(settings.sources)}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     try:
-        return build_source(settings.sources[name], workspace_id=settings.workspace_default, base_dir=config.resolve().parent)
+        return build_source(settings.sources[name], workspace_id=settings.workspace_default,
+                            base_dir=config.resolve().parent if config else Path.cwd())
     except ValueError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
-
 
 @app.command()
 def ingest(
@@ -121,24 +160,28 @@ def ingest(
     reprocess: bool = False,
     dry_run: bool = False,
     thread: Optional[str] = typer.Option(None, "--thread"),
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     """Extract memories from a source's traces (idempotent; progress is saved per thread)."""
     from memhub.pipeline.ingest import ingest_source
 
     service = _service(config)
     settings = service.settings
-    if settings.llm is None:
-        typer.secho(f"{config} is missing `llm`: ingest needs an extractor and a judge", fg=typer.colors.RED, err=True)
+    try:
+        extractor, judge = service.parts.llm, service.parts.judge
+    except ConfigError as exc:
+        _fail(exc)
+    if extractor is None:
+        typer.secho(f"{service.resolved.path or 'the configuration'} is missing `llm`: ingest needs an extractor and a judge (set `models.chat`, `llm` or `connect`)", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     summary = ingest_source(
         store=service.store,
         settings=settings,
         registry=service.registry,
-        source=_build_source(settings, source, config),
+        source=_build_source(settings, source, service.resolved.path),
         source_name=source,
-        extractor=build_chat_model(settings.llm.extractor),
-        judge=build_chat_model(settings.llm.judge),
+        extractor=extractor,
+        judge=judge,
         embeddings=service.embeddings,
         reprocess=reprocess,
         dry_run=dry_run,
@@ -155,11 +198,12 @@ def add(
     workspace: Optional[str] = typer.Option(None, "--ws"),
     user: Optional[str] = typer.Option(None, "--user"),
     reference: Optional[str] = typer.Option(None, "--reference"),
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     """Add a memory by hand from a JSON file validated against the type's schema. An optional
     `observed_at` (ISO timestamp) in the file dates the memory; it defaults to now."""
     service = _service(config)
+    workspace, user = _ids(workspace, user)
     fields = json.loads(file.read_text())
     observed_at = datetime.fromisoformat(fields.pop("observed_at")) if "observed_at" in fields else None
     try:
@@ -181,10 +225,11 @@ def list_(
     workspace: Optional[str] = typer.Option(None, "--ws"),
     stale: bool = typer.Option(False, "--stale", help="Only memories whose valid_until has passed"),
     area: Optional[str] = typer.Option(None, "--area", help="Only memories linked to this area (key or title)"),
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     """List every memory, each with a `stale` flag (valid_until passed)."""
     service = _service(config)
+    workspace, user = _ids(workspace, user)
     rows = service.list(_actor(), status=status, type=type, user_id=user, workspace_id=workspace, stale=stale, area=area)
     _print([{**r, "key": r["payload"].get("key")} for r in rows])  # `key` names the slot of a keyed type
 
@@ -197,9 +242,10 @@ def search(
     type: Optional[str] = None,
     k: int = 10,
     include_stale: bool = typer.Option(False, "--include-stale", help="Also return expired memories"),
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     service = _service(config)
+    workspace, user = _ids(workspace, user)
     try:
         expansion = service.expansion(_actor(), query, workspace_id=workspace, include_stale=include_stale)
         rows = service.search(
@@ -214,9 +260,10 @@ def search(
 
 
 @app.command()
-def queue(workspace: Optional[str] = typer.Option(None, "--ws"), config: Path = ConfigOpt) -> None:
+def queue(workspace: Optional[str] = typer.Option(None, "--ws"), config: Optional[Path] = ConfigOpt) -> None:
     """Workspace candidates awaiting review, conflicts first."""
     service = _service(config)
+    workspace, _ = _ids(workspace, None)
     _print(service.queue(_actor(), workspace_id=workspace))
 
 
@@ -225,7 +272,7 @@ def approve(
     id: str,
     resolve: Optional[str] = typer.Option(None, help="keep_old | replace | keep_both, for a conflicting candidate"),
     note: Optional[str] = None,
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     service = _service(config)
     try:
@@ -237,7 +284,7 @@ def approve(
 
 
 @app.command()
-def reject(id: str, note: Optional[str] = None, config: Path = ConfigOpt) -> None:
+def reject(id: str, note: Optional[str] = None, config: Optional[Path] = ConfigOpt) -> None:
     service = _service(config)
     try:
         row = service.reject(_actor(), uuid.UUID(id), note=note)
@@ -248,7 +295,7 @@ def reject(id: str, note: Optional[str] = None, config: Path = ConfigOpt) -> Non
 
 
 @app.command()
-def edit(id: str, file: Path = typer.Option(..., "--file", "-f"), config: Path = ConfigOpt) -> None:
+def edit(id: str, file: Path = typer.Option(..., "--file", "-f"), config: Optional[Path] = ConfigOpt) -> None:
     """Insert version N+1 of memory `id` with the fields from a JSON file (only the fields given are changed)."""
     service = _service(config)
     fields = json.loads(file.read_text())
@@ -261,7 +308,7 @@ def edit(id: str, file: Path = typer.Option(..., "--file", "-f"), config: Path =
 
 
 @app.command()
-def history(id: str, config: Path = ConfigOpt) -> None:
+def history(id: str, config: Optional[Path] = ConfigOpt) -> None:
     """Every version of memory `id`, oldest first: value, observed_at, evidence and who created it."""
     service = _service(config)
     try:
@@ -280,7 +327,7 @@ def history(id: str, config: Path = ConfigOpt) -> None:
 
 
 @app.command()
-def archive(id: str, config: Path = ConfigOpt) -> None:
+def archive(id: str, config: Optional[Path] = ConfigOpt) -> None:
     service = _service(config)
     try:
         row = service.archive(_actor(), uuid.UUID(id))
@@ -294,7 +341,7 @@ def archive(id: str, config: Path = ConfigOpt) -> None:
 def delete(
     id: Optional[str] = typer.Argument(None),
     user: Optional[str] = typer.Option(None, "--user", help="Permanently erase all of this user's data"),
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     service = _service(config)
     try:
@@ -312,7 +359,7 @@ def delete(
 
 
 @app.command()
-def promote(id: str, config: Path = ConfigOpt) -> None:
+def promote(id: str, config: Optional[Path] = ConfigOpt) -> None:
     """Copy a user-scope memory into the workspace review queue as a new candidate."""
     service = _service(config)
     try:
@@ -332,17 +379,18 @@ def areas(
     ctx: typer.Context,
     user: Optional[str] = typer.Option(None, "--user"),
     workspace: Optional[str] = typer.Option(None, "--ws"),
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     """List the areas (key, title, `proposed` flag, count of active memories) of a user, or of the workspace."""
     if ctx.invoked_subcommand is not None:
         return
     service = _service(config)
+    workspace, user = _ids(workspace, user)
     _print(service.areas(_actor(), user_id=user, workspace_id=workspace))
 
 
 @areas_app.command("merge")
-def areas_merge(source: str, target: str, config: Path = ConfigOpt) -> None:
+def areas_merge(source: str, target: str, config: Optional[Path] = ConfigOpt) -> None:
     """Move every memory of area `source` (a memory_id) to `target`, as new versions, and archive `source`."""
     service = _service(config)
     try:
@@ -358,10 +406,11 @@ def page(
     user: Optional[str] = typer.Option(None, "--user"),
     area: Optional[str] = typer.Option(None, "--area", help="Area key or title; omit for every page of the user"),
     workspace: Optional[str] = typer.Option(None, "--ws"),
-    config: Path = ConfigOpt,
+    config: Optional[Path] = ConfigOpt,
 ) -> None:
     """Print an area page: title, summary (derived text, marked auto-summary), dated details, last updated."""
     service = _service(config)
+    workspace, user = _ids(workspace, user)
     try:
         pages = [service.page(user, area, workspace_id=workspace)] if area else service.pages(user, workspace_id=workspace)
     except (ServiceError, StoreError) as exc:
@@ -378,10 +427,12 @@ def _render_page(pg: dict) -> str:
 
 
 @app.command()
-def runs(last: int = 10, config: Path = ConfigOpt) -> None:
+def runs(last: int = 10, config: Optional[Path] = ConfigOpt) -> None:
     service = _service(config)
     _print(service.runs(_actor(), last=last))
 
+
+cli_setup.register(app)
 
 if __name__ == "__main__":
     app()

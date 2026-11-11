@@ -122,6 +122,17 @@ def test_rows_have_the_reference_keys_and_types(backend):
     assert (row["version"], row["seen_count"], row["assertion"], row["links"]) == (1, 1, "stated", [])
 
 
+def test_naive_datetimes_are_stored_as_utc(backend):
+    naive = datetime(2026, 1, 1, 12)
+    with backend.unit_of_work() as uow:
+        row = add(uow, "naive", valid_until=naive, valid_from=naive, observed_at=naive)
+        run = run_row(uow, last_message_at=naive)
+    aware = naive.replace(tzinfo=timezone.utc)
+    for col in ("valid_until", "valid_from", "observed_at"):
+        assert row[col] == aware and row[col].utcoffset() == timedelta(0), col
+    assert run["last_message_at"] == aware and run["last_message_at"].utcoffset() == timedelta(0)
+
+
 def test_returned_rows_are_copies(backend):
     with backend.unit_of_work() as uow:
         row = add(uow, "original", evidence=[{"message_id": "m1"}])
@@ -152,8 +163,28 @@ def test_one_active_row_per_memory_and_per_keyed_slot(backend, unique_error):
         with backend.unit_of_work() as uow:
             add(uow, "coffee", type="preference", payload={"content": "coffee", "key": "drink"})
     with backend.unit_of_work() as uow:
+        add(uow, "tea in ws2", workspace_id="ws2", **keyed)  # another workspace: fine
+        add(uow, "the team's tea", scope="workspace", user_id=None, **keyed)  # the workspace's own slot: fine
+        add(uow, "fact with the key", type="fact", payload={"content": "x", "key": "drink"})  # another type: fine
+    with pytest.raises(unique_error):
+        with backend.unit_of_work() as uow:
+            add(uow, "the team's coffee", scope="workspace", user_id=None, **keyed)
+    with backend.unit_of_work() as uow:
         assert [r["version"] for r in uow.memories.history(first["memory_id"])] == [1]
         assert uow.memories.count_active(type="preference", scope="user", workspace_id="ws", user_id="alice") == 1
+
+
+def test_keyed_slot_compares_keys_as_json_text(backend, unique_error):
+    """`payload->>'key'`: the string "1" and the number 1 are one slot; true and 1 are two."""
+    with backend.unit_of_work() as uow:
+        add(uow, "string one", type="preference", payload={"content": "a", "key": "1"})
+    with pytest.raises(unique_error):
+        with backend.unit_of_work() as uow:
+            add(uow, "number one", type="preference", payload={"content": "b", "key": 1})
+    with backend.unit_of_work() as uow:
+        add(uow, "true", type="profile", payload={"content": "c", "key": True})
+        add(uow, "number one", type="profile", payload={"content": "d", "key": 1})
+        assert uow.memories.count_active(type="profile", scope="user", workspace_id="ws", user_id="alice") == 2
 
 
 # --- capabilities -----------------------------------------------------------------------------------------------
@@ -189,6 +220,33 @@ def test_parallel_ingest_capability(backend):
             assert other is True
     with backend.thread_lock("s", "t1") as again:
         assert again is True
+
+
+def test_vector_search_capability(backend):
+    with backend.unit_of_work() as uow:
+        add(uow, "near", vec(0.9))
+        if Capability.VECTOR_SEARCH not in backend.capabilities:
+            for name in ("search", "top_similar", "nearest_area"):
+                with pytest.raises(NotImplementedError, match=rf"^vector_search is not available on {backend.name}: "):
+                    getattr(uow.vectors, name)
+            return
+        assert contents(uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id="alice")) == ["near"]
+
+
+def test_json_lookup_capability(backend):
+    area = uuid.uuid4()
+    with backend.unit_of_work() as uow:
+        row = add(uow, "linked", links=[area_link(area)])
+        if Capability.JSON_LOOKUP not in backend.capabilities:
+            for name in ("linked_rows", "move_area_links", "add_link"):
+                with pytest.raises(NotImplementedError, match=rf"^json_lookup is not available on {backend.name}: "):
+                    getattr(uow.memories, name)
+            return
+        assert contents(uow.memories.linked_rows(area)) == ["linked"] and row["links"] == [area_link(area)]
+
+
+def test_transactions_capability(backend):
+    assert Capability.TRANSACTIONS in backend.capabilities  # every memhub call relies on it: no backend may lack it
 
 
 # --- vectors ----------------------------------------------------------------------------------------------------
@@ -233,6 +291,16 @@ def test_search_filters_stale_area_type_and_k(backend):
         assert search(type="area") == ["an area"]
         assert search(type="episode") == ["an episode"]
         assert search(k=1) == ["fresh"]
+
+
+def test_search_filters_stale_boundary_is_strictly_before_now(backend):
+    with backend.unit_of_work() as uow:
+        add(uow, "ends now", vec(0.90), valid_until=NOW)
+        add(uow, "ended a second ago", vec(0.95), valid_until=NOW - timedelta(seconds=1))
+    with backend.unit_of_work() as uow:
+        assert contents(uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id="alice", now=NOW)) == ["ends now"]
+        stale = {r["content"]: r["stale"] for r in uow.memories.list_memories(now=NOW)}
+        assert stale == {"ends now": False, "ended a second ago": True}
 
 
 def test_search_boosts_area_text_and_entity_capped_at_one(backend):
@@ -518,21 +586,23 @@ def _ingest(backend, settings, registry, tmp_path, lines, answers, embeddings=No
     )
 
 
-def _line(thread: str, mid: str, q: str) -> dict:
-    return {"chat_id": thread, "user_id": "u1", "message_id": mid, "timestamp": (NOW - timedelta(hours=5)).isoformat(),
+def _line(thread: str, mid: str, q: str, hours: int = 5) -> dict:
+    return {"chat_id": thread, "user_id": "u1", "message_id": mid, "timestamp": (NOW - timedelta(hours=hours)).isoformat(),
             "q": q, "a": "Noted"}
 
 
-def _cand(content: str, quote: str, mid: str, assertion: str = "stated") -> Any:
+def _cand(content: str, quote: str, mid: str, assertion: str = "stated", type: str = "fact", scope: str = "user",
+          **fields: Any) -> Any:
     from memhub.pipeline.extract import Candidate, Evidence
 
-    return Candidate(type="fact", scope="user", fields={"content": content}, utility=5, applies_generally=True,
+    return Candidate(type=type, scope=scope, fields={"content": content, **fields}, utility=5, applies_generally=True,
                      assertion=assertion, evidence=[Evidence(message_id=mid, quote=quote, claim_source="user")])
 
 
 def _ledger(backend) -> tuple[list[tuple], list[tuple]]:
     with backend.unit_of_work() as uow:
-        mems = sorted((r["type"], r["scope"], r["status"], r["content"]) for r in uow.memories.list_memories())
+        mems = sorted((r["type"], r["scope"], r["status"], r["content"], r["version"], r["seen_count"],
+                       r["conflicts_with"] is not None) for r in uow.memories.list_memories())
         [summary] = uow.runs.list_run_summaries(last=1) or [None]
         runs = sorted(
             (r["thread_id"], r["candidates_proposed"], r["created"], sorted(d["reason"] for d in r["dropped"]))
@@ -542,14 +612,34 @@ def _ledger(backend) -> tuple[list[tuple], list[tuple]]:
 
 
 def test_ingest_writes_the_expected_rows(backend, settings, registry, tmp_path):
-    lines = [_line("c1", "m1", "I live in Lyon"), _line("c2", "m2", "My dog is called Rex")]
-    answers = [[_cand("User lives in Lyon", "I live in Lyon", "m1")],
-               [_cand("User has a cat", "I have a cat", "m2")]]  # the quote is not in the message
+    lines = [
+        _line("c1", "m1", "I live in Lyon"),
+        _line("c2", "m2", "My dog is called Rex"),
+        _line("c3", "m3", "As I said, I live in Lyon"),
+        _line("c4", "m4", "Answer me in English please", hours=6),
+        _line("c5", "m5", "From now on answer me in Portuguese", hours=4),
+        _line("c6", "m6", "Our press line runs at night"),
+    ]
+    answers = [
+        [_cand("User lives in Lyon", "I live in Lyon", "m1")],
+        [_cand("User has a cat", "I have a cat", "m2")],  # the quote is not in the message: dropped
+        [_cand("User lives in Lyon", "I live in Lyon", "m3")],  # the same fact from another thread: merged
+        [_cand("Prefers answers in English", "Answer me in English", "m4", type="preference", key="lang")],
+        [_cand("Prefers answers in Portuguese", "answer me in Portuguese", "m5", type="preference", key="lang")],
+        [_cand("The press line runs at night", "Our press line runs at night", "m6", scope="workspace")],
+    ]
     summary = _ingest(backend, settings, registry, tmp_path, lines, answers)
-    assert (summary.segments_processed, summary.created, summary.failed_segments) == (2, 1, 0)
+    assert (summary.segments_processed, summary.created, summary.merged, summary.conflicts_opened,
+            summary.failed_segments) == (6, 4, 1, 1, 0)
     mems, runs = _ledger(backend)
-    assert mems == [("fact", "user", "active", "User lives in Lyon")]
-    assert runs == [("c1", 1, 1, []), ("c2", 1, 0, ["ungrounded"])]
+    assert mems == [
+        ("fact", "user", "active", "User lives in Lyon", 1, 2, False),  # seen in c1 and c3
+        ("fact", "workspace", "candidate", "The press line runs at night", 1, 1, False),  # waits for review
+        ("preference", "user", "active", "Prefers answers in English", 1, 1, False),
+        ("preference", "user", "candidate", "Prefers answers in Portuguese", 1, 1, True),  # the slot's other value
+    ]
+    assert runs == [("c1", 1, 1, []), ("c2", 1, 0, ["ungrounded"]), ("c3", 1, 0, []), ("c4", 1, 1, []),
+                    ("c5", 1, 1, []), ("c6", 1, 1, [])]
 
 
 def test_failed_segment_leaves_nothing_and_is_retried(backend, settings, registry, tmp_path):
@@ -562,7 +652,7 @@ def test_failed_segment_leaves_nothing_and_is_retried(backend, settings, registr
         assert uow.runs.get_watermark(source="jsonl", thread_id="c1") is None
     again = _ingest(backend, settings, registry, tmp_path, lines, answer)
     assert (again.segments_processed, again.created, again.failed_segments) == (1, 1, 0)
-    assert _ledger(backend)[0] == [("fact", "user", "active", "User lives in Lyon")]
+    assert _ledger(backend)[0] == [("fact", "user", "active", "User lives in Lyon", 1, 1, False)]
 
 
 def test_reembed_to_new_dims(backend, settings, registry):

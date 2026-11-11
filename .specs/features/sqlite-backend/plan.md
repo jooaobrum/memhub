@@ -170,7 +170,7 @@ A missing capability names itself and the fix (PRD D8).
 | Vector storage with sqlite-vec | the scalar `vec_distance_cosine` over the BLOB column, no `vec0` table (door 4) | user delegated: "Any question you need from me, I'll let you decide the best decision"; one copy of each embedding, nothing to keep in sync | y |
 | A callable `db` | `open_backend` calls it once to see what it returns (a `sqlite3.Connection` or a psycopg one) and closes that probe connection; no SQL runs on it | PRD: "callable returning a connection - detected from the result" | n |
 | A borrowed `sqlite3.Connection` already inside the app's transaction | memhub's unit of work is a `SAVEPOINT` inside it, released or rolled back by memhub, never the app's transaction (AD-004) | same rule as a borrowed psycopg connection | n |
-| Minimum SQLite | 3.35 (`RETURNING`) and JSON1 built in; checked at `init()` | stdlib builds of Python 3.11+ meet it; clear error otherwise | n |
+| Minimum SQLite | 3.38 (the `->` JSON operator the keyed-slot index uses) and JSON1 built in; checked at `init()` | stdlib builds of Python 3.11+ meet it; clear error otherwise | n |
 
 **Open questions:** none - all resolved or logged above.
 
