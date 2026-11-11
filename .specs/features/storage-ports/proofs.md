@@ -1,8 +1,8 @@
 # storage-ports proofs
 
-**HEAD**: 473e944
+**HEAD**: 0ad1f48
 **Tree**: clean
-**Result**: 47 pass, 0 fail; mutations 0 killed, 1 not
+**Result**: 47 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -58,4 +58,6 @@
 
 | Mutation | Location | Killed |
 | --- | --- | --- |
-| spec refused | `  mutation 1: row["valid_until"] is not None and row[… occurs 0 times in src/m` | no |
+| C24: in-memory stale boundary valid_until < now -> <= (Postgres keeps `<`) | `src/memhub/storage/memory.py:146` | yes |
+| C21: keyed-slot uniqueness ignores workspace_id | `src/memhub/storage/memory.py:132` | yes |
+| C3: unit of work writes the live tables (no snapshot, no rollback) | `src/memhub/storage/memory.py:687` | yes |
