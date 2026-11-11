@@ -1,8 +1,8 @@
 # memory-facade proofs
 
-**HEAD**: fdec080
+**HEAD**: 2a58e6c
 **Tree**: clean
-**Result**: 56 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 59 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -52,7 +52,7 @@
 | C39 | `.venv/bin/python -m pytest tests/test_memory_api.py::test_no_embedding_in_any_return` | 1 | 1 | pass |
 | C40 | `.venv/bin/python -m pytest tests/test_memory_api.py::test_invalid_calls_raise` | 1 | 1 | pass |
 | C41 | `.venv/bin/python -m pytest tests/test_memory_api.py::test_add_result_dumps_to_json` | 1 | 1 | pass |
-| C42 | `.venv/bin/python -m pytest tests` | 598 | 598 | pass |
+| C42 | `.venv/bin/python -m pytest tests` | 601 | 601 | pass |
 | C43 | `.venv/bin/python -m pytest tests/test_connection_source.py::test_url_opens_and_closes_per_transaction` | 1 | 1 | pass |
 | C44 | `.venv/bin/python -m pytest tests/test_cli.py::test_cli_without_database_url_names_key` | 3 | 3 | pass |
 | C45 | `.venv/bin/python -m pytest tests/test_packaging.py::test_public_exports` | 1 | 1 | pass |
@@ -61,4 +61,15 @@
 | C47 | `.venv/bin/python -m pytest tests/test_packaging.py::test_core_imports_no_azure` | 1 | 1 | pass |
 | C48 | `.venv/bin/python -m pytest tests/e2e/test_pr1_memory.py::test_pr1_demo` | 1 | 1 | pass |
 | C48 | `.venv/bin/python -m pytest tests/e2e/test_pr1_memory.py::test_call_without_user_id_fails` | 1 | 1 | pass |
+| C49 | `.venv/bin/python -m pytest tests/test_connection_source.py::test_rolled_back_search_path_is_set_again` | 1 | 1 | pass |
+| C49 | `.venv/bin/python -m pytest tests/test_connection_source.py::test_app_rollback_does_not_lose_the_schema` | 1 | 1 | pass |
+| C50 | `.venv/bin/python -m pytest tests/test_memory_api.py::test_ingest_through_pool_of_one` | 1 | 1 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| approve(memory_id) picks the oldest candidate instead of the newest (C33) | `src/memhub/memory.py:292` | yes |
+| search(types=[...]) returns more than top_k rows (C27) | `src/memhub/memory.py:337` | yes |
+| a rolled-back SET search_path is still remembered as done (C14) | `src/memhub/connection.py:82` | yes |
