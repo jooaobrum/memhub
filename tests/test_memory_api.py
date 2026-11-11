@@ -322,13 +322,6 @@ def test_add_text_is_fact(mem):
     assert (row["type"], row["content"]) == ("fact", "just a sentence")
 
 
-def test_infer_true_not_implemented(mem):
-    calls = (mem.embedder.calls, mem.llm.calls)
-    with pytest.raises(NotImplementedError, match="push"):
-        mem.add([{"role": "user", "content": "hi"}], **IDS, infer=True)
-    assert (mem.embedder.calls, mem.llm.calls) == calls
-
-
 def test_search_own_and_workspace_rows_only(mem):
     for text in ("boiler alpha note", "boiler beta note", "boiler gamma note"):
         mem.add(text, **IDS)

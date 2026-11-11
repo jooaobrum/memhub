@@ -13,7 +13,7 @@ Plan: `.specs/features/sqlite-backend/plan.md`
 **C1** - `open_backend` gives a `SqliteBackend` for a `sqlite3.Connection`, `sqlite:///m.db`, `sqlite:////abs/m.db`, `sqlite:///:memory:` and a callable returning a `sqlite3.Connection`, and creates no table before `init()` (AC 1)
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_db_kinds_build_a_sqlite_backend_and_run_no_sql`
 
-**C2** - `sqlite:///m.db` is the relative file `m.db`, `sqlite:////tmp/x/m.db` the absolute one; `sqlite://`, `sqlite:m.db` and `sqlite:///` raise `TypeError` naming `sqlite:///path` (AC 1)
+**C2** - `sqlite:///m.db` is the relative file `m.db`, `sqlite:////tmp/x/m.db` the absolute one; `sqlite://`, `sqlite:m.db`, `sqlite:///`, `sqlite:////` and `sqlite:///  ` raise `TypeError` naming `sqlite:///path` (AC 1)
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_sqlite_url_forms`
 
 **C3** - A borrowed `sqlite3.Connection` answers `select 1` after `m.add(...)` and after a failing `m.add(...)`, keeps its `row_factory`, and an open app transaction is neither committed nor rolled back by memhub (AC 2)
@@ -28,9 +28,10 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_commit_is
 **C6** - `init()` creates `{prefix}_memory`, `{prefix}_memory_runs`, `{prefix}_memhub_meta` whose column names are exactly `MEMORY_COLUMNS` / `RUN_COLUMNS` / `key, value`; a second `init()` changes nothing (AC 4)
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_schema_columns_match_the_reference_and_init_is_idempotent`
 
-**C7** - Rows carry exactly the reference keys; `id` / `memory_id` / `conflicts_with` are `uuid.UUID`, timestamps aware `datetime` equal to what was written, `payload` / `entities` / `evidence` / `links` Python dicts and lists, `verified` a `bool`, `embedding` a `list[float]` within 1e-6 of what was written (AC 4)
+**C7** - Rows carry exactly the reference keys; `id` / `memory_id` / `conflicts_with` are `uuid.UUID`, timestamps aware `datetime` equal to what was written and stored as UTC text (a +02:00 `valid_until` and a -05:00 `now` an hour apart compare by time), `payload` / `entities` / `evidence` / `links` Python dicts and lists, `verified` a `bool`, `embedding` a `list[float]` within 1e-6 of what was written (AC 4)
 Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_rows_have_the_reference_keys_and_types`
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_row_values_round_trip`
+Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_stale_filter_compares_times_not_offsets`
 
 **C8** - A second active row for one `memory_id`, or for one keyed slot, raises `sqlite3.IntegrityError` and one active row stays (AC 5)
 Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_one_active_row_per_memory_and_per_keyed_slot`
@@ -47,9 +48,10 @@ Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_capabiliti
 **C11** - On the same data, the sqlite-vec path and the Python path return the same rows in the same order from `search`, `top_similar` and `nearest_area`, with `similarity` 0.95 / 0.86 / 0.50 within 1e-6; a stale 0.99 row only with `include_stale`; another user's 0.99 row never (AC 8)
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_both_vector_paths_agree`
 
-**C12** - Search filters, `k` and the +0.05 boosts capped at 1.0 hold on both vector paths (AC 8)
+**C12** - Search filters, `k` and the +0.05 boosts capped at 1.0 hold on both vector paths, including for a linked row ranked ninth on similarity with `k=3`, which comes back first (AC 8)
 Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_search_filters_stale_area_type_and_k`
 Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_search_boosts_area_text_and_entity_capped_at_one`
+Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_search_boosts_rows_ranked_below_k`
 
 **C13** - `vector_path` is `python` when `sqlite_vec` cannot be imported, when the connection cannot load extensions, and when `MEMHUB_SQLITE_VEC=0`; it is `sqlite-vec` otherwise; on the fallback `search` returns the 0.95 row first (AC 9)
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_vector_path_selection`

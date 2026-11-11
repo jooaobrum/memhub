@@ -41,9 +41,11 @@ class Routed(NamedTuple):
 def route(
     p: Proposal, decision: Decision, *, uow: UnitOfWork, registry: TypeRegistry, segment: Segment,
     source_name: str, settings: Settings, link: dict | None = None, links: list[dict] | None = None,
+    run_id: str | None = None, agent_id: str | None = None,
 ) -> Routed:
     """Apply the decision. `link` and `links` (each a `{kind, memory_id}`) are added to the memory written or
-    merged into, unless already there or pointing the memory at itself."""
+    merged into, unless already there or pointing the memory at itself. `run_id` / `agent_id` (the app's call)
+    are stamped on a row this writes; a merge writes none."""
     evidence = evidence_entries(p, p.context or segment, source_name)
     observed_at = newest_observed_at(evidence) or datetime.now(timezone.utc)
     c = p.candidate
@@ -72,6 +74,7 @@ def route(
             # the new version is its own claim: time fields come from the candidate, not the version it replaces
             times=dict(observed_at=observed_at, valid_from=c.valid_from, valid_until=valid_until,
                        durability=c.durability, assertion=c.assertion),
+            run_id=run_id, agent_id=agent_id,
         )  # it keeps the evidence of the version it replaces or extends, and gains this candidate's
         uow.memories.merge_evidence_row(new["id"], new_evidence=evidence, thread_id=segment.thread_id)
         for l in links:
@@ -87,6 +90,6 @@ def route(
         status="active" if active else "candidate", verified=False, created_by="remember" if p.explicit else "extractor", score=p.score,
         conflicts_with=target["memory_id"] if conflict else None, observed_at=observed_at,
         valid_from=c.valid_from, valid_until=valid_until, durability=c.durability,
-        assertion=c.assertion, links=links,
+        assertion=c.assertion, links=links, run_id=run_id, agent_id=agent_id,
     )
     return Routed("conflict" if conflict else "created", row["memory_id"], row["id"])

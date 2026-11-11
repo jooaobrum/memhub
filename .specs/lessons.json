@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 9,
+  "next_id": 15,
   "lessons": [
     {
       "id": "L-001",
@@ -148,6 +148,114 @@
       ],
       "created": "2026-11-11T17:57:06Z",
       "last_seen": "2026-11-11T17:57:06Z"
+    },
+    {
+      "id": "L-009",
+      "key": "surviving_mutant::when a backend stores timestamps as text assert the raw stored text is utc not only that values round trip",
+      "text": "When a backend stores timestamps as text, assert the raw stored text is UTC, not only that values round-trip",
+      "signal": "surviving_mutant",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "sqlite-backend"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "src/memhub/storage/sqlite.py _ts; C7 (storage)"
+      ],
+      "created": "2026-11-11T18:29:58Z",
+      "last_seen": "2026-11-11T18:29:58Z"
+    },
+    {
+      "id": "L-010",
+      "key": "surviving_mutant::prove a rank then boost rule with more rows than k and a boosted row ranked below k",
+      "text": "Prove a rank-then-boost rule with more rows than k and a boosted row ranked below k",
+      "signal": "surviving_mutant",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "sqlite-backend"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "src/memhub/storage/sqlite.py search; C12 (storage)"
+      ],
+      "created": "2026-11-11T18:29:59Z",
+      "last_seen": "2026-11-11T18:29:59Z"
+    },
+    {
+      "id": "L-011",
+      "key": "ac_gap::reject a url whose path is empty after its root not only an empty remainder",
+      "text": "Reject a URL whose path is empty after its root, not only an empty remainder",
+      "signal": "ac_gap",
+      "scope": "connection",
+      "status": "candidate",
+      "features": [
+        "sqlite-backend"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "src/memhub/connection.py sqlite_path; C2 (connection)"
+      ],
+      "created": "2026-11-11T18:29:59Z",
+      "last_seen": "2026-11-11T18:29:59Z"
+    },
+    {
+      "id": "L-012",
+      "key": "ac_gap::content hash ids for resent messages must not depend on where the resent window starts",
+      "text": "Content-hash ids for resent messages must not depend on where the resent window starts",
+      "signal": "ac_gap",
+      "scope": "ingestion",
+      "status": "candidate",
+      "features": [
+        "push-ingestion"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "src/memhub/pipeline/push.py to_interactions; C8 (ingestion)"
+      ],
+      "created": "2026-11-11T20:25:43Z",
+      "last_seen": "2026-11-11T20:25:43Z"
+    },
+    {
+      "id": "L-013",
+      "key": "surviving_mutant::prove every row of an event mapping including the review pending branch of a new version",
+      "text": "Prove every row of an event mapping, including the review-pending branch of a new version",
+      "signal": "surviving_mutant",
+      "scope": "ingestion",
+      "status": "candidate",
+      "features": [
+        "push-ingestion"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "src/memhub/memory.py _push_event; C2 (ingestion)"
+      ],
+      "created": "2026-11-11T20:25:43Z",
+      "last_seen": "2026-11-11T20:25:43Z"
+    },
+    {
+      "id": "L-014",
+      "key": "spec_precision_gap::do not chain in assertions compare each variant against the base value",
+      "text": "Do not chain != in assertions: compare each variant against the base value",
+      "signal": "spec_precision_gap",
+      "scope": "tests",
+      "status": "candidate",
+      "features": [
+        "push-ingestion"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "tests/test_push.py test_message_ids; C9 (tests)"
+      ],
+      "created": "2026-11-11T20:25:43Z",
+      "last_seen": "2026-11-11T20:25:43Z"
     }
   ]
 }
