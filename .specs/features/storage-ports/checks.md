@@ -117,7 +117,7 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_
 | capabilities (5) x backends (2) | `transactions` C3 · `vector_search` C23 C24 · `json_lookup` C24 (entity boost) C25 · `parallel_ingest` C22 · `schemas` C14 (memory lacks) C12 | - |
 | repository methods (37) | C2, table-driven over all 37 on both backends; behaviour by the contract suite C3 C18-C27 | - |
 | `db` kinds for Postgres capabilities (4) | pool C4 · connection C4 · callable C4 · URL C4 | - |
-| modules that must not touch psycopg (6) | `service.py` · `memory.py` · `cli.py` · `middleware.py` · `toolkit.py` · `pipeline/*.py` - C6, one AST walk over all | - |
+| modules that must not touch psycopg (6) | `service.py` C6 · `memory.py` C6 · `cli.py` C6 · `middleware.py` C6 · `toolkit.py` C6 · `pipeline/*.py` C6 - one AST walk over all | - |
 | unit-of-work outcomes (2) | clean exit C3 · exception C3 C26 | - |
 | AC 14 URL pairs (3) | `MEM` x2 C16 · `shared` x2 C16 · `a` / `b` C16 | - |
 | AC 15 examples (3) | before init C17 C28 · other dims C17 · fresh Postgres database C28 | - |
