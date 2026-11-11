@@ -251,7 +251,8 @@ Proof: `.venv/bin/python -m pytest tests/e2e/test_pr2_init.py::test_pr2_demo`
 ## Handoff
 
 - **Settled mid-build:** user: "Ok, lets implement. Use the stacked PR from our last branch." then "it should be from this one 1-memhub-as-a-pluggable-memory-package -> origin/1-memhub-as-a-pluggable-memory-package" - branch `feat/config-and-cli` is stacked on `da0aa17`, the head of that branch
-- **Dispatched:** none
-- **Boundary:** none yet
+- **Dispatched:** Verifier at code `5d66262`, diff `da0aa17..5d66262` (no screens sub-agent: no capture)
+- **Boundary:** C1-C60 closed at `5d66262`; full suite 671 passed (598 before this PR); `check_proofs.py` 63 pass, 0 fail
+- **Environment:** work is in the git worktree `~/worktrees/memhub-config` (another session uses the main checkout on `feat/storage-ports`); the git-ignored `memhub.yaml` was copied there for `test_config.py` / `test_terms.py`
 - **Abandoned:** none
 - **Walked:** n/a - no screen
