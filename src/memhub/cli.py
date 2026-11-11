@@ -17,7 +17,8 @@ from dotenv import find_dotenv, load_dotenv
 from memhub.config import Settings, build_chat_model, build_embeddings, load_config
 from memhub.service import MemoryService, ServiceError
 from memhub.sources import build_source
-from memhub.store import Actor, MemoryStore, StoreError
+from memhub.storage.postgres import MemoryStore
+from memhub.storage.rules import Actor, StoreError
 
 load_dotenv(find_dotenv(usecwd=True))  # API keys live in a git-ignored .env
 
@@ -49,8 +50,8 @@ def _service(config: Path, *, check_embedding: bool = True) -> MemoryService:
     store = MemoryStore(settings.database_url, settings.project_prefix, settings.database_schema)
     if check_embedding:
         try:
-            with store.connect() as conn, conn.cursor() as cur:
-                store.check_embedding_config(cur, model=settings.embeddings.model, dims=settings.embeddings.dims)
+            with store.unit_of_work() as uow:
+                uow.meta.check_embedding_config(model=settings.embeddings.model, dims=settings.embeddings.dims)
         except StoreError as exc:
             _fail(exc)
     registry = settings.build_registry()

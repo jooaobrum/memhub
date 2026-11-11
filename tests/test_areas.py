@@ -292,7 +292,7 @@ def test_an_area_without_active_rows_makes_no_call(env):
     with env.store.connect() as conn, conn.cursor() as cur:
         env.store.archive(cur, fact["memory_id"])
         judge = FakeChatModel()
-        assert summarize_area(judge, cur=cur, store=env.store, area_memory_id=area["memory_id"]).written is False
+        assert summarize_area(judge, uow=env.store.bind(cur), area_memory_id=area["memory_id"]).written is False
     assert judge.calls == 0
 
 

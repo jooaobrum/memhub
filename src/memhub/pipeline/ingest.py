@@ -21,7 +21,7 @@ from memhub.pipeline.score import admit
 from memhub.pipeline.summarize import summarize_area
 from memhub.pipeline.verify import asked_only, episode_told_by_user, unsupported_claims, worth_checking
 from memhub.pipeline.segment import Segment, build_segments, group_threads
-from memhub.store import MemoryStore
+from memhub.storage import Backend, UnitOfWork
 from memhub.types import TypeRegistry
 
 log = logging.getLogger(__name__)
@@ -89,19 +89,19 @@ def _segment_signals(segment: Segment, feedback: list[dict], llm_check=None) -> 
 
 
 def _write(
-    cur, p: Proposal, res: _SegmentResult, *, store, settings, registry, segment, source_name,
+    uow: UnitOfWork, p: Proposal, res: _SegmentResult, *, settings, registry, segment, source_name,
     judge, embeddings, now,
 ) -> Routed | None:
     """Reconcile and route one admitted proposal; None when a cap or its areas drop it. Counts created/merged."""
     plan = None
     if p.candidate.type in settings.area_types():
-        plan = plan_areas(p, cur=cur, store=store, settings=settings, segment=segment, embeddings=embeddings)
+        plan = plan_areas(p, uow=uow, settings=settings, segment=segment, embeddings=embeddings)
         if plan.dropped:
             res.dropped.append({"candidate": p.candidate.model_dump(mode="json"), "reason": plan.dropped})
             res.areas_capped += plan.dropped == "area_cap"
             return None
     decision = reconcile(
-        p, cur=cur, store=store, settings=settings, segment=segment, judge=judge,
+        p, uow=uow, settings=settings, segment=segment, judge=judge,
         area_ids=plan.area_ids if plan else None, embeddings=embeddings, now=now,
     )
     res.tokens_in += decision.tokens_in
@@ -110,26 +110,26 @@ def _write(
         res.dropped.append({"candidate": p.candidate.model_dump(mode="json"), "reason": decision.reason})
         return None
     cap = settings.types[p.candidate.type].max_active
-    if cap is not None and decision.action == "create" and p.scope == "user" and store.count_active(
-        cur, type=p.candidate.type, scope=p.scope, workspace_id=segment.workspace_id,
+    if cap is not None and decision.action == "create" and p.scope == "user" and uow.memories.count_active(
+        type=p.candidate.type, scope=p.scope, workspace_id=segment.workspace_id,
         user_id=segment.user_id,
     ) >= cap:
         res.dropped.append({"candidate": p.candidate.model_dump(mode="json"), "reason": "cap_reached"})
         return None
-    if p.candidate.type == "term" and decision.action == "create" and store.count_active(
-        cur, type="term", scope=p.scope, workspace_id=segment.workspace_id, user_id=None,
+    if p.candidate.type == "term" and decision.action == "create" and uow.memories.count_active(
+        type="term", scope=p.scope, workspace_id=segment.workspace_id, user_id=None,
         statuses=("active", "candidate"),
     ) >= settings.terms.max_per_workspace:
         res.dropped.append({"candidate": p.candidate.model_dump(mode="json"), "reason": "term_cap"})
         return None
     links = []
     if plan:
-        links, made = create_areas(plan, p, cur=cur, store=store, registry=registry, segment=segment, embeddings=embeddings)
+        links, made = create_areas(plan, p, uow=uow, registry=registry, segment=segment, embeddings=embeddings)
         res.areas_created += made
         res.areas_merged += plan.merged
         res.touched_areas |= {l["memory_id"] for l in links}
     routed = route(
-        p, decision, cur=cur, store=store, registry=registry, segment=segment, source_name=source_name,
+        p, decision, uow=uow, registry=registry, segment=segment, source_name=source_name,
         settings=settings, links=links,
     )
     if routed.outcome == "merged":
@@ -189,7 +189,7 @@ def _verify(proposals, judge, segment, settings, res):
 
 
 def _process_segment(
-    cur, segment: Segment, signals: list[dict], *, store, settings, registry, source_name, extractor, judge,
+    uow: UnitOfWork, segment: Segment, signals: list[dict], *, settings, registry, source_name, extractor, judge,
     embeddings, run_id, now, history=None,
 ) -> _SegmentResult:
     res = _SegmentResult()
@@ -199,7 +199,7 @@ def _process_segment(
     background = bool(rest.messages) and not prefilter.should_skip(rest, settings.ingestion, signals)
     if background or ordered:
         areas = owner_area_list(
-            cur=cur, store=store, settings=settings, workspace_id=segment.workspace_id, user_id=segment.user_id
+            uow=uow, settings=settings, workspace_id=segment.workspace_id, user_id=segment.user_id
         ) if settings.area_types() else None
         proposals = []
         if background:
@@ -231,14 +231,14 @@ def _process_segment(
         res.dropped += later
         for p in proposals:
             p.embedding = list(embeddings.embed_query(p.memory.content))
-        proposals, low = admit(proposals, cur=cur, store=store, settings=settings, segment=segment, signals=signals)
+        proposals, low = admit(proposals, uow=uow, settings=settings, segment=segment, signals=signals)
         res.dropped += low
-        write = dict(store=store, settings=settings, registry=registry, segment=segment, source_name=source_name, judge=judge, embeddings=embeddings, now=now)
+        write = dict(settings=settings, registry=registry, segment=segment, source_name=source_name, judge=judge, embeddings=embeddings, now=now)
         for p in proposals:
-            _write(cur, p, res, **write)
+            _write(uow, p, res, **write)
     first, last = segment.messages[0], segment.messages[-1]
-    store.upsert_run(
-        cur, run_id=run_id, source=source_name, thread_id=segment.thread_id, workspace_id=segment.workspace_id,
+    uow.runs.upsert_run(
+        run_id=run_id, source=source_name, thread_id=segment.thread_id, workspace_id=segment.workspace_id,
         user_id=segment.user_id, first_message_id=first.message_id, last_message_id=last.message_id,
         last_message_at=last.timestamp, final_pass=segment.is_final_pass, signals=signals, dropped=res.dropped,
         status="extract_error" if res.extract_error else "ok", candidates_proposed=res.proposed,
@@ -251,10 +251,10 @@ def _ingest_thread(tid, msgs, summary, touched, *, store, settings, registry, so
                    feedback, llm_check, reprocess, dry_run, now) -> None:
     watermark, final_done = None, False
     if not reprocess:
-        with store.connect() as conn, conn.cursor() as cur:
-            row = store.get_watermark(cur, source=source_name, thread_id=tid)
+        with store.unit_of_work() as uow:
+            row = uow.runs.get_watermark(source=source_name, thread_id=tid)
             watermark = row["last_message_at"] if row else None
-            final_done = store.has_final_pass(cur, source=source_name, thread_id=tid)
+            final_done = uow.runs.has_final_pass(source=source_name, thread_id=tid)
     segments = build_segments(
         msgs, watermark_at=watermark, final_done=final_done, now=now, ingestion=settings.ingestion
     )
@@ -262,9 +262,9 @@ def _ingest_thread(tid, msgs, summary, touched, *, store, settings, registry, so
     for segment in segments:
         signals = _segment_signals(segment, feedback, llm_check)
         try:
-            with store.connect() as conn, conn.cursor() as cur:
+            with store.unit_of_work() as uow:
                 res = _process_segment(
-                    cur, segment, signals, store=store, settings=settings, registry=registry,
+                    uow, segment, signals, settings=settings, registry=registry,
                     source_name=source_name, extractor=extractor, judge=judge, embeddings=embeddings,
                     run_id=summary.run_id, now=now, history=msgs,
                 )
@@ -297,7 +297,7 @@ def _ingest_thread(tid, msgs, summary, touched, *, store, settings, registry, so
 
 def ingest_source(
     *,
-    store: MemoryStore,
+    store: Backend,
     settings: Settings,
     registry: TypeRegistry,
     source: Any,
@@ -336,9 +336,9 @@ def ingest_source(
     if not dry_run:
         for area_id in sorted(touched):  # after the last segment: one summary per area, a failure loses only its own
             try:
-                with store.connect() as conn, conn.cursor() as cur:
+                with store.unit_of_work() as uow:
                     done = summarize_area(
-                        judge, cur=cur, store=store, area_memory_id=uuid.UUID(area_id), retries=settings.extraction.retries
+                        judge, uow=uow, area_memory_id=uuid.UUID(area_id), retries=settings.extraction.retries
                     )
             except Exception:
                 log.warning("area summary failed: area=%s", area_id, exc_info=True)
@@ -346,6 +346,6 @@ def ingest_source(
             summary.summaries_written += done.written
             summary.summary_tokens_in += done.tokens_in
             summary.summary_tokens_out += done.tokens_out
-        with store.connect() as conn, conn.cursor() as cur:
-            store.purge_dropped(cur, retention_days=settings.retention.dropped_days)
+        with store.unit_of_work() as uow:
+            uow.runs.purge_dropped(retention_days=settings.retention.dropped_days)
     return summary

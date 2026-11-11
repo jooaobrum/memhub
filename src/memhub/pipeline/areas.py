@@ -13,7 +13,8 @@ from typing import Any
 from memhub.config import Settings
 from memhub.pipeline.ground import Proposal
 from memhub.pipeline.segment import Segment
-from memhub.store import MemoryStore, Row, area_link
+from memhub.storage import UnitOfWork
+from memhub.storage.rules import Row, area_link
 from memhub.types import Area, TypeRegistry
 
 MAX_AREAS = 3
@@ -52,19 +53,19 @@ def area_owner(p: Proposal, segment: Segment) -> dict[str, Any]:
     )
 
 
-def owner_area_list(*, cur, store: MemoryStore, settings: Settings, workspace_id: str, user_id: str) -> list[tuple[str, str, str]]:
+def owner_area_list(*, uow: UnitOfWork, settings: Settings, workspace_id: str, user_id: str) -> list[tuple[str, str, str]]:
     """(key, title, description) offered to the extractor: the seeds, then the owner's other areas."""
     listed = {a.key: (a.key, a.title, a.description) for a in settings.areas.seeds}
-    for row in store.owner_areas(cur, scope="user", workspace_id=workspace_id, user_id=user_id):
+    for row in uow.memories.owner_areas(scope="user", workspace_id=workspace_id, user_id=user_id):
         key = row["payload"].get("key")
         if key and key not in listed:
             listed[key] = (key, row["payload"]["title"], row["payload"].get("description", ""))
     return list(listed.values())
 
 
-def plan_areas(p: Proposal, *, cur, store: MemoryStore, settings: Settings, segment: Segment, embeddings: Any) -> AreaPlan:
+def plan_areas(p: Proposal, *, uow: UnitOfWork, settings: Settings, segment: Segment, embeddings: Any) -> AreaPlan:
     owner = area_owner(p, segment)
-    owned = store.owner_areas(cur, **owner)
+    owned = uow.memories.owner_areas(**owner)
     by_key = {r["payload"].get("key"): r for r in owned if r["payload"].get("key")}
     by_title = {r["payload"]["title"].strip().lower(): r for r in owned}
     seeds = {a.key: a for a in settings.areas.seeds}
@@ -106,7 +107,7 @@ def plan_areas(p: Proposal, *, cur, store: MemoryStore, settings: Settings, segm
             use_seed(seeds_by_title[title.lower()].key)
         else:
             embedding = list(embeddings.embed_query(f"{title}: {description}"))
-            near = store.nearest_area(cur, query_embedding=embedding, **owner)
+            near = uow.vectors.nearest_area(query_embedding=embedding, **owner)
             if near is not None and near["similarity"] is not None and near["similarity"] >= settings.areas.merge_similarity:
                 use_row(near)
                 plan.merged += 1
@@ -124,7 +125,7 @@ def plan_areas(p: Proposal, *, cur, store: MemoryStore, settings: Settings, segm
 
 
 def create_areas(
-    plan: AreaPlan, p: Proposal, *, cur, store: MemoryStore, registry: TypeRegistry, segment: Segment, embeddings: Any,
+    plan: AreaPlan, p: Proposal, *, uow: UnitOfWork, registry: TypeRegistry, segment: Segment, embeddings: Any,
 ) -> tuple[list[dict], int]:
     """Write the plan's missing area rows. Returns the `in_area` links for the candidate, and how many rows were created."""
     owner = area_owner(p, segment)
@@ -134,8 +135,8 @@ def create_areas(
         payload = Area(
             content=f"{a.title}: {a.description}", title=a.title, description=a.description, proposed=a.proposed, key=a.key,
         ).model_dump(mode="json")
-        row = store.add_memory(
-            cur, type="area", schema_version=registry.latest_version("area"), entities=[], embedding=embedding,
+        row = uow.memories.add_memory(
+            type="area", schema_version=registry.latest_version("area"), entities=[], embedding=embedding,
             content=payload["content"], payload=payload, evidence=[{"source": "areas", "reason": "proposed" if a.proposed else "seed"}],
             status="active", verified=False, created_by="extractor" if a.proposed else "seed", **owner,
         )

@@ -12,7 +12,8 @@ from memhub.config import Settings
 from memhub.pipeline.ground import Proposal
 from memhub.pipeline.llm import invoke_structured
 from memhub.pipeline.segment import Segment
-from memhub.store import MemoryStore, Row, area_ids as area_link_ids
+from memhub.storage import UnitOfWork
+from memhub.storage.rules import Row, area_ids as area_link_ids
 from memhub.types import Term, term_content
 
 
@@ -121,13 +122,13 @@ def _term_names(term: str, aliases: list[str]) -> set[str]:
     return {term.strip().lower(), *(a.strip().lower() for a in aliases)}
 
 
-def _reconcile_term(p: Proposal, *, cur, store: MemoryStore, settings: Settings, segment: Segment, embeddings: Any) -> Decision:
+def _reconcile_term(p: Proposal, *, uow: UnitOfWork, settings: Settings, segment: Segment, embeddings: Any) -> Decision:
     """A definition of a known term (case-insensitive) adds its aliases, up to `terms.max_aliases`; an alias that
     belongs to a different active term is a conflict for the admin. A pending version is amended in place."""
     new: Term = p.memory  # type: ignore[assignment]
     cap = settings.terms.max_aliases
     rows = [
-        r for r in store.list_memories(cur, type="term", workspace_id=segment.workspace_id)
+        r for r in uow.memories.list_memories(type="term", workspace_id=segment.workspace_id)
         if r["scope"] == "workspace" and r["status"] in ("active", "candidate") and r["conflicts_with"] is None
     ]
     same = [r for r in rows if r["payload"]["term"].strip().lower() == new.term.strip().lower()]
@@ -163,8 +164,8 @@ def _stale(row: Row, now: datetime) -> bool:
 
 
 class _Reconciler:
-    def __init__(self, p, *, cur, store, settings, segment, judge, embeddings, now) -> None:
-        self.p, self.cur, self.store, self.settings, self.segment = p, cur, store, settings, segment
+    def __init__(self, p, *, uow, settings, segment, judge, embeddings, now) -> None:
+        self.p, self.uow, self.settings, self.segment = p, uow, settings, segment
         self.judged = _Judged(judge, p, segment, settings.extraction.retries)
         self.embeddings, self.now = embeddings, now
         self.observed = _candidate_observed_at(p, segment)
@@ -173,8 +174,8 @@ class _Reconciler:
     def pending_for(self, row: Row) -> Row | None:
         """The candidate already waiting for review against this slot with the same statement."""
         p = self.p
-        for pending in self.store.list_memories(
-            self.cur, status="candidate", type=p.candidate.type, workspace_id=self.segment.workspace_id,
+        for pending in self.uow.memories.list_memories(
+            status="candidate", type=p.candidate.type, workspace_id=self.segment.workspace_id,
             user_id=self.segment.user_id if p.scope == "user" else None,
         ):
             if pending["conflicts_with"] == row["memory_id"] and pending["payload"].get("key") == p.memory.key \
@@ -241,17 +242,17 @@ class _Reconciler:
         p, s = self.p, self.settings
         owner = self.segment.user_id if p.scope == "user" else None
         if isinstance(p.memory, Term):
-            return _reconcile_term(p, cur=self.cur, store=self.store, settings=s, segment=self.segment, embeddings=self.embeddings)
+            return _reconcile_term(p, uow=self.uow, settings=s, segment=self.segment, embeddings=self.embeddings)
         if s.is_slot(p.candidate.type, p.memory):  # one active row per (owner, type, key): no similarity search
-            for row in self.store.list_memories(
-                self.cur, status="active", type=p.candidate.type, user_id=owner, workspace_id=self.segment.workspace_id
+            for row in self.uow.memories.list_memories(
+                status="active", type=p.candidate.type, user_id=owner, workspace_id=self.segment.workspace_id
             ):
                 if row["scope"] == p.scope and row["user_id"] == owner and row["payload"].get("key") == p.memory.key:
                     return self.against([row], keyed=True)
             return Decision("create")
         rows = [
-            r for t in s.compare_types(p.candidate.type) for r in self.store.top_similar(
-                self.cur, type=t, scope=p.scope, workspace_id=self.segment.workspace_id,
+            r for t in s.compare_types(p.candidate.type) for r in self.uow.vectors.top_similar(
+                type=t, scope=p.scope, workspace_id=self.segment.workspace_id,
                 user_id=self.segment.user_id, query_embedding=p.embedding, limit=5 if self.area_ids is None else 25,
             )
         ]
@@ -271,12 +272,12 @@ class _Reconciler:
 
 
 def reconcile(
-    p: Proposal, *, cur, store: MemoryStore, settings: Settings, segment: Segment, judge: Any,
+    p: Proposal, *, uow: UnitOfWork, settings: Settings, segment: Segment, judge: Any,
     area_ids: set[str] | None = None, embeddings: Any = None, now: datetime | None = None,
 ) -> Decision:
     """Decide what a candidate means next to what is stored (the upsert policy of design.md). The judge is asked
     at most once, and never when the two statements are the same after normalising."""
-    r = _Reconciler(p, cur=cur, store=store, settings=settings, segment=segment, judge=judge, embeddings=embeddings,
+    r = _Reconciler(p, uow=uow, settings=settings, segment=segment, judge=judge, embeddings=embeddings,
                     now=now or datetime.now(timezone.utc))
     r.area_ids = area_ids
     decision = r.decide()

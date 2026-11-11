@@ -196,7 +196,7 @@ def test_signal_feature():
 def test_score_formula_and_novelty(store, settings):
     seg = _seg(msg("m1"))
     with store.connect() as conn, conn.cursor() as cur:
-        args = dict(cur=cur, store=store, settings=settings, segment=seg, signals=[])
+        args = dict(uow=store.bind(cur), settings=settings, segment=seg, signals=[])
         assert compute_score(_proposal(), **args) == pytest.approx(0.35 + 0.30 + 0.20 + 0.06 + 0.025)
         _add(store, cur, "old", vec_at(0.86))
         _add(store, cur, "other owner", vec_at(1.0), user_id="someone-else")
@@ -211,7 +211,7 @@ def test_score_formula_and_novelty(store, settings):
 def test_inferred_evidence_scores_lower_than_stated_and_assistant_only_stays_04(store, settings):
     seg = _seg(msg("m1"))
     with store.connect() as conn, conn.cursor() as cur:
-        args = dict(cur=cur, store=store, settings=settings, segment=seg, signals=[])
+        args = dict(uow=store.bind(cur), settings=settings, segment=seg, signals=[])
         stated = compute_score(_proposal(), **args)
         inferred = compute_score(_proposal(cand(assertion="inferred")), **args)
         assert stated - inferred == pytest.approx(0.30 * 0.4)
@@ -225,7 +225,7 @@ def test_admit_drops_below_threshold(store, settings):
     weak = cand(type="episode", quote="Paris", mid="m2", claim="assistant", utility=1, content="c", situation="s", actions="a", outcome="o")
     p = Proposal(weak, registry_episode(weak), "user", vec_at(1.0))
     with store.connect() as conn, conn.cursor() as cur:
-        kept, dropped = admit([_proposal(), p], cur=cur, store=store, settings=settings, segment=_seg(msg("m1")), signals=[])
+        kept, dropped = admit([_proposal(), p], uow=store.bind(cur), settings=settings, segment=_seg(msg("m1")), signals=[])
     assert len(kept) == 1 and kept[0].score > 0.9
     assert [d["reason"] for d in dropped] == ["low_score"] and p.score < 0.5
 
@@ -239,7 +239,7 @@ def registry_episode(c):
 
 def _reconcile(store, settings, p, judge, seg=None):
     with store.connect() as conn, conn.cursor() as cur:
-        return reconcile(p, cur=cur, store=store, settings=settings, segment=seg or _seg(msg("m1")), judge=judge)
+        return reconcile(p, uow=store.bind(cur), settings=settings, segment=seg or _seg(msg("m1")), judge=judge)
 
 
 def _seed(store, sim, **kw):
