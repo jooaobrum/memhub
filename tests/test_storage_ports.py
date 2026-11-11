@@ -26,7 +26,7 @@ from tests.fakes import FakeEmbeddings
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "memhub"
 BEFORE_PORTS = "2a58e6c"
-PORTS_DONE = "77f11ce"  # the last commit of PR 3: later PRs change old tests with their own claims (AD-021)
+PORTS_DONE = "9fdbf05"  # the last commit of PR 3: later PRs change old tests with their own claims (AD-021)
 SCHEMAS_MESSAGE = "schemas is not available on memory: remove database_schema from the config, or use Postgres"
 
 
