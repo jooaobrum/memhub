@@ -9,8 +9,8 @@
     me.search("language")
 
 `Memory` is a facade over `MemoryService`: every rule (validation, injection scan, ownership, review) lives
-there. It adds three things: the ids every call must carry (`CallContext`), the connection the app lends
-(`memhub.connection`), and one result format for every write (`AddResult`, `MemoryEvent`). Embeddings are
+there. It adds three things: the ids every call must carry (`CallContext`), the storage the app lends (a
+Postgres connection via `memhub.connection`, or `memory://` for tests; see `memhub.storage`), and one result format for every write (`AddResult`, `MemoryEvent`). Embeddings are
 never returned.
 """
 from __future__ import annotations
@@ -20,15 +20,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
-import psycopg
 from pydantic import BaseModel, Field
 
 from memhub.config import Config, EmbeddingConfig
-from memhub.connection import connection_source
 from memhub.settings import Parts, Resolved, embedding_model_id, resolve
 from memhub.middleware import MemoryMiddleware
 from memhub.service import MemoryService, NotFound, ValidationError
-from memhub.store import Actor, EmbeddingMismatch, MemoryStore, Row
+from memhub.storage import Capability, open_backend, require
+from memhub.storage.base import FIXES
+from memhub.storage.rules import Actor, EmbeddingMismatch, Row
 from memhub.toolkit import MemoryToolkit
 
 __all__ = ["AddResult", "CallContext", "Dropped", "Memory", "MemoryEvent", "ScopedMemory"]
@@ -112,6 +112,10 @@ def _uuid(value: Any) -> uuid.UUID:
         raise NotFound(f"no memory {value}") from exc
 
 
+# What every `Memory` call relies on; `schemas` is added when the config sets `database_schema`.
+_NEEDED = (Capability.TRANSACTIONS, Capability.VECTOR_SEARCH, Capability.JSON_LOOKUP)
+
+
 class Memory:
     """memhub for one app. See the module docstring."""
 
@@ -132,11 +136,13 @@ class Memory:
         self.resolved = resolve(config, overrides)
         self.settings = self.resolved.config.model_copy(deep=True)
         self.parts = Parts(self.resolved, passed={"db": db, "llm": llm, "embedder": embedder, "judge": judge})
-        self.source = connection_source(self.parts.db)
+        self.store = open_backend(self.parts.db, self.settings.project_prefix, self.settings.database_schema)
+        self.source = getattr(self.store, "source", None)  # Postgres: where connections come from
+        for capability in (*_NEEDED, *((Capability.SCHEMAS,) if self.settings.database_schema else ())):
+            require(self.store, capability, FIXES[capability])
         self.embedder = self.parts.embedder
         self._embedding_model = embedding_model_id(self.embedder, self.settings)
         self.settings.embeddings = None  # known once one probe embed gives the dims; see `_ready`
-        self.store = MemoryStore(self.source, self.settings.project_prefix, self.settings.database_schema)
         self.registry = self.settings.build_registry()
         self.service = MemoryService(store=self.store, settings=self.settings, registry=self.registry, embeddings=self.embedder)
         self.roles = list(roles) if roles is not None else ["user"]
@@ -171,11 +177,8 @@ class Memory:
         if self._checked:
             return
         emb = self._probe()
-        try:
-            with self.store.connect() as conn, conn.cursor() as cur:
-                self.store.check_embedding_config(cur, model=emb.model, dims=emb.dims)
-        except psycopg.errors.UndefinedTable as exc:
-            raise EmbeddingMismatch("the ledger has no tables yet: run `Memory.init()` (or `memhub init`) first") from exc
+        with self.store.unit_of_work() as uow:  # no tables yet: EmbeddingMismatch naming `init()`, on every backend
+            uow.meta.check_embedding_config(model=emb.model, dims=emb.dims)
         self._checked = True
 
     def _ctx(self, workspace_id: Any, user_id: Any, run_id: Any, agent_id: Any = None, roles: Any = None) -> CallContext:
@@ -195,8 +198,8 @@ class Memory:
         return row
 
     def _active(self, memory_id: Any, ctx: CallContext) -> Row:
-        with self.store.connect() as conn, conn.cursor() as cur:
-            return self._visible(self.store.get_active(cur, _uuid(memory_id)), ctx)
+        with self.store.unit_of_work() as uow:
+            return self._visible(uow.memories.get_active(_uuid(memory_id)), ctx)
 
     def scope(self, workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
               roles: list[str] | None = None) -> "ScopedMemory":
@@ -235,8 +238,8 @@ class Memory:
         a rejected candidate, or one of your own user rows."""
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
         if hard:
-            with self.store.connect() as conn, conn.cursor() as cur:
-                row = self._visible(self.store.get_by_id(cur, _uuid(id)), ctx)
+            with self.store.unit_of_work() as uow:
+                row = self._visible(uow.memories.get_by_id(_uuid(id)), ctx)
             self.service.delete(ctx.actor, row["id"])
             return
         active = self._active(id, ctx)
@@ -254,10 +257,10 @@ class Memory:
     def _candidate(self, id: Any, ctx: CallContext) -> Row:
         """The row `id` names: a version row, or a memory's newest candidate."""
         key = _uuid(id)
-        with self.store.connect() as conn, conn.cursor() as cur:
-            row = self.store.get_by_id(cur, key)
+        with self.store.unit_of_work() as uow:
+            row = uow.memories.get_by_id(key)
             if row is None:
-                pending = [r for r in self.store.history(cur, key) if r["status"] == "candidate"]
+                pending = [r for r in uow.memories.history(key) if r["status"] == "candidate"]
                 row = max(pending, key=lambda r: (r["version"], r["created_at"])) if pending else None
         return self._visible(row, ctx)
 

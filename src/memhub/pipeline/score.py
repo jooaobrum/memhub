@@ -4,7 +4,7 @@ from __future__ import annotations
 from memhub.config import Settings
 from memhub.pipeline.ground import Proposal
 from memhub.pipeline.segment import Segment
-from memhub.store import MemoryStore
+from memhub.storage import UnitOfWork
 
 _UP = {"correction", "feedback_up"}
 _DOWN = {"feedback_down", "rephrase", "error"}
@@ -34,9 +34,9 @@ def novelty_feature(similarities: list[float], settings: Settings) -> float:
     return min(1.0, max(0.0, (dup - max(similarities)) / (dup - low)))
 
 
-def compute_score(p: Proposal, *, cur, store: MemoryStore, settings: Settings, segment: Segment, signals: list[dict]) -> float:
-    rows = store.top_similar(
-        cur, type=p.candidate.type, scope=p.scope, workspace_id=segment.workspace_id,
+def compute_score(p: Proposal, *, uow: UnitOfWork, settings: Settings, segment: Segment, signals: list[dict]) -> float:
+    rows = uow.vectors.top_similar(
+        type=p.candidate.type, scope=p.scope, workspace_id=segment.workspace_id,
         user_id=segment.user_id, query_embedding=p.embedding,
     )
     active = [r["similarity"] for r in rows if r["status"] == "active" and r["similarity"] is not None]
@@ -51,11 +51,11 @@ def compute_score(p: Proposal, *, cur, store: MemoryStore, settings: Settings, s
 
 
 def admit(
-    proposals: list[Proposal], *, cur, store: MemoryStore, settings: Settings, segment: Segment, signals: list[dict]
+    proposals: list[Proposal], *, uow: UnitOfWork, settings: Settings, segment: Segment, signals: list[dict]
 ) -> tuple[list[Proposal], list[dict]]:
     kept, dropped = [], []
     for p in proposals:
-        p.score = compute_score(p, cur=cur, store=store, settings=settings, segment=segment, signals=signals)
+        p.score = compute_score(p, uow=uow, settings=settings, segment=segment, signals=signals)
         if p.score < settings.admission.threshold and not p.explicit:
             dropped.append({"candidate": p.candidate.model_dump(mode="json"), "reason": "low_score"})
         else:

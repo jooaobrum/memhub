@@ -13,7 +13,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from memhub.pipeline.llm import invoke_structured
-from memhub.store import MemoryStore, as_vector_list
+from memhub.storage import UnitOfWork
+from memhub.storage.rules import as_vector_list
 
 AUTO_SUMMARY = "auto-summary"
 
@@ -45,12 +46,12 @@ def _prompt(title: str, rows: list[dict]) -> str:
     )
 
 
-def summarize_area(judge: Any, *, cur, store: MemoryStore, area_memory_id: uuid.UUID, retries: int = 0) -> SummaryResult:
+def summarize_area(judge: Any, *, uow: UnitOfWork, area_memory_id: uuid.UUID, retries: int = 0) -> SummaryResult:
     """No call when the area has no active linked rows, or the row set is unchanged since the last summary."""
-    area = store.get_active(cur, area_memory_id)
+    area = uow.memories.get_active(area_memory_id)
     if area is None or area["type"] != "area":
         return SummaryResult()
-    rows = store.linked_rows(cur, area_memory_id)
+    rows = uow.memories.linked_rows(area_memory_id)
     fingerprint = rows_fingerprint(rows)
     if not rows or area["payload"].get("summary_rows") == fingerprint:
         return SummaryResult()
@@ -66,8 +67,8 @@ def summarize_area(judge: Any, *, cur, store: MemoryStore, area_memory_id: uuid.
         **area["payload"], "summary": text, "content": f"{title}: {text}", "summary_label": AUTO_SUMMARY,
         "summary_rows": fingerprint,
     }
-    store.edit_memory(
-        cur, area_memory_id, content=payload["content"], payload=payload, entities=[],
+    uow.memories.edit_memory(
+        area_memory_id, content=payload["content"], payload=payload, entities=[],
         embedding=as_vector_list(area["embedding"]), verified=False, created_by="summarizer",
     )
     result.written = True

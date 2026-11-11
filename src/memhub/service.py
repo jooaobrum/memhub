@@ -1,11 +1,11 @@
 """MemoryService: the public API used by the CLI and by MemoryMiddleware.
 
 Everything here takes an `Actor` (id + roles) and enforces the review /
-ownership rules on top of the plain CRUD that `store.py` provides. It is
+ownership rules on top of the plain CRUD that a storage `Backend` provides
+(`memhub.storage`: Postgres or in-memory), one `UnitOfWork` per call. It is
 also where content gets embedded and scanned for injection before it is
-written. The ingest pipeline talks to `MemoryStore` directly instead (it
-needs several writes in one transaction per segment), not through this
-class.
+written. The ingest pipeline opens its own unit of work per segment (it
+needs several writes in one transaction), not through this class.
 """
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ from pydantic import ValidationError as PydanticValidationError
 
 from memhub import injection
 from memhub.config import Settings
-from memhub.store import Actor, MemoryStore, NotFound, Row, area_ids, as_vector_list
+from memhub.storage import Backend, UnitOfWork
+from memhub.storage.rules import Actor, NotFound, Row, area_ids, as_vector_list
 from memhub.types import TypeRegistry
 
 __all__ = [
@@ -71,7 +72,7 @@ class Embedder:
 
 @dataclass
 class MemoryService:
-    store: MemoryStore
+    store: Backend
     settings: Settings
     registry: TypeRegistry
     embeddings: Embedder
@@ -116,9 +117,9 @@ class MemoryService:
             if not actor.has_role("workspace_admin"):
                 raise PermissionDenied("only a workspace_admin may change a workspace memory")
 
-    def _guard_embedding_config(self, cur) -> None:
-        self.store.check_embedding_config(
-            cur, model=self.settings.embeddings.model, dims=self.settings.embeddings.dims
+    def _guard_embedding_config(self, uow: UnitOfWork) -> None:
+        uow.meta.check_embedding_config(
+            model=self.settings.embeddings.model, dims=self.settings.embeddings.dims
         )
 
     # --- writes --------------------------------------------------------------
@@ -150,20 +151,19 @@ class MemoryService:
         embedding = self._embed(instance.content)
         status = "active" if scope == "user" or actor.has_role("workspace_admin") else "candidate"
         verified = status == "active"
-        with self.store.connect() as conn, conn.cursor() as cur:
-            self._guard_embedding_config(cur)
+        with self.store.unit_of_work() as uow:
+            self._guard_embedding_config(uow)
             if self.settings.is_slot(type, instance) and any(
                 r["payload"].get("key") == instance.key and r["scope"] == scope and r["user_id"] == (user_id if scope == "user" else None)
-                for r in self.store.list_memories(cur, status="active", type=type, user_id=user_id, workspace_id=workspace_id)
+                for r in uow.memories.list_memories(status="active", type=type, user_id=user_id, workspace_id=workspace_id)
             ):
                 raise ValidationError(f"an active {type} with key {instance.key!r} exists: edit it instead")
             cap = self.settings.types[type].max_active
-            if cap is not None and status == "active" and self.store.count_active(
-                cur, type=type, scope=scope, workspace_id=workspace_id, user_id=user_id
+            if cap is not None and status == "active" and uow.memories.count_active(
+                type=type, scope=scope, workspace_id=workspace_id, user_id=user_id
             ) >= cap:
                 raise ValidationError(f"the {type} limit ({cap}) is reached: archive one first")
-            return self.store.add_memory(
-                cur,
+            return uow.memories.add_memory(
                 type=type,
                 schema_version=self.registry.latest_version(type),
                 scope=scope,
@@ -186,8 +186,8 @@ class MemoryService:
         self, actor: Actor, memory_id: uuid.UUID, fields: dict[str, Any], *,
         run_id: str | None = None, agent_id: str | None = None,
     ) -> Row:
-        with self.store.connect() as conn, conn.cursor() as cur:
-            active = self.store.get_active(cur, memory_id)
+        with self.store.unit_of_work() as uow:
+            active = uow.memories.get_active(memory_id)
             if active is None:
                 raise NotFound(f"no active version for memory {memory_id}")
             self._authorize_owner_or_admin(actor, active)
@@ -198,10 +198,9 @@ class MemoryService:
             except PydanticValidationError as exc:
                 raise ValidationError(str(exc)) from exc
             self._check_instance(instance)
-            self._guard_embedding_config(cur)
+            self._guard_embedding_config(uow)
             embedding = self._embed(instance.content)
-            return self.store.edit_memory(
-                cur,
+            return uow.memories.edit_memory(
                 memory_id,
                 content=instance.content,
                 payload=instance.model_dump(mode="json"),
@@ -216,23 +215,23 @@ class MemoryService:
 
     def history(self, actor: Actor, memory_id: uuid.UUID) -> list[Row]:
         """Every version of a memory, oldest first: value, when it was said, evidence, who created it."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            rows = self.store.history(cur, memory_id)
+        with self.store.unit_of_work() as uow:
+            rows = uow.memories.history(memory_id)
             if not rows:
                 raise NotFound(f"no memory {memory_id}")
             return rows
 
     def archive(self, actor: Actor, memory_id: uuid.UUID) -> Row:
-        with self.store.connect() as conn, conn.cursor() as cur:
-            active = self.store.get_active(cur, memory_id)
+        with self.store.unit_of_work() as uow:
+            active = uow.memories.get_active(memory_id)
             if active is None:
                 raise NotFound(f"no active version for memory {memory_id}")
             self._authorize_owner_or_admin(actor, active)
-            return self.store.archive(cur, memory_id)
+            return uow.memories.archive(memory_id)
 
     def delete(self, actor: Actor, id: uuid.UUID) -> None:
-        with self.store.connect() as conn, conn.cursor() as cur:
-            row = self.store.get_by_id(cur, id)
+        with self.store.unit_of_work() as uow:
+            row = uow.memories.get_by_id(id)
             if row is None:
                 raise NotFound(f"no row {id}")
             owns_user_row = row["scope"] == "user" and row["user_id"] == actor.id
@@ -244,49 +243,48 @@ class MemoryService:
                 raise PermissionDenied(
                     "delete is only allowed for rejected candidates (owner or admin), or your own user-scope rows"
                 )
-            self.store.delete_row(cur, id)
+            uow.memories.delete_row(id)
 
     def delete_user(self, actor: Actor, user_id: str) -> dict[str, int]:
         if user_id != actor.id and not actor.has_role("workspace_admin"):
             raise PermissionDenied("only the user themself or a workspace_admin may erase a user's data")
-        with self.store.connect() as conn, conn.cursor() as cur:
-            return self.store.delete_user(cur, user_id)
+        with self.store.unit_of_work() as uow:
+            return uow.memories.delete_user(user_id)
 
     def approve(self, actor: Actor, id: uuid.UUID, *, resolve: str | None = None, note: str | None = None) -> Row:
         if not any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
             raise PermissionDenied("actor lacks an approving role")
-        with self.store.connect() as conn, conn.cursor() as cur:
+        with self.store.unit_of_work() as uow:
             merged = None
-            row = self.store.get_by_id(cur, id)
+            row = uow.memories.get_by_id(id)
             if resolve == "keep_both" and row is not None and row["conflicts_with"] is not None \
                     and row["payload"].get("key") is not None:
-                old = self.store.get_active(cur, row["conflicts_with"])
+                old = uow.memories.get_active(row["conflicts_with"])
                 if old is not None:  # one slot, one row: keeping both values means one statement holding both
                     content = f"{old['content']}; {row['content']}"
                     merged = {"content": content, "payload": {**old["payload"], "content": content},
                               "embedding": self._embed(content)}
-            return self.store.approve(cur, id, reviewed_by=actor.id, resolve=resolve, note=note, merged=merged)
+            return uow.memories.approve(id, reviewed_by=actor.id, resolve=resolve, note=note, merged=merged)
 
     def reject(self, actor: Actor, id: uuid.UUID, *, note: str | None = None) -> Row:
         if not any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
             raise PermissionDenied("actor lacks an approving role")
-        with self.store.connect() as conn, conn.cursor() as cur:
-            return self.store.reject(cur, id, reviewed_by=actor.id, note=note)
+        with self.store.unit_of_work() as uow:
+            return uow.memories.reject(id, reviewed_by=actor.id, note=note)
 
     def promote(
         self, actor: Actor, memory_id: uuid.UUID, *, run_id: str | None = None, agent_id: str | None = None,
     ) -> Row:
         """Copy a user-scope memory into the workspace review queue as a new candidate."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            active = self.store.get_active(cur, memory_id)
+        with self.store.unit_of_work() as uow:
+            active = uow.memories.get_active(memory_id)
             if active is None:
                 raise NotFound(f"no active version for memory {memory_id}")
             if active["scope"] != "user":
                 raise ValidationError("only a user-scope memory can be promoted")
             if active["user_id"] != actor.id and not actor.has_role("workspace_admin"):
                 raise PermissionDenied("only the owner or a workspace_admin may promote this memory")
-            return self.store.add_memory(
-                cur,
+            return uow.memories.add_memory(
                 type=active["type"],
                 schema_version=active["schema_version"],
                 scope="workspace",
@@ -326,13 +324,13 @@ class MemoryService:
     ) -> list[Row]:
         """Every row (stale ones marked); `stale=True` lists only the stale ones; `area` (key, title or id)
         keeps the rows linked to that area of the owner."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            rows = self.store.list_memories(
-                cur, status=status, type=type, user_id=user_id, workspace_id=workspace_id, stale=stale, now=now
+        with self.store.unit_of_work() as uow:
+            rows = uow.memories.list_memories(
+                status=status, type=type, user_id=user_id, workspace_id=workspace_id, stale=stale, now=now
             )
             if area is None:
                 return rows
-            found = self._find_area(cur, area, workspace_id or self.settings.workspace_default, user_id)
+            found = self._find_area(uow, area, workspace_id or self.settings.workspace_default, user_id)
             return [r for r in rows if found and str(found["memory_id"]) in area_ids(r["links"])]
 
     def search(
@@ -352,21 +350,21 @@ class MemoryService:
         (a key, title or id) when given, else the owner's area whose description is nearest the query.
         Each row carries `areas`, the titles of the areas it is linked to."""
         workspace_id = workspace_id or self.settings.workspace_default
-        with self.store.connect() as conn, conn.cursor() as cur:
-            expansion = self._expand(cur, query, workspace_id, include_stale, now)
+        with self.store.unit_of_work() as uow:
+            expansion = self._expand(uow, query, workspace_id, include_stale, now)
         embedding = self._embed(expansion.text)
-        with self.store.connect() as conn, conn.cursor() as cur:
-            self._guard_embedding_config(cur)
-            best = self._find_area(cur, area, workspace_id, user_id) if area else self.store.nearest_area(
-                cur, scope="user" if user_id else "workspace", workspace_id=workspace_id, user_id=user_id,
+        with self.store.unit_of_work() as uow:
+            self._guard_embedding_config(uow)
+            best = self._find_area(uow, area, workspace_id, user_id) if area else uow.vectors.nearest_area(
+                scope="user" if user_id else "workspace", workspace_id=workspace_id, user_id=user_id,
                 query_embedding=embedding,
             )
-            rows = self.store.search(
-                cur, query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=k, type=type,
+            rows = uow.vectors.search(
+                query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=k, type=type,
                 include_stale=include_stale, now=now, area_boost=best["memory_id"] if best else None,
                 text_boost=expansion.related,
             )
-            titles = self.store.areas_by_memory_id(cur, [i for r in rows for i in area_ids(r["links"])])
+            titles = uow.memories.areas_by_memory_id([i for r in rows for i in area_ids(r["links"])])
             for r in rows:
                 r["areas"] = [titles[i]["payload"]["title"] for i in area_ids(r["links"]) if i in titles]
                 if expansion.terms:  # which terms widened the query, so the effect can be seen
@@ -378,16 +376,16 @@ class MemoryService:
         now: datetime | None = None,
     ) -> Expansion:
         """What `search` does to the query: active glossary terms found in it add their other aliases and expansion."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            return self._expand(cur, query, workspace_id or self.settings.workspace_default, include_stale, now)
+        with self.store.unit_of_work() as uow:
+            return self._expand(uow, query, workspace_id or self.settings.workspace_default, include_stale, now)
 
-    def _expand(self, cur, query: str, workspace_id: str, include_stale: bool, now: datetime | None) -> Expansion:
+    def _expand(self, uow: UnitOfWork, query: str, workspace_id: str, include_stale: bool, now: datetime | None) -> Expansion:
         """Only active terms count (a candidate expands nothing). `related` never adds text, it only boosts rank."""
         if "term" not in self.registry:
             return Expansion(query)
         added: list[str] = []
         result = Expansion(query)
-        for row in reversed(self.store.list_memories(cur, status="active", type="term", workspace_id=workspace_id, now=now)):
+        for row in reversed(uow.memories.list_memories(status="active", type="term", workspace_id=workspace_id, now=now)):
             if row["scope"] != "workspace" or (row["stale"] and not include_stale):
                 continue
             term = row["payload"]
@@ -404,11 +402,11 @@ class MemoryService:
 
     # --- areas ---------------------------------------------------------------------
 
-    def _find_area(self, cur, ref: str, workspace_id: str, user_id: str | None) -> Row | None:
+    def _find_area(self, uow: UnitOfWork, ref: str, workspace_id: str, user_id: str | None) -> Row | None:
         """The owner's active area whose key, title or memory_id is `ref` (title compared ignoring case)."""
         wanted = ref.strip().lower()
-        for row in self.store.owner_areas(
-            cur, scope="user" if user_id else "workspace", workspace_id=workspace_id, user_id=user_id
+        for row in uow.memories.owner_areas(
+            scope="user" if user_id else "workspace", workspace_id=workspace_id, user_id=user_id
         ):
             if wanted in (str(row["payload"].get("key") or "").lower(), row["payload"]["title"].lower(), str(row["memory_id"])):
                 return row
@@ -416,16 +414,16 @@ class MemoryService:
 
     def areas(self, actor: Actor, *, user_id: str | None = None, workspace_id: str | None = None) -> list[dict]:
         """The active areas of a user (or of every owner in the workspace), each with its count of active linked rows."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            rows = self.store.list_memories(
-                cur, status="active", type="area", user_id=user_id,
+        with self.store.unit_of_work() as uow:
+            rows = uow.memories.list_memories(
+                status="active", type="area", user_id=user_id,
                 workspace_id=workspace_id or self.settings.workspace_default,
             )
             return [
                 {
                     "memory_id": r["memory_id"], "key": r["payload"].get("key"), "title": r["payload"]["title"],
                     "proposed": r["payload"].get("proposed", False), "user_id": r["user_id"],
-                    "count": len(self.store.linked_rows(cur, r["memory_id"])),
+                    "count": len(uow.memories.linked_rows(r["memory_id"])),
                 }
                 for r in reversed(rows)
             ]
@@ -434,18 +432,18 @@ class MemoryService:
         """Move every `in_area` link of `source` to `target` (new versions), then archive `source`."""
         if source == target:
             raise ValidationError("an area cannot be merged into itself")
-        with self.store.connect() as conn, conn.cursor() as cur:
+        with self.store.unit_of_work() as uow:
             rows = []
             for memory_id in (source, target):
-                row = self.store.get_active(cur, memory_id)
+                row = uow.memories.get_active(memory_id)
                 if row is None or row["type"] != "area":
                     raise NotFound(f"no active area {memory_id}")
                 self._authorize_owner_or_admin(actor, row)
                 rows.append(row)
             if any(rows[0][k] != rows[1][k] for k in ("scope", "user_id", "workspace_id")):
                 raise ValidationError("areas can only be merged within one owner")
-            moved = self.store.move_area_links(cur, source, target, created_by=actor.id)
-            self.store.archive(cur, source)
+            moved = uow.memories.move_area_links(source, target, created_by=actor.id)
+            uow.memories.archive(source)
             return {"moved": moved, "archived": source, "into": target}
 
     def page(
@@ -453,11 +451,11 @@ class MemoryService:
     ) -> dict[str, Any]:
         """One area of `owner` (a user id; None = the workspace) read as a page: the title, the derived summary,
         the active non-stale rows linked to it (newest first, capped), and the newest `observed_at` among them."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            row = self._find_area(cur, area, workspace_id or self.settings.workspace_default, owner)
+        with self.store.unit_of_work() as uow:
+            row = self._find_area(uow, area, workspace_id or self.settings.workspace_default, owner)
             if row is None:
                 raise NotFound(f"no area {area!r}")
-            return self._page(cur, row, now)
+            return self._page(uow, row, now)
 
     def page_for_query(
         self, query: str, owner: str | None, *, workspace_id: str | None = None, now: datetime | None = None
@@ -465,29 +463,29 @@ class MemoryService:
         """The page of the owner's active area nearest the query, or None when no area is close enough
         (`areas.page_min_similarity`) or the area has no row to show."""
         embedding = self._embed(query)
-        with self.store.connect() as conn, conn.cursor() as cur:
-            best = self.store.nearest_area(
-                cur, scope="user" if owner else "workspace",
+        with self.store.unit_of_work() as uow:
+            best = uow.vectors.nearest_area(
+                scope="user" if owner else "workspace",
                 workspace_id=workspace_id or self.settings.workspace_default, user_id=owner, query_embedding=embedding,
             )
             if best is None or best["status"] != "active" or best["similarity"] < self.settings.areas.page_min_similarity:
                 return None
-            page = self._page(cur, best, now)
+            page = self._page(uow, best, now)
             return page if page["details"] else None
 
     def pages(self, owner: str | None, *, workspace_id: str | None = None, now: datetime | None = None) -> list[dict[str, Any]]:
         """Every page of `owner` that has at least one row."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            rows = self.store.owner_areas(
-                cur, scope="user" if owner else "workspace",
+        with self.store.unit_of_work() as uow:
+            rows = uow.memories.owner_areas(
+                scope="user" if owner else "workspace",
                 workspace_id=workspace_id or self.settings.workspace_default, user_id=owner,
             )
-            pages = [self._page(cur, r, now) for r in rows]
+            pages = [self._page(uow, r, now) for r in rows]
             return [pg for pg in pages if pg["details"]]
 
-    def _page(self, cur, area: Row, now: datetime | None) -> dict[str, Any]:
-        details = self.store.linked_rows(
-            cur, area["memory_id"], stale_at=now or datetime.now(timezone.utc), limit=self.settings.areas.page_max_items
+    def _page(self, uow: UnitOfWork, area: Row, now: datetime | None) -> dict[str, Any]:
+        details = uow.memories.linked_rows(
+            area["memory_id"], stale_at=now or datetime.now(timezone.utc), limit=self.settings.areas.page_max_items
         )
         return {
             "memory_id": area["memory_id"],
@@ -500,14 +498,14 @@ class MemoryService:
 
     def queue(self, actor: Actor, *, workspace_id: str | None = None) -> list[Row]:
         """Candidates awaiting review (any scope), conflicts first."""
-        with self.store.connect() as conn, conn.cursor() as cur:
-            return self.store.queue(cur, workspace_id=workspace_id)
+        with self.store.unit_of_work() as uow:
+            return uow.memories.queue(workspace_id=workspace_id)
 
     def runs(self, actor: Actor, *, last: int = 10) -> list[Row]:
-        with self.store.connect() as conn, conn.cursor() as cur:
-            rows = self.store.list_run_summaries(cur, last=last)
+        with self.store.unit_of_work() as uow:
+            rows = uow.runs.list_run_summaries(last=last)
             for row in rows:
-                row["dropped_by_reason"] = self.store.dropped_by_reason(cur, row["run_id"])
+                row["dropped_by_reason"] = uow.runs.dropped_by_reason(row["run_id"])
             return rows
 
     # --- agent proposals -----------------------------------------------------------
@@ -531,10 +529,9 @@ class MemoryService:
         if scope == "user" and not user_id:
             raise ValidationError("user_id is required for scope=user")
         embedding = self._embed(instance.content)
-        with self.store.connect() as conn, conn.cursor() as cur:
-            self._guard_embedding_config(cur)
-            return self.store.add_memory(
-                cur,
+        with self.store.unit_of_work() as uow:
+            self._guard_embedding_config(uow)
+            return uow.memories.add_memory(
                 type=type,
                 schema_version=self.registry.latest_version(type),
                 scope=scope,
@@ -561,25 +558,22 @@ class MemoryService:
         if not actor.has_role("workspace_admin"):
             raise PermissionDenied("only a workspace_admin may reembed the ledger")
         count = 0
-        with self.store.connect() as conn:
-            with conn.cursor() as cur:
-                saved = self.store.get_meta(cur, "embedding") or {}
-                if saved.get("dims") != self.settings.embeddings.dims:
-                    self.store.set_embedding_dims(cur, self.settings.embeddings.dims)
-            with conn.cursor() as read_cur, conn.cursor() as write_cur:
-                for batch in self.store.iter_for_reembed(read_cur, batch_size=batch_size):
-                    for row in batch:
-                        vector = self._embed(row["content"])
-                        self.store.update_embedding(write_cur, row["id"], vector)
-                        count += 1
-            with conn.cursor() as cur:
-                self.store.set_meta(
-                    cur, "embedding", {"model": self.settings.embeddings.model, "dims": self.settings.embeddings.dims}
-                )
+        with self.store.unit_of_work() as uow:
+            saved = uow.meta.get_meta("embedding") or {}
+            if saved.get("dims") != self.settings.embeddings.dims:
+                uow.vectors.set_embedding_dims(self.settings.embeddings.dims)
+            for batch in uow.vectors.iter_for_reembed(batch_size=batch_size):
+                for row in batch:
+                    vector = self._embed(row["content"])
+                    uow.vectors.update_embedding(row["id"], vector)
+                    count += 1
+            uow.meta.set_meta(
+                "embedding", {"model": self.settings.embeddings.model, "dims": self.settings.embeddings.dims}
+            )
         return count
 
     def purge_dropped(self, actor: Actor) -> int:
         if not actor.has_role("workspace_admin"):
             raise PermissionDenied("only a workspace_admin may purge dropped-candidate history")
-        with self.store.connect() as conn, conn.cursor() as cur:
-            return self.store.purge_dropped(cur, retention_days=self.settings.retention.dropped_days)
+        with self.store.unit_of_work() as uow:
+            return uow.runs.purge_dropped(retention_days=self.settings.retention.dropped_days)

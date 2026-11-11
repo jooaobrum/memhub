@@ -1,0 +1,12 @@
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT *, (status = 'active' AND valid_until IS NOT NULL AND valid_until < %s) AS stale FROM {p}_memory WHERE status = %s AND type = %s AND workspace_id = %s ORDER BY created_at DESC
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT typname AS name, oid, typarray AS array_oid, oid::regtype::text AS regtype, typdelim AS delimiter FROM pg_type t WHERE t.oid = to_regtype(%(name)s) ORDER BY t.oid
+SELECT value FROM {p}_memhub_meta WHERE key = %s
+SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {p}_memory WHERE status IN ('active','candidate') AND type=%(type)s AND scope=%(scope)s AND workspace_id=%(ws)s AND user_id=%(uid)s ORDER BY embedding <=> %(qe)s::vector LIMIT %(limit)s
+SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {p}_memory WHERE status='active' AND ((scope='workspace' AND workspace_id=%(ws)s) OR (scope='user' AND workspace_id=%(ws)s AND user_id=%(uid)s)) AND NOT (status = 'active' AND valid_until IS NOT NULL AND valid_until < %(now)s) AND type <> 'area' ORDER BY embedding <=> %(qe)s::vector LIMIT %(limit)s

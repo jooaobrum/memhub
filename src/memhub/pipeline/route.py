@@ -9,7 +9,8 @@ from memhub.config import Settings
 from memhub.pipeline.ground import Proposal
 from memhub.pipeline.reconcile import Decision
 from memhub.pipeline.segment import Segment
-from memhub.store import MemoryStore, newest_observed_at
+from memhub.storage import UnitOfWork
+from memhub.storage.rules import newest_observed_at
 from memhub.types import TypeRegistry
 
 
@@ -38,7 +39,7 @@ class Routed(NamedTuple):
     id: uuid.UUID
 
 def route(
-    p: Proposal, decision: Decision, *, cur, store: MemoryStore, registry: TypeRegistry, segment: Segment,
+    p: Proposal, decision: Decision, *, uow: UnitOfWork, registry: TypeRegistry, segment: Segment,
     source_name: str, settings: Settings, link: dict | None = None, links: list[dict] | None = None,
 ) -> Routed:
     """Apply the decision. `link` and `links` (each a `{kind, memory_id}`) are added to the memory written or
@@ -50,37 +51,37 @@ def route(
     target = decision.target
     links = [l for l in [link, *(links or [])] if l and not (target and str(target["memory_id"]) == l["memory_id"])]
     if decision.action == "merge":
-        store.merge_evidence_row(
-            cur, target["id"], new_evidence=evidence, thread_id=segment.thread_id, valid_until=valid_until,
+        uow.memories.merge_evidence_row(
+            target["id"], new_evidence=evidence, thread_id=segment.thread_id, valid_until=valid_until,
         )
         for l in links:
-            store.add_link(cur, target["id"], l)
+            uow.memories.add_link(target["id"], l)
         return Routed("merged", target["memory_id"], target["id"])
 
     content = p.memory.content
     payload = p.memory.model_dump(mode="json")
     entities = [e.model_dump() for e in p.memory.entities]
     if decision.action == "amend":  # a pending candidate takes the merged payload; nothing new is inserted
-        store.amend_row(cur, target["id"], content=p.memory.content, payload=p.memory.model_dump(mode="json"), embedding=p.embedding)
-        store.merge_evidence_row(cur, target["id"], new_evidence=evidence, thread_id=segment.thread_id)
+        uow.memories.amend_row(target["id"], content=p.memory.content, payload=p.memory.model_dump(mode="json"), embedding=p.embedding)
+        uow.memories.merge_evidence_row(target["id"], new_evidence=evidence, thread_id=segment.thread_id)
         return Routed("merged", target["memory_id"], target["id"])
     if decision.action == "supersede":
-        new = store.edit_memory(
-            cur, target["memory_id"], content=content, payload=payload, entities=entities,
+        new = uow.memories.edit_memory(
+            target["memory_id"], content=content, payload=payload, entities=entities,
             embedding=p.embedding, verified=False, created_by="remember" if p.explicit else "extractor", as_candidate=p.scope != "user" and settings.types[c.type].review,
             # the new version is its own claim: time fields come from the candidate, not the version it replaces
             times=dict(observed_at=observed_at, valid_from=c.valid_from, valid_until=valid_until,
                        durability=c.durability, assertion=c.assertion),
         )  # it keeps the evidence of the version it replaces or extends, and gains this candidate's
-        store.merge_evidence_row(cur, new["id"], new_evidence=evidence, thread_id=segment.thread_id)
+        uow.memories.merge_evidence_row(new["id"], new_evidence=evidence, thread_id=segment.thread_id)
         for l in links:
-            store.add_link(cur, new["id"], l)
+            uow.memories.add_link(new["id"], l)
         return Routed("superseded", new["memory_id"], new["id"])
 
     conflict = decision.action == "conflict"
     active = (p.scope == "user" or not settings.types[c.type].review) and not conflict
-    row = store.add_memory(
-        cur, type=p.candidate.type, schema_version=registry.latest_version(p.candidate.type), scope=p.scope,
+    row = uow.memories.add_memory(
+        type=p.candidate.type, schema_version=registry.latest_version(p.candidate.type), scope=p.scope,
         workspace_id=segment.workspace_id, user_id=segment.user_id if p.scope == "user" else None,
         content=content, payload=payload, entities=entities, embedding=p.embedding, evidence=evidence,
         status="active" if active else "candidate", verified=False, created_by="remember" if p.explicit else "extractor", score=p.score,

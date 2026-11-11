@@ -19,7 +19,8 @@ from memhub.config import Config, ConfigError, EmbeddingConfig, build_chat_model
 from memhub.service import MemoryService, ServiceError
 from memhub.settings import SEARCH_PLACES, Parts, Resolved, embedding_model_id, read_context, resolve
 from memhub.sources import build_source
-from memhub.store import Actor, MemoryStore, StoreError
+from memhub.storage.postgres import MemoryStore
+from memhub.storage.rules import Actor, StoreError
 
 load_dotenv(find_dotenv(usecwd=True))  # API keys live in a git-ignored .env
 
@@ -73,8 +74,8 @@ def _service(config: Optional[Path], *, check_embedding: bool = True) -> MemoryS
         _fail(exc)
     if check_embedding:
         try:
-            with store.connect() as conn, conn.cursor() as cur:
-                store.check_embedding_config(cur, model=settings.embeddings.model, dims=settings.embeddings.dims)
+            with store.unit_of_work() as uow:
+                uow.meta.check_embedding_config(model=settings.embeddings.model, dims=settings.embeddings.dims)
         except StoreError as exc:
             _fail(exc)
     registry = settings.build_registry()
