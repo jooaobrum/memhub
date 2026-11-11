@@ -1,6 +1,6 @@
 """N4 / AD-014: `service.search` on Postgres runs the SQL it ran before the storage ports.
 
-The statements were recorded at fdec080 (before the ports) into tests/data/search_sql_fdec080.txt.
+The statements were recorded at 2a58e6c (the last commit before the ports) into tests/data/search_sql_before_ports.txt.
 Set MEMHUB_RECORD_SQL=1 to write the file again - only ever on a commit whose search SQL is the reference.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import psycopg
 
 from memhub.service import Actor
 
-GOLDEN = Path(__file__).parent / "data" / "search_sql_fdec080.txt"
+GOLDEN = Path(__file__).parent / "data" / "search_sql_before_ports.txt"
 
 
 def _vec(seed: float, dims: int = 16) -> list[float]:
@@ -35,7 +35,7 @@ def _record(monkeypatch, prefix: str) -> list[str]:
     return seen
 
 
-def test_search_issues_the_sql_recorded_at_fdec080(service, monkeypatch):
+def test_search_issues_the_sql_recorded_before_the_ports(service, monkeypatch):
     admin = Actor(id="admin-1", roles=["workspace_admin"])
     for text in ("alice prefers tea", "alice lives in Lisbon", "the press runs at night"):
         service.add(admin, type="fact", scope="user", fields={"content": text}, user_id="alice")

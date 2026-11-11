@@ -29,8 +29,8 @@ Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_bind_shares
 **C6** - `service.py`, `memory.py`, `cli.py`, `middleware.py`, `toolkit.py`, `pipeline/*.py` import no `psycopg`, have no parameter named `cur`, and call no `.cursor(` / `.connect(` (AC 6)
 Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_no_psycopg_outside_the_postgres_backend`
 
-**C7** - `memhub.store` exports every public name it had at `fdec080`, each the same object as in its new module (AC 7)
-Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_store_shim_exports_every_name_from_fdec080`
+**C7** - `memhub.store` exports every public name it had at `2a58e6c`, each the same object as in its new module (AC 7)
+Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_store_shim_exports_every_name_from_before_the_ports`
 
 **C8** - The 10 pure helpers and errors import from a module that loads with `psycopg` blocked (AC 7)
 Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_pure_helpers_import_without_psycopg`
@@ -38,11 +38,11 @@ Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_pure_helper
 **C9** - The full suite passes on Postgres (AC 8)
 Proof: `.venv/bin/python -m pytest -q tests`
 
-**C10** - Every test-file line changed since `fdec080` in a pre-existing test file replaces `cur=cur, store=<x>` with `uow=<x>.bind(cur)` (AC 8)
+**C10** - Every test-file line changed since `2a58e6c` in a pre-existing test file replaces `cur=cur, store=<x>` with `uow=<x>.bind(cur)` (AC 8)
 Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_old_test_files_change_only_at_pipeline_call_sites`
 
-**C11** - `service.search` on Postgres issues the SQL statements recorded at `fdec080`, same text and order, prefix normalized (AC 9)
-Proof: `.venv/bin/python -m pytest tests/test_search_sql.py::test_search_issues_the_sql_recorded_at_fdec080`
+**C11** - `service.search` on Postgres issues the SQL statements recorded at `2a58e6c`, same text and order, prefix normalized (AC 9)
+Proof: `.venv/bin/python -m pytest tests/test_search_sql.py::test_search_issues_the_sql_recorded_before_the_ports`
 
 ### S2 - A backend says what it cannot do
 
@@ -137,7 +137,7 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_reembed
 
 ## Handoff
 
-- **Settled mid-build:** none
+- **Settled mid-build:** user chose "Own worktree": PR 3 builds in `~/worktrees/memhub-storage`; the PR 1 fix `2a58e6c` is its base, so C7, C10, C11 compare against `2a58e6c` (the last commit before the ports) instead of `fdec080`
 - **Dispatched:** none yet
 - **Boundary:** none closed
 - **Abandoned:** none

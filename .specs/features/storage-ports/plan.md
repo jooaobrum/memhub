@@ -109,9 +109,9 @@ The full existing suite stays green on Postgres while every caller uses a `UnitO
 4. The system SHALL give `MemoryStore.capabilities` all five capabilities, for every kind of `db` PR 1 accepts (pool, connection, callable, URL)
 5. WHEN `MemoryStore.bind(cur)` is used inside an open cursor's transaction THEN its writes SHALL be visible to that cursor before commit, and `bind` SHALL neither commit nor roll back
 6. The modules `service.py`, `memory.py`, `cli.py`, `middleware.py`, `toolkit.py` and every `pipeline/*.py` SHALL NOT import `psycopg`, take a parameter named `cur`, or call `.cursor(` or `.connect(`
-7. The system SHALL keep `memhub.store` exporting every public name it exported at `fdec080`, each the same object as in its new module; `newest_observed_at`, `fresh_evidence`, `area_link`, `area_ids`, `as_vector_list`, `Actor`, `StoreError`, `NotFound`, `Conflict`, `EmbeddingMismatch` SHALL live in a module that imports no psycopg
-8. The full test suite SHALL pass on Postgres, and test files SHALL differ from `fdec080` only where a pipeline call passed `cur=cur, store=store` and now passes `uow=store.bind(cur)` (AD-011)
-9. WHEN `service.search` runs on Postgres THEN it SHALL issue the same SQL statements, in the same order (table prefix normalized), as recorded at `fdec080` (AD-014)
+7. The system SHALL keep `memhub.store` exporting every public name it exported at `2a58e6c`, each the same object as in its new module; `newest_observed_at`, `fresh_evidence`, `area_link`, `area_ids`, `as_vector_list`, `Actor`, `StoreError`, `NotFound`, `Conflict`, `EmbeddingMismatch` SHALL live in a module that imports no psycopg
+8. The full test suite SHALL pass on Postgres, and test files SHALL differ from `2a58e6c` only where a pipeline call passed `cur=cur, store=store` and now passes `uow=store.bind(cur)` (AD-011)
+9. WHEN `service.search` runs on Postgres THEN it SHALL issue the same SQL statements, in the same order (table prefix normalized), as recorded at `2a58e6c`, the last commit before the ports (AD-014)
 
 ### S2: A backend says what it cannot do (P1)
 
@@ -168,12 +168,12 @@ An app test builds `Memory(db=MEM)` and gets Postgres's behaviour, with nothing 
 | Test call sites vs N1 | `MemoryStore` keeps its cursor API and is the Postgres backend; only pipeline call sites in tests change, to `uow=store.bind(cur)` | user: "Edit call sites" (AD-011) | y |
 | `memory://` sharing | fresh per `Memory`; shared by `<name>` within the process | user: "Fresh, or shared by name" (AD-012) | y |
 | `init()` on `memory://` | required, as on Postgres | user: "Require init()" (AD-013) | y |
-| N4 proof | same SQL as `fdec080` in a test; median latency from a bench script, not a gate | user: "Same SQL + bench" (AD-014) | y |
+| N4 proof | same SQL as `2a58e6c` in a test; median latency from a bench script, not a gate | user: "Same SQL + bench" (AD-014) | y |
 | `parallel_ingest` on a borrowed `psycopg.Connection` | Postgres declares it for every `db` kind; PR 1's advisory lock on the borrowed connection stays as it is | user: "Keep the flag" (AD-015) | y |
 | Which capabilities `Memory.__init__` checks | `transactions`, `vector_search`, `json_lookup` always; `schemas` when `database_schema` is set; `parallel_ingest` when `thread_lock` is called | no config key asks for several ingest workers, so nothing at startup needs it | n |
 | Repository method names | identical to today's `MemoryStore` names (`add_memory`, `list_memories`, ...), not renamed to `add` / `list` | TDD: "the move is mechanical"; renames would double the diff for no behaviour | n |
 | In-memory ordering ties | rows with the same `created_at` come back in insertion order | Postgres `now()` is fixed per transaction, so tie order there is unspecified; contract tests do not depend on ties | n |
-| The bench script | `scripts/bench_search.py` runs `service.search` 200 times on the test data at `fdec080` and at `HEAD` and prints both medians and the ratio; the result goes in the PR description | N4 asks for the number; AD-014 keeps it out of CI | n |
+| The bench script | `scripts/bench_search.py` runs `service.search` 200 times on the test data at `2a58e6c` and at `HEAD` and prints both medians and the ratio; the result goes in the PR description | N4 asks for the number; AD-014 keeps it out of CI | n |
 
 **Open questions:** none - all resolved or logged above.
 
