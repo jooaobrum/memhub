@@ -179,6 +179,8 @@ def env_layer(environ: Mapping[str, str]) -> dict[str, Any]:
             value = yaml.safe_load(environ[name])
         except yaml.YAMLError:
             value = environ[name]
+        if not isinstance(value, (list, dict, type(None))):
+            value = environ[name]  # a plain value stays text: validation turns it into the field's type ("5" -> 5, "123" stays a str)
         node = out
         for seg in path[:-1]:
             node = node.setdefault(seg, {})
@@ -287,7 +289,7 @@ def mask(key: str, value: Any) -> Any:
     if key.rsplit(".", 1)[-1] in SECRET_KEYS and value is not None:
         return "***"
     if isinstance(value, str):
-        return re.sub(r"(://[^:/@\s]+:)([^@\s]+)(@)", r"\1***\3", value)
+        return re.sub(r"(://[^:/\s]+:)(\S*)@", r"\1***@", value)  # up to the last @: a password may hold one
     return value
 
 
@@ -331,7 +333,11 @@ def _resolve(
     for _, layer in layers:
         user_raw = _merge_layers(user_raw, layer)
     values = interpolate(merged, environ, strict=strict)
-    config = Config.model_validate(values)
+    try:
+        config = Config.model_validate(values)
+    except ValidationError as exc:
+        problems = "; ".join(f"{'.'.join(str(s) for s in e['loc'])}: {e['msg']}" for e in exc.errors())
+        raise ConfigError(f"invalid configuration: {problems}") from exc
     config._raw = user_raw
     return Resolved(config=config, sources=sources, path=path, values=values)
 
@@ -415,6 +421,8 @@ def set_key(path: str | Path, key: str, text: str, *, environ: Mapping[str, str]
     for alias, name in KEY_ALIASES.items():  # write to whichever spelling the file already uses
         if head == name and alias in data and name not in data:
             head = alias
+        elif head == alias and name in data and alias not in data:
+            head = name
     segs[0] = head
     node = data
     for seg in segs[:-1]:
@@ -424,9 +432,8 @@ def set_key(path: str | Path, key: str, text: str, *, environ: Mapping[str, str]
     node[segs[-1]] = value
     try:
         _resolve(yaml_layer=copy.deepcopy(data), path=path, code_layer={}, environ=os.environ if environ is None else environ, strict=False)
-    except ValidationError as exc:
-        first = exc.errors()[0]
-        raise ConfigError(f"`{key}` = {text!r} is not valid: {'.'.join(str(p) for p in first['loc'])}: {first['msg']}") from exc
+    except ConfigError as exc:
+        raise ConfigError(f"`{key}` = {text!r} is not valid: {exc}") from exc
     check_no_secrets(data)
     write_yaml(path, data)
 

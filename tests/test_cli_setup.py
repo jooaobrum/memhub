@@ -293,7 +293,7 @@ def test_config_set_refuses_literal_secret(key):
     path = _yaml_file(Path("memhub.yaml"), {"project": "p"})
     before = path.read_bytes()
     result = runner.invoke(cli.app, ["config", "set", f"models.{key}", "sk-123"])
-    assert result.exit_code == 1 and "${VAR}" in result.output and path.read_bytes() == before
+    assert result.exit_code == 1 and "pass a ${VAR} reference" in result.output and path.read_bytes() == before
     assert runner.invoke(cli.app, ["config", "set", f"models.{key}", "${OPENAI_API_KEY}"]).exit_code == 0
     assert _loaded()["models"][key] == "${OPENAI_API_KEY}"
 
@@ -554,3 +554,18 @@ def test_cli_without_embedder_source_names_key(pg_dsn):
     for command in (["list"], ["init"], ["search", "x"]):
         result = runner.invoke(cli.app, [*command, "--config", str(path)])
         assert result.exit_code != 0 and "embeddings" in result.output, command
+
+
+def test_config_set_follows_the_files_spelling_of_an_alias():
+    path = _yaml_file(Path("memhub.yaml"), {"project_prefix": "a"})
+    assert runner.invoke(cli.app, ["config", "set", "project", "b"]).exit_code == 0
+    assert _loaded() == {"project_prefix": "b"}
+    _yaml_file(path, {"project": "a"})
+    assert runner.invoke(cli.app, ["config", "set", "project_prefix", "c"]).exit_code == 0
+    assert _loaded() == {"project": "c"}
+
+
+def test_config_show_masks_a_password_that_holds_an_at_sign():
+    _yaml_file(Path("memhub.yaml"), {"project": "p", "db": "postgresql://u:p@ss@h/d"})
+    shown = {k: v for k, v, _ in _lines(runner.invoke(cli.app, ["config", "show"]).output)}
+    assert shown["db"] == "postgresql://u:***@h/d"

@@ -204,3 +204,11 @@ def test_save_refuses_literal_secret_and_writes_nothing(key, tmp_path):
     with pytest.raises(ConfigError, match=key):
         cfg.save(target)
     assert not target.exists() and not list(tmp_path.glob("*.tmp"))
+
+
+def test_a_value_the_field_cannot_hold_is_a_config_error_not_a_traceback():
+    with pytest.raises(ConfigError, match="project_prefix"):  # "123" is read as text, then refused as a table prefix
+        resolve(environ={"MEMHUB_PROJECT": "123"})
+    assert resolve(environ={"MEMHUB_INGESTION__MAX_CANDIDATES": "6"}).config.ingestion.max_candidates == 6
+    with pytest.raises(ConfigError, match="ingestion.max_candidates"):
+        resolve(environ={"MEMHUB_INGESTION__MAX_CANDIDATES": "many"})
