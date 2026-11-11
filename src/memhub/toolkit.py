@@ -30,9 +30,12 @@ def _view(row: dict) -> dict[str, Any]:
 
 
 class MemoryToolkit:
-    def __init__(self, service: MemoryService, *, workspace_id: str, user_id: str | None, k: int = 5, actor: Actor | None = None):
+    def __init__(self, service: MemoryService, *, workspace_id: str, user_id: str | None, k: int = 5, actor: Actor | None = None,
+                 run_id: str | None = None, agent_id: str | None = None):
+        """`run_id` / `agent_id` (the app's run and agent) are stored on what `propose_memory` writes."""
         self.service, self.workspace_id, self.user_id, self.k = service, workspace_id, user_id, k
         self.actor = actor or Actor(id="agent")
+        self.run_id, self.agent_id = run_id, agent_id
 
     def search_memory(self, query: str, type: str | None = None) -> list[dict[str, Any]]:
         rows = self.service.search(self.actor, query, workspace_id=self.workspace_id, user_id=self.user_id, k=self.k, type=type)
@@ -43,7 +46,7 @@ class MemoryToolkit:
         try:
             row = self.service.propose(
                 self.actor, type=type, scope=scope, fields=fields, evidence=evidence or [],
-                workspace_id=self.workspace_id, user_id=self.user_id,
+                workspace_id=self.workspace_id, user_id=self.user_id, run_id=self.run_id, agent_id=self.agent_id,
             )
         except ServiceError as exc:
             return {"rejected": str(exc)}

@@ -16,6 +16,10 @@ def build_source(cfg: Any, *, workspace_id: str, base_dir: Path) -> Any:
         from memhub.sources.mlflow import MLflowSource
 
         return MLflowSource(cfg, workspace_id=workspace_id)
+    if cfg.kind == "claude_code":
+        from memhub.sources.claude_code import ClaudeCodeSource
+
+        return ClaudeCodeSource(cfg)
     if cfg.kind == "sql":
         from memhub.sources.sql import SQLSource
 

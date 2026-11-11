@@ -25,11 +25,13 @@ ollama = ["langchain-ollama>=0.2"]
 mistral = ["langchain-mistralai>=0.2"]
 mlflow = ["mlflow>=2.14"]
 sqlite = ["sqlite-vec>=0.1.6"]
+mcp = ["mcp>=2.0,<3"]
 dev = [
   "hatchling",  # the packaging test builds a wheel
   "pytest>=8.0",
   "pytest-cov>=5.0",
   "sqlite-vec>=0.1.6",
+  "mcp>=2.0,<3",
 ]
 
 [project.scripts]
