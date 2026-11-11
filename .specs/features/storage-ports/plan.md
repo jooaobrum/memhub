@@ -172,8 +172,8 @@ An app test builds `Memory(db=MEM)` and gets Postgres's behaviour, with nothing 
 | `parallel_ingest` on a borrowed `psycopg.Connection` | Postgres declares it for every `db` kind; PR 1's advisory lock on the borrowed connection stays as it is | user: "Keep the flag" (AD-015) | y |
 | Which capabilities `Memory.__init__` checks | `transactions`, `vector_search`, `json_lookup` always; `schemas` when `database_schema` is set; `parallel_ingest` when `thread_lock` is called | no config key asks for several ingest workers, so nothing at startup needs it | n |
 | Repository method names | identical to today's `MemoryStore` names (`add_memory`, `list_memories`, ...), not renamed to `add` / `list` | TDD: "the move is mechanical"; renames would double the diff for no behaviour | n |
-| In-memory ordering ties | rows with the same `created_at` come back in insertion order | Postgres `now()` is fixed per transaction, so tie order there is unspecified; contract tests do not depend on ties | n |
-| The bench script | `scripts/bench_search.py` runs `service.search` 200 times on the test data at `2a58e6c` and at `HEAD` and prints both medians and the ratio; the result goes in the PR description | N4 asks for the number; AD-014 keeps it out of CI | n |
+| In-memory ordering ties | rows with the same sort key break ties by insertion, in the sort's direction (a later insert is newer) | Postgres `now()` is fixed per transaction, so tie order there is unspecified; contract tests do not depend on ties | n |
+| The bench script | `scripts/bench_search.py` alternates `2a58e6c` and the working tree for 5 rounds of 200 `service.search` calls and prints the median of each side and the ratio; the result goes in the PR description | N4 asks for the number; AD-014 keeps it out of CI | n |
 
 **Open questions:** none - all resolved or logged above.
 

@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub`
 Plan: `.specs/features/storage-ports/plan.md`
 
-27 checks in 3 slices · 4 one-way doors · 0 open
+28 checks in 3 slices · 4 one-way doors · 0 open
 
 ## Checks
 
@@ -105,6 +105,10 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_failed_
 Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py::test_reembed_to_new_dims`
 Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_reembed_to_new_dims`
 
+**C28** - On either backend, a unit of work before `init` raises `EmbeddingMismatch` naming `init()`; on a Postgres database where `init` never ran (no `vector` type) it is that error, not psycopg's `vector type not found` (AC 15; appended mid-build)
+Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py::test_a_call_before_init_names_init`
+Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_before_init_names_init`
+
 ## Coverage
 
 | Set (size) | Member -> proof | Unproven |
@@ -116,7 +120,7 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_reembed
 | modules that must not touch psycopg (6) | `service.py` · `memory.py` · `cli.py` · `middleware.py` · `toolkit.py` · `pipeline/*.py` - C6, one AST walk over all | - |
 | unit-of-work outcomes (2) | clean exit C3 · exception C3 C26 | - |
 | AC 14 URL pairs (3) | `MEM` x2 C16 · `shared` x2 C16 · `a` / `b` C16 | - |
-| AC 15 examples (2) | before init C17 · other dims C17 | - |
+| AC 15 examples (3) | before init C17 C28 · other dims C17 · fresh Postgres database C28 | - |
 | AC 18 examples (2) | commit -> seen C20 · raise -> nothing C20 | - |
 | AC 19 uniqueness (2) | same `memory_id` C21 · same keyed slot C21 | - |
 | AC 21 search examples (8) | cosine order C23 · stale C24 · other user C24 · other workspace C24 · candidate C24 · area/type C24 · `k` C24 · boosts C24 | - |
@@ -139,5 +143,5 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_reembed
 
 - **Settled mid-build:** user chose "Own worktree": PR 3 builds in `~/worktrees/memhub-storage`; the PR 1 fix `2a58e6c` is its base, so C7, C10, C11 compare against `2a58e6c` (the last commit before the ports) instead of `fdec080`
 - **Dispatched:** none yet
-- **Boundary:** none closed
-- **Abandoned:** none
+- **Boundary:** C1-C28 closed at `21e2f48` (refactor `b8f70ae`, backend and suites `21e2f48`); full suite on Postgres 602 passed before the new tests; N4 bench: ratio 0.954 and 0.998 (interleaved, 5 rounds)
+- **Abandoned:** a bench that ran base then tree once (ratios 1.19 / 1.12 / 0.97: the second side always met a fuller database); replaced by interleaved rounds
