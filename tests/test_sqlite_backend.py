@@ -507,3 +507,26 @@ def test_ingest_matches_the_in_memory_backend(tmp_path, settings, registry, monk
     assert ledgers["memory"][0][1] == [("c1", 2, 2, []), ("c2", 1, 0, ["ungrounded"]), ("c3", 0, 0, [])]
     assert ledgers["sqlite-vec"] == ledgers["memory"]
     assert ledgers["python"] == ledgers["memory"]
+
+
+def test_doctor_reports_the_vector_path(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from memhub import cli
+
+    monkeypatch.chdir(tmp_path)
+    import langchain.embeddings
+
+    monkeypatch.setattr(langchain.embeddings, "init_embeddings", lambda spec, **kw: FakeEmbeddings(16))
+    runner = CliRunner()
+    init = runner.invoke(cli.app, ["init", "--db", "sqlite:///m.db", "--embeddings", "openai:text-embedding-3-small",
+                                   "--preset", "assistant", "--project", "doc"])
+    assert init.exit_code == 0, init.output
+    for flag, path in (("1", "sqlite-vec"), ("0", "python")):
+        monkeypatch.setenv(VEC_ENV, flag)
+        out = runner.invoke(cli.app, ["doctor"])
+        lines = [line.split("  ") for line in out.output.splitlines()]
+        assert ["ok", "db", "sqlite answers SELECT 1"] in lines, out.output
+        vector = [line for line in lines if line[1:2] == ["vector"]]
+        assert len(vector) == 1 and vector[0][0] == "ok" and vector[0][2].startswith(path), out.output
+        assert any(line[:2] == ["ok", "schema"] for line in lines), out.output
