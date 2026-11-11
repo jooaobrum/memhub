@@ -1,0 +1,23 @@
+[
+  {
+    "file": "src/memhub/memory.py",
+    "old": "row = max(pending, key=lambda r: (r[\"version\"], r[\"created_at\"])) if pending else None",
+    "new": "row = min(pending, key=lambda r: (r[\"version\"], r[\"created_at\"])) if pending else None",
+    "proof": ".venv/bin/python -m pytest tests/test_memory_api.py::test_approve_reject_accept_memory_or_version_id",
+    "label": "approve(memory_id) picks the oldest candidate instead of the newest (C33)"
+  },
+  {
+    "file": "src/memhub/memory.py",
+    "old": "rows = sorted(rows, key=lambda r: r[\"similarity\"], reverse=True)[:top_k]",
+    "new": "rows = sorted(rows, key=lambda r: r[\"similarity\"], reverse=True)",
+    "proof": ".venv/bin/python -m pytest tests/test_memory_api.py::test_search_own_and_workspace_rows_only",
+    "label": "search(types=[...]) returns more than top_k rows (C27)"
+  },
+  {
+    "file": "src/memhub/connection.py",
+    "old": "_prepared.get(conn, set()).difference_update(r for r in ran if r.startswith(\"schema:\"))",
+    "new": "pass",
+    "proof": ".venv/bin/python -m pytest tests/test_connection_source.py::test_rolled_back_search_path_is_set_again",
+    "label": "a rolled-back SET search_path is still remembered as done (C14)"
+  }
+]

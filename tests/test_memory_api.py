@@ -340,6 +340,9 @@ def test_search_own_and_workspace_rows_only(mem):
     assert len(mem.search("boiler note", **IDS, top_k=2)) == 2
     found = {r["content"] for r in mem.search("boiler note", **IDS, top_k=10)}
     assert found == {"boiler alpha note", "boiler beta note", "boiler gamma note", "boiler shared note"}
+    mem.add({"key": "boiler", "content": "boiler preference note"}, type="preference", **IDS)
+    assert len(mem.search("boiler note", **IDS, top_k=1, types=["fact", "preference"])) == 1
+    assert [r["type"] for r in mem.search("boiler note", **IDS, top_k=5, types=["preference"])] == ["preference"]
 
 
 def test_get_all_by_status(mem):
@@ -379,13 +382,29 @@ def test_delete_archives_and_hard_deletes(mem):
         mem.delete(shared.version_id, **IDS, hard=True)
 
 
+def _run_row(m: Memory, user: str) -> None:
+    now = datetime.now(timezone.utc)
+    with m.store.connect() as conn, conn.cursor() as cur:
+        m.store.upsert_run(cur, run_id=uuid.uuid4(), source="jsonl", thread_id=f"t-{user}", workspace_id=WS, user_id=user,
+                           first_message_id="1", last_message_id="2", last_message_at=now, final_pass=False, status="ok")
+
+
+def _run_users(m: Memory) -> list[str]:
+    with m.store.connect() as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT user_id FROM {m.store.prefix}_memory_runs ORDER BY user_id")
+        return [r["user_id"] for r in cur.fetchall()]
+
+
 def test_delete_all_erases_only_caller(mem):
     mem.add("alice one", **IDS)
     mem.add("alice two", **IDS)
     mem.add("bob one", **BOB)
-    assert mem.delete_all(**IDS) == {"deleted": 2, "runs": 0}
+    _run_row(mem, "alice")
+    _run_row(mem, "bob")
+    assert mem.delete_all(**IDS) == {"deleted": 2, "runs": 1}
     assert mem.get_all(**IDS) == []
     assert [r["content"] for r in mem.get_all(**BOB)] == ["bob one"]
+    assert _run_users(mem) == ["bob"]
 
 
 def test_queue_workspace_candidates_conflicts_first(mem):
@@ -395,6 +414,11 @@ def test_queue_workspace_candidates_conflicts_first(mem):
     _sql(mem, "UPDATE {t} SET conflicts_with = %s WHERE id = %s", uuid.uuid4(), uuid.UUID(conflicting.version_id))
     assert [r["content"] for r in mem.queue(**ADMIN)] == ["second pending", "first pending"]
     assert str(mem.queue(**ADMIN)[1]["id"]) == plain.version_id
+    json.loads(mem.tools(**BOB).call("propose_memory", {"type": "fact", "fields": {"content": "bob private idea"}}))
+    assert "bob private idea" not in [r["content"] for r in mem.queue(**IDS)]  # not alice's to review
+    assert "bob private idea" in [r["content"] for r in mem.queue(**BOB)]
+    assert "bob private idea" in [r["content"] for r in mem.queue(**ADMIN)]
+    assert {"first pending", "second pending"} <= {r["content"] for r in mem.queue(**IDS)}
 
 
 def test_approve_reject_accept_memory_or_version_id(mem):
@@ -410,6 +434,17 @@ def test_approve_reject_accept_memory_or_version_id(mem):
         mem.approve(by_memory.id, **ADMIN)  # no candidate left on that memory
     with pytest.raises(NotFound):
         mem.approve(uuid.uuid4(), **ADMIN)
+
+    two = mem.add("two candidate versions v1", **IDS, scope="workspace").results[0]
+    with mem.store.connect() as conn, conn.cursor() as cur:
+        v2 = mem.store.add_memory(
+            cur, type="fact", schema_version=1, scope="workspace", workspace_id=WS, user_id=None,
+            content="two candidate versions v2", payload={"content": "two candidate versions v2"}, entities=[],
+            embedding=FakeEmbeddings(16).embed_query("two candidate versions v2"), evidence=[], status="candidate",
+            verified=False, created_by="alice", memory_id=uuid.UUID(two.id), version=2,
+        )
+    newest = mem.approve(two.id, **ADMIN)
+    assert (newest.version_id, newest.version, newest.content) == (str(v2["id"]), 2, "two candidate versions v2")
 
 
 def test_promote_returns_pending_workspace_event(mem):
@@ -441,6 +476,35 @@ def test_ingest_runs_single_source(pool):
     m.init()
     summary = m.ingest(**IDS)
     assert summary.run_id is not None and summary.source == "empty"
+
+
+class OneMessage(EmptySource):
+    """One user message, two days old: enough for the pipeline to take the thread lock and write a run row."""
+
+    def read(self):
+        from memhub.sources.base import Interaction
+
+        when = datetime.now(timezone.utc) - timedelta(days=2)
+        return [Interaction(thread_id="t1", user_id="alice", workspace_id=self.workspace_id, message_id="m1", role="user",
+                            content="I moved to Lisbon last month", timestamp=when, trace_id="tr1")]
+
+
+def test_ingest_through_pool_of_one(pg_dsn):
+    from tests.fakes import extraction
+
+    pool = ConnectionPool(pg_dsn, min_size=1, max_size=1, timeout=5, open=True)
+    try:
+        m = Memory(db=pool, llm=FakeChatModel([extraction()] * 4, unrelated_by_default=True), embedder=FakeEmbeddings(16),
+                   config={"project_prefix": _prefix(), "sources": {"one": {"kind": "tests.test_memory_api:OneMessage"}}})
+        m.init()
+        summary = m.ingest(**IDS)
+        assert summary.threads_seen == 1 and summary.threads_locked == 0
+        with m.store.connect() as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT count(*) AS n FROM {m.store.prefix}_memory_runs WHERE thread_id = 't1'")
+            assert cur.fetchone()["n"] >= 1
+        assert pool.closed is False
+    finally:
+        pool.close()
 
 
 def test_ingest_without_source_raises(mem):

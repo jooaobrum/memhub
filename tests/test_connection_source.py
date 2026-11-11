@@ -242,3 +242,34 @@ def test_url_opens_and_closes_per_transaction(pg_dsn, monkeypatch):
             assert c.closed is False
     assert len(opened) == 2
     assert all(c.closed for c in opened)
+
+
+# --- C49: a search_path that a rollback undid is set again ---------------------------------------------------
+
+
+def _search_path(c: psycopg.Connection) -> str:
+    with c.cursor(row_factory=psycopg.rows.tuple_row) as cur:
+        cur.execute("SHOW search_path")
+        return cur.fetchone()[0]
+
+
+def test_rolled_back_search_path_is_set_again(conn):
+    schema = f"s{uuid.uuid4().hex[:8]}"
+    with pytest.raises(RuntimeError):
+        with connection_mod._own_transaction(conn, vector=False, schema=schema):
+            raise RuntimeError("first memhub transaction fails")
+    assert f"schema:{schema}" not in connection_mod._prepared.get(conn, set())
+    with connection_mod._own_transaction(conn, vector=False, schema=schema) as c:
+        assert _search_path(c).startswith(schema)
+
+
+def test_app_rollback_does_not_lose_the_schema(pg_dsn, conn):
+    config = {"project_prefix": _prefix(), "database_schema": f"s{uuid.uuid4().hex[:8]}"}
+    Memory(db=pg_dsn, embedder=FakeEmbeddings(16), config=config).init()  # tables made elsewhere, e.g. by `memhub init`
+    m = Memory(db=conn, embedder=FakeEmbeddings(16), config=config)
+    conn.execute("SELECT 1")  # the app opens a transaction before memhub ever touches this connection
+    m.add("inside the app transaction", **IDS)
+    conn.rollback()  # undoes everything memhub did inside it, a SET search_path included
+    m.add("after the app rolled back", **IDS)
+    assert [r["content"] for r in m.get_all(**IDS)] == ["after the app rolled back"]
+    conn.rollback()

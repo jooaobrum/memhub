@@ -211,6 +211,12 @@ Every write tells the app what happened in the same shape.
 47. The system SHALL ship `docs/azure.md` showing a `ConnectionPool` whose connection class fetches an Entra token with `max_lifetime` under 3600, and `AzureChatOpenAI` / `AzureOpenAIEmbeddings` with `azure_ad_token_provider`; no module under `src/memhub` SHALL import `azure`
 48. WHEN `tests/e2e/test_pr1_memory.py` opens a psycopg pool, builds `Memory` with fake models and runs `init` → `add` → `search` → `promote` → `approve` → `delete_all` THEN each step SHALL succeed and the user's rows SHALL be gone; a call with no `user_id` SHALL raise `ValidationError`
 
+### S7: Found by verification (P1)
+
+49. IF memhub's first `SET search_path` on a borrowed connection runs inside the app's transaction and the app then rolls back, THEN the next memhub call SHALL set the search_path again and succeed
+    - a failed first memhub transaction → the next one sees the schema; app rollback after `add` → the next `add` succeeds
+50. WHEN `ingest()` runs through a pool of `max_size=1` THEN the system SHALL finish without waiting for a second connection, running the thread's transactions on the connection that holds the advisory lock
+
 ## Out of scope
 
 | Excluded | Why |

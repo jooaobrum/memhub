@@ -13,11 +13,13 @@ open, and commits or rolls back only its own transaction - a savepoint when the 
 from __future__ import annotations
 
 import sqlite3
+import threading
 import weakref
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
 import psycopg
+from psycopg import pq
 from pgvector.psycopg import register_vector
 from psycopg.rows import dict_row, tuple_row
 
@@ -32,15 +34,18 @@ _SQLITE = "the sqlite backend is not available yet (it ships in a later memhub r
 _prepared: "weakref.WeakKeyDictionary[psycopg.Connection, set[str]]" = weakref.WeakKeyDictionary()
 
 
-def _prepare(conn: psycopg.Connection, *, vector: bool, schema: str | None) -> set[str]:
-    """Run what is missing on this connection; returns what it ran, so a rolled-back transaction can forget it."""
+def _prepare(conn: psycopg.Connection, *, vector: bool, schema: str | None, remember_schema: bool = True) -> set[str]:
+    """Run what is missing on this connection; returns what it ran, so a rolled-back transaction can forget it.
+    `remember_schema=False` sets the search_path without caching it: a `SET` made inside the app's open
+    transaction is undone if the app rolls back, so it is run again on the next call."""
     done = _prepared.setdefault(conn, set())
     ran: set[str] = set()
     if schema and f"schema:{schema}" not in done:  # `public` stays on the path: that is where the vector extension usually lives
         conn.execute(f"SET search_path TO {schema}, public")
-        ran.add(f"schema:{schema}")
+        if remember_schema:
+            ran.add(f"schema:{schema}")
     if vector and "vector" not in done:
-        register_vector(conn)
+        register_vector(conn)  # a client-side adapter: no transaction can undo it
         ran.add("vector")
     done |= ran
     return ran
@@ -65,11 +70,12 @@ def _own_transaction(conn: psycopg.Connection, *, vector: bool, schema: str | No
     """memhub's transaction on `conn`: a real one when the connection is idle, a savepoint when the app has one
     open. Rows come back as dicts for the duration only; the app's row factory is put back after."""
     original = conn.row_factory
+    inside_app = conn.info.transaction_status == pq.TransactionStatus.INTRANS
     conn.row_factory = dict_row
     ran: set[str] = set()
     try:
         with conn.transaction():
-            ran = _prepare(conn, vector=vector, schema=schema)
+            ran = _prepare(conn, vector=vector, schema=schema, remember_schema=not inside_app)
             yield conn
     except BaseException:
         # a `SET` inside a rolled-back transaction is undone: run it again next time
@@ -168,20 +174,35 @@ class FactorySource(ConnectionSource):
 
 
 class PoolSource(ConnectionSource):
-    """A pool the app owns: one pooled connection per transaction, handed back open; the pool is never closed."""
+    """A pool the app owns: one pooled connection per transaction, handed back open; the pool is never closed.
+    While a thread holds an advisory lock, its transactions run on the lock's connection: a second connection
+    from a pool of size 1 would wait for the first forever."""
 
     def __init__(self, pool: Any) -> None:
         self.pool = pool
+        self._held = threading.local()
 
     @contextmanager
     def transaction(self, *, vector: bool = True, schema: str | None = None) -> Iterator[psycopg.Connection]:
+        held = getattr(self._held, "conn", None)
+        if held is not None:
+            with _own_transaction(held, vector=vector, schema=schema) as c:
+                yield c
+            return
         with self.pool.connection() as conn, _own_transaction(conn, vector=vector, schema=schema) as c:
             yield c
 
     @contextmanager
     def lock_connection(self) -> Iterator[psycopg.Connection]:
+        if getattr(self._held, "conn", None) is not None:  # a lock inside a lock: same connection
+            yield self._held.conn
+            return
         with self.pool.connection() as conn:
-            yield conn
+            self._held.conn = conn
+            try:
+                yield conn
+            finally:
+                self._held.conn = None
 
 
 class BorrowedConnectionSource(ConnectionSource):
