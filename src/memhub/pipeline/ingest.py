@@ -21,7 +21,7 @@ from memhub.pipeline.score import admit
 from memhub.pipeline.summarize import summarize_area
 from memhub.pipeline.verify import asked_only, episode_told_by_user, unsupported_claims, worth_checking
 from memhub.pipeline.segment import Segment, build_segments, group_threads
-from memhub.storage import Backend, UnitOfWork
+from memhub.storage import Backend, Capability, UnitOfWork
 from memhub.types import TypeRegistry
 
 log = logging.getLogger(__name__)
@@ -326,14 +326,18 @@ def ingest_source(
     summary.threads_seen = len(threads)
     touched: set[str] = set()  # areas that gained or changed a row in a committed segment
 
+    one = dict(store=store, settings=settings, registry=registry, source_name=source_name, extractor=extractor, judge=judge,
+               embeddings=embeddings, feedback=feedback, llm_check=llm_check, reprocess=reprocess, dry_run=dry_run, now=now)
+    can_lock = Capability.PARALLEL_INGEST in store.capabilities  # without it one worker is assumed (AD-016)
     for tid, msgs in threads.items():
+        if not can_lock:
+            _ingest_thread(tid, msgs, summary, touched, **one)
+            continue
         with store.thread_lock(source_name, tid) as locked:
             if not locked:  # another worker is on this thread: it would read the same watermark and write the same rows twice
                 summary.threads_locked += 1
                 continue
-            _ingest_thread(tid, msgs, summary, touched, store=store, settings=settings, registry=registry, source_name=source_name,
-                           extractor=extractor, judge=judge, embeddings=embeddings, feedback=feedback, llm_check=llm_check,
-                           reprocess=reprocess, dry_run=dry_run, now=now)
+            _ingest_thread(tid, msgs, summary, touched, **one)
 
     summary.outdated = summary.dropped_by_reason.get("outdated", 0)
     summary.same_slot_in_segment = summary.dropped_by_reason.get("same_slot_in_segment", 0)

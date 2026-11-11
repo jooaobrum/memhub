@@ -1,0 +1,16 @@
+# SQLite backend verification
+
+**Verdict**: FAIL
+**Mutations**: 3 - probed C7 (timestamps stored as UTC text), C12 (over-fetch before boosts), C8 (keyed-slot index); 1 killed, 2 not
+**Proofs**: `proofs.md` at fa670d9 (code identical to da95bfb; 35 pass, 0 fail)
+**Verifier**: independent sub-agent (author != verifier)
+
+## Findings
+
+| Finding | Evidence | Fix | Closed |
+| --- | --- | --- | --- |
+| Timestamps can be stored in their own offset, not UTC, and no test fails. The stale filter (`valid_until < ?`), `purge_dropped`, `get_watermark` and every `ORDER BY created_at/observed_at` compare that text, so text order stops being time order | mutation `_ts: value.astimezone(timezone.utc).isoformat(...) -> value.isoformat(...)` not killed by C7's proof, nor by all of `test_sqlite_backend.py`, `test_contract_sqlite.py` and the e2e test (86 pass). A Verifier example kills it: a row whose `valid_until` is 1 h before `NOW`, written in +02:00, stays in `search(now=NOW in -05:00)` and is not `stale` | in `test_row_values_round_trip`, read the raw `valid_until` text and assert that it ends in `+00:00` and equals `until.astimezone(utc).isoformat(timespec="microseconds")`. Add a search/stale case whose `valid_until` and `now` use non-UTC offsets across an hour boundary | `7fe7bc7` - C7 now reads the raw stored text (`test_row_values_round_trip`) and `test_stale_filter_compares_times_not_offsets`; mutation killed |
+| C12 does not hold the over-fetch rule (`max(k*4, 20)` rows ranked before `apply_boosts`). With the pool cut to `k`, a row that a boost would lift into the top k is never seen | mutation `search: _nearest(..., max(k * 4, 20)) -> _nearest(..., k)` not killed. `test_search_boosts_area_text_and_entity_capped_at_one` has 5 rows and `k=5`, so the pool never matters. A Verifier example kills it on both vector paths: 60 rows at 0.50 to 0.795 plus an area-linked row at 0.76 with `k=3, area_boost=area` should return the boosted row first | add a contract test where a boosted row ranks below position `k` by raw similarity (more than `k` rows, small `k`) and must come back first after the +0.05 boost | `7fe7bc7` - C12 `test_search_boosts_rows_ranked_below_k` (contract, every backend); mutation killed |
+| `sqlite:////` (empty absolute path) is not rejected as a URL of another shape. `open_backend` accepts it as the path `/`, and `init()` then fails with `sqlite3.OperationalError: unable to open database file`, not with the `TypeError` naming the accepted forms (AC 1) | Verifier example: `open_backend("sqlite:////")` does not raise. `sqlite_path` only rejects an empty remainder | make `sqlite_path` reject `/` (and blank or whitespace paths) with the same `TypeError`, and add `sqlite:////` to the bad forms in `test_sqlite_url_forms` | `7fe7bc7` - C2 `test_sqlite_url_forms` refuses `sqlite:////` and `sqlite:///  ` |
+
+Probed with no finding: keyed-slot mutation `COALESCE(user_id, '') -> user_id` was killed by C8. The keyed slot also holds on values outside the plan: the string `"true"` and the boolean `true` share one slot (as Postgres `->>` does), and `""`, `1` and `1.5` are separate slots with `""` unique. Search on an empty ledger returns `[]` on both paths. Stale filtering with non-UTC offsets is correct at HEAD.

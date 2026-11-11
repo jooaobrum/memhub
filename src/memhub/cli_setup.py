@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,7 +17,12 @@ from memhub.settings import (
     CONFIG_FILE, SEARCH_PLACES, Parts, Resolved, discover, embedding_model_id, load_preset, preset_names, resolve,
     set_key, write_context, write_yaml,
 )
-from memhub.store import MemoryStore, StoreError
+from memhub.storage import open_backend
+from memhub.storage.postgres import MemoryStore
+from memhub.storage.rules import StoreError
+
+# what a database can answer `init` with: a configuration problem to report, not a crash
+_INIT_ERRORS = (ConfigError, StoreError, psycopg.Error, sqlite3.Error, NotImplementedError, TypeError)
 
 ConfigOpt = typer.Option(None, "--config", "-c", help="Path to memhub.yaml (default: ./memhub.yaml, $MEMHUB_CONFIG, ~/.config/memhub/memhub.yaml)")
 POOL_LIFETIME_LIMIT = 3600  # an Entra token lives about an hour: a pool must recycle connections sooner
@@ -72,8 +78,8 @@ def _init_tables(cli: Any, config: Optional[Path], check_model: bool) -> None:
         if not legacy:
             model, dims = embedding_model_id(embedder, settings), got
     try:
-        MemoryStore(parts.db, settings.project_prefix, settings.database_schema).init(embedding_model=model, dims=dims)
-    except (ConfigError, StoreError, psycopg.Error) as exc:
+        open_backend(parts.db, settings.project_prefix, settings.database_schema).init(embedding_model=model, dims=dims)
+    except _INIT_ERRORS as exc:
         cli._fail(exc)
     typer.echo(f"initialized {settings.project_prefix}_memory / {settings.project_prefix}_memory_runs")
 
@@ -130,9 +136,9 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         except Exception as exc:  # noqa: BLE001 - any provider error is a configuration problem here
             _die(f"embedding model {embeddings or 'from connect'!r} is not reachable: {exc}")
         settings = resolved.config
-        MemoryStore(parts.db, settings.project_prefix, settings.database_schema).init(
+        open_backend(parts.db, settings.project_prefix, settings.database_schema).init(
             embedding_model=embedding_model_id(embedder, settings), dims=dims)
-    except (ConfigError, StoreError, psycopg.Error) as exc:
+    except _INIT_ERRORS as exc:
         cli._fail(exc)
     write_yaml(target, data)
     typer.echo(f"initialized {settings.project_prefix}_memory / {settings.project_prefix}_memory_runs")
@@ -210,10 +216,18 @@ def doctor(config: Optional[Path] = ConfigOpt) -> None:
 
     store = None
     try:
-        store = MemoryStore(parts.db, settings.project_prefix, settings.database_schema)
-        with store.connect(vector=False, schema=False) as conn:
-            conn.execute("SELECT 1")
-        say("ok", "db", "answers SELECT 1")
+        store = open_backend(parts.db, settings.project_prefix, settings.database_schema)
+        store = store.resolve() if getattr(store, "deferred", False) else store
+        if isinstance(store, MemoryStore):
+            with store.connect(vector=False, schema=False) as conn:
+                conn.execute("SELECT 1")
+        elif store.name == "sqlite":
+            with store.source.connection() as conn:
+                conn.execute("SELECT 1")
+        say("ok", "db", f"{store.name} answers SELECT 1")
+        if store.name == "sqlite":
+            hint = "" if store.vector_path == "sqlite-vec" else " (Python cosine: pip install memhub[sqlite] for search in SQL)"
+            say("ok", "vector", f"{store.vector_path}{hint}")
     except ConfigError as exc:
         store = None
         say("fail", "db", str(exc))
@@ -245,11 +259,7 @@ def doctor(config: Optional[Path] = ConfigOpt) -> None:
         say("skip", "schema", "needs the database")
     else:
         try:
-            with store.connect(vector=False) as conn, conn.cursor() as cur:
-                present = [t for t in (f"{settings.project_prefix}_memory", f"{settings.project_prefix}_memory_runs", f"{settings.project_prefix}_memhub_meta")
-                           if cur.execute("SELECT to_regclass(%s) AS t", (t,)).fetchone()["t"] is not None]
-                missing = [t for t in (f"{settings.project_prefix}_memory", f"{settings.project_prefix}_memory_runs", f"{settings.project_prefix}_memhub_meta") if t not in present]
-                saved = store.get_meta(cur, "embedding") if not missing else None
+            missing, saved = _ledger_state(store, settings.project_prefix)
         except Exception as exc:  # noqa: BLE001
             missing = [f"{type(exc).__name__}: {exc}"]
         if dims is None:
@@ -271,6 +281,23 @@ def doctor(config: Optional[Path] = ConfigOpt) -> None:
         if not life or life >= POOL_LIFETIME_LIMIT:
             say("warn", "pool", f"max_lifetime is {life}: set it below {POOL_LIFETIME_LIMIT} s so connections are renewed before an Entra token expires")
     done()
+
+
+def _ledger_state(store: Any, prefix: str) -> tuple[list[str], Any]:
+    """The ledger tables missing from the database, and the embedding meta when none is."""
+    tables = (f"{prefix}_memory", f"{prefix}_memory_runs", f"{prefix}_memhub_meta")
+    if isinstance(store, MemoryStore):
+        with store.connect(vector=False) as conn, conn.cursor() as cur:
+            missing = [t for t in tables if cur.execute("SELECT to_regclass(%s) AS t", (t,)).fetchone()["t"] is None]
+            return missing, (store.get_meta(cur, "embedding") if not missing else None)
+    if store.name == "sqlite":
+        with store.source.connection() as conn:
+            present = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        missing = [t for t in tables if t not in present]
+        if missing:
+            return missing, None
+    with store.unit_of_work() as uow:  # in memory, or SQLite with every table
+        return [], uow.meta.get_meta("embedding")
 
 
 # --- use --------------------------------------------------------------------------------------------------------

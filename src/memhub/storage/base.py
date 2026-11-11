@@ -50,7 +50,7 @@ FIXES: dict[Capability, str] = {
     Capability.TRANSACTIONS: "use Postgres",
     Capability.VECTOR_SEARCH: "install a vector extension for this database, or use Postgres",
     Capability.JSON_LOOKUP: "use a database with JSON queries, or Postgres",
-    Capability.PARALLEL_INGEST: "run one ingest worker, or use Postgres",
+    Capability.PARALLEL_INGEST: "run one ingest worker or use Postgres",  # the PRD's wording
     Capability.SCHEMAS: "remove database_schema from the config, or use Postgres",
 }
 

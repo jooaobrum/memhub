@@ -322,6 +322,19 @@ def test_search_boosts_area_text_and_entity_capped_at_one(backend):
     assert abs(got["names the press"] - 0.91) < 1e-6 and got["top"] == 1.0
 
 
+def test_search_boosts_rows_ranked_below_k(backend):
+    """Boosts apply to more rows than `k`: a linked row ranked below `k` on similarity alone can still come first."""
+    area_id = uuid.uuid4()
+    with backend.unit_of_work() as uow:
+        for i in range(60):
+            add(uow, f"plain {i}", vec(0.50 + i * 0.005))  # 0.500 .. 0.795
+        add(uow, "in the area", vec(0.76), links=[area_link(area_id)])  # ninth on similarity alone
+    with backend.unit_of_work() as uow:
+        rows = uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id="alice", k=3, area_boost=area_id)
+    assert contents(rows) == ["in the area", "plain 59", "plain 58"]
+    assert abs(rows[0]["similarity"] - 0.81) < 1e-6
+
+
 def test_top_similar_and_nearest_area(backend):
     with backend.unit_of_work() as uow:
         add(uow, "candidate", vec(0.95), status="candidate")
