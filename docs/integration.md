@@ -340,6 +340,34 @@ Caveats:
 - Entity boost is not wired. Only `active` rows are injected, so workspace candidates stay invisible until approved.
 - If your tools need to know about injection, set `retrieval` per type in config: `always` (in snapshot), `search` (per-turn), `index_then_load` (skills).
 
+### 5.1 Push a conversation instead of logging it
+
+Levels A to C read what your app already logs. When there is no log to read, push each conversation as it ends;
+the pipeline (extraction, grounding, admission, reconcile, routing) is the same, it just runs now:
+
+```python
+from memhub import Memory
+
+m = Memory(db=pool, llm=chat_model, embedder=embeddings)
+out = m.add(
+    [{"role": "user", "content": "I moved to Lyon", "timestamp": "2026-11-11T09:00:00Z"},
+     {"role": "assistant", "content": "Noted."}],
+    infer=True, workspace_id="acme", user_id="anna", run_id=trace_id,   # thread_id defaults to run_id
+)
+for e in out.results:     # AddResult: one MemoryEvent per memory written
+    print(e.event, e.status, e.id, e.content)   # ADD / PENDING / UPDATE / MERGE / CONFLICT
+for d in out.dropped:     # one Dropped per candidate the pipeline refused: low_score, ungrounded, outdated, ...
+    print(d.reason, d.content)
+```
+
+- `infer` defaults to `False`: without it `add` stores the fields you give, with no model call (AD-019).
+- Message ids are hashes of workspace, user, thread, role, content and timestamp, so pushing the whole conversation
+  again after each turn is fine: only the messages after the thread's watermark are extracted.
+- Each `segment_max_user_turns` user turns is one segment and one transaction. A model or embedder outage raises to
+  you; the segments before it stay, and the next push of the same messages picks up from there.
+- `/remember ...` in a user message works as in scheduled ingest. `system` and `tool` messages are left out.
+- Run rows are written under source `push` and show in `memhub runs`; workspace memories wait in `memhub queue`.
+
 ## 6. Other frameworks
 
 memhub has no framework adapters besides LangChain. For LlamaIndex, OpenAI Agents SDK, custom loops, or another language:

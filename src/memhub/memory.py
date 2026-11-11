@@ -105,6 +105,25 @@ def _event(row: Row, event: Event) -> MemoryEvent:
     )
 
 
+def _push_event(outcome: str, row: Row) -> Event:
+    """What a routed proposal is to the app: a new memory, a new version, the same fact, or a contradiction."""
+    if outcome == "merged":
+        return "MERGE"
+    if outcome == "conflict":
+        return "CONFLICT"
+    if row["status"] == "candidate":
+        return "PENDING"
+    return "UPDATE" if outcome == "superseded" else "ADD"
+
+
+def _dropped_content(dropped: dict[str, Any]) -> str | None:
+    """The text of a dropped candidate: its `content` field, else its text fields joined."""
+    fields = (dropped.get("candidate") or {}).get("fields") or {}
+    if isinstance(fields.get("content"), str):
+        return fields["content"]
+    return " ".join(v for v in fields.values() if isinstance(v, str)) or None
+
+
 def _uuid(value: Any) -> uuid.UUID:
     try:
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
@@ -208,14 +227,22 @@ class Memory:
 
     # --- writes -----------------------------------------------------------------------------------------------
 
-    def add(self, data: str | dict[str, Any], *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
-            agent_id: Any = None, roles: list[str] | None = None, type: str | None = None, scope: str = "user",
-            infer: bool = False) -> AddResult:
-        """A memory from its fields (or a text, stored as a `fact`). User scope is active at once; a workspace
-        memory waits for review (`PENDING`) unless the caller is a `workspace_admin`."""
+    def add(self, data: str | dict[str, Any] | list[dict[str, Any]], *, workspace_id: Any = None, user_id: Any = None,
+            run_id: Any = None, agent_id: Any = None, roles: list[str] | None = None, type: str | None = None,
+            scope: str = "user", infer: bool = False, thread_id: str | None = None) -> AddResult:
+        """`infer=False` (the default, AD-019): a memory from its fields (or a text, stored as a `fact`), with no
+        model call. User scope is active at once; a workspace memory waits for review (`PENDING`) unless the caller
+        is a `workspace_admin`.
+
+        `infer=True`: `data` is a conversation, `[{"role": "user"|"assistant", "content", "timestamp"?}]` (or a
+        string: one user message). The messages not extracted yet in `thread_id` (default: `run_id`) go through
+        extraction, grounding, admission, reconcile and routing; the result lists every memory written (`ADD`,
+        `PENDING`, `UPDATE`, `MERGE`, `CONFLICT`) and every candidate dropped, with its reason."""
         ctx = self._ctx(workspace_id, user_id, run_id, agent_id, roles)
         if infer:
-            raise NotImplementedError("add(messages, infer=True) - push ingestion - is not available yet; pass fields")
+            return self._push(data, ctx, type=type, thread_id=thread_id)
+        if isinstance(data, list):
+            raise ValidationError("a list of messages is a conversation: pass infer=True to extract memories from it")
         self._ready()
         fields = {"content": data} if isinstance(data, str) else dict(data)
         row = self.service.add(
@@ -223,6 +250,27 @@ class Memory:
             user_id=ctx.user_id, run_id=ctx.run_id, agent_id=ctx.agent_id,
         )
         return AddResult(run_id=ctx.run_id, results=[_event(row, "ADD" if row["status"] == "active" else "PENDING")])
+
+    def _push(self, data: Any, ctx: CallContext, *, type: str | None, thread_id: str | None) -> AddResult:
+        from memhub.pipeline.push import push_messages, to_messages
+
+        if type is not None:
+            raise ValidationError("infer=True extracts each memory's type itself: do not pass type")
+        if isinstance(data, dict):
+            raise ValidationError('infer=True takes a list of {"role", "content"} messages, or a string, not fields')
+        to_messages(data)  # refuse a bad call before any model or database work
+        if self.llm is None:
+            raise ValidationError("infer=True needs an llm to extract memories: pass Memory(llm=...) or set models.chat")
+        self._ready()
+        pushed = push_messages(
+            data, store=self.store, settings=self.settings, registry=self.registry, extractor=self.llm,
+            judge=self.judge, embeddings=self.embedder, workspace_id=ctx.workspace_id, user_id=ctx.user_id,
+            run_id=ctx.run_id, agent_id=ctx.agent_id, thread_id=thread_id,
+        )
+        results = [_event(row, _push_event(routed.outcome, row)) for seg in pushed for routed, row in seg.written]
+        dropped = [Dropped(content=_dropped_content(d), reason=d["reason"]) for seg in pushed for d in seg.dropped]
+        dropped += [Dropped(content=None, reason="extract_error") for seg in pushed if seg.extract_error]
+        return AddResult(run_id=ctx.run_id, results=results, dropped=dropped)
 
     def update(self, id: Any, fields: dict[str, Any], *, workspace_id: Any = None, user_id: Any = None,
                run_id: Any = None, agent_id: Any = None, roles: list[str] | None = None) -> MemoryEvent:
