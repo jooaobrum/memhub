@@ -9,6 +9,7 @@ open, and commits or rolls back only its own transaction - a savepoint when the 
     source = connection_source(conn)              # psycopg.Connection
     source = connection_source(lambda: psycopg.connect(url))
     source = connection_source("postgresql://...")
+    source = connection_source("sqlite:///memhub.db")   # or a sqlite3.Connection: a `SqliteSource`
 """
 from __future__ import annotations
 
@@ -28,7 +29,11 @@ ACCEPTED = (
     "or a postgresql:// URL"
 )
 
-_SQLITE = "the sqlite backend is not available yet (it ships in a later memhub release): use Postgres"
+SQLITE_FORMS = (
+    "a sqlite3.Connection, a callable returning one, sqlite:///path (a relative file), sqlite:////path "
+    "(an absolute file) or sqlite:///:memory:"
+)
+SQLITE_MEMORY = ":memory:"
 
 # connection -> what has been set up on it: "vector", and "schema:<name>" for the search_path
 _prepared: "weakref.WeakKeyDictionary[psycopg.Connection, set[str]]" = weakref.WeakKeyDictionary()
@@ -146,9 +151,6 @@ class FactorySource(ConnectionSource):
 
     def _open(self) -> psycopg.Connection:
         conn = self.factory()
-        if isinstance(conn, sqlite3.Connection):
-            conn.close()
-            raise NotImplementedError(_SQLITE)
         if not isinstance(conn, psycopg.Connection):
             raise TypeError(f"the db callable returned {type(conn).__name__}; it must return {ACCEPTED.split(', a callable')[0]}")
         return conn
@@ -222,6 +224,68 @@ class BorrowedConnectionSource(ConnectionSource):
         yield self.conn
 
 
+def sqlite_path(url: str) -> str:
+    """The file a `sqlite:` URL names: `sqlite:///m.db` -> `m.db`, `sqlite:////tmp/m.db` -> `/tmp/m.db`,
+    `sqlite:///:memory:` -> `:memory:`. Any other shape is a `TypeError`."""
+    path = url[len("sqlite:///"):] if url.startswith("sqlite:///") else ""
+    if not path:
+        raise TypeError(f"unsupported SQLite URL {url!r}; db must be {SQLITE_FORMS}")
+    return path
+
+
+class SqliteSource:
+    """Hands out a `sqlite3.Connection` for one memhub transaction. A connection the app gave is borrowed and
+    never closed; a file URL or a callable is opened per transaction and closed after; `:memory:` keeps one
+    connection for the life of the source (the database would vanish with it)."""
+
+    def __init__(self, db: Any) -> None:
+        self.borrowed: sqlite3.Connection | None = None
+        self.factory: Callable[[], Any] | None = None
+        self.path: str | None = None
+        self._kept: sqlite3.Connection | None = None
+        self._lock = threading.RLock()  # one transaction at a time on a connection that is shared
+        if isinstance(db, sqlite3.Connection):
+            self.borrowed = db
+        elif isinstance(db, str):
+            self.path = sqlite_path(db)
+        elif callable(db):
+            self.factory = db
+        else:
+            raise TypeError(f"db is a {type(db).__name__}; it must be {SQLITE_FORMS}")
+
+    @property
+    def owns_connections(self) -> bool:
+        return self.borrowed is None
+
+    @contextmanager
+    def connection(self) -> Iterator[sqlite3.Connection]:
+        if self.borrowed is not None:
+            with self._lock:
+                yield self.borrowed
+            return
+        if self.path == SQLITE_MEMORY:
+            with self._lock:
+                if self._kept is None:
+                    self._kept = sqlite3.connect(SQLITE_MEMORY, isolation_level=None, check_same_thread=False)
+                yield self._kept
+            return
+        if self.factory is not None:
+            conn = self.factory()
+            if not isinstance(conn, sqlite3.Connection):
+                raise TypeError(f"the db callable returned {type(conn).__name__}; it must return a sqlite3.Connection")
+        else:  # a writer waits up to 5 s for another's commit instead of failing at once
+            conn = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+
+def is_sqlite(db: Any) -> bool:
+    """Whether `db` names SQLite without calling anything: a connection, a source or a `sqlite:` URL."""
+    return isinstance(db, (sqlite3.Connection, SqliteSource)) or (isinstance(db, str) and db.startswith("sqlite:"))
+
+
 def _is_pool(db: Any) -> bool:
     try:
         from psycopg_pool import ConnectionPool
@@ -230,18 +294,16 @@ def _is_pool(db: Any) -> bool:
     return isinstance(db, ConnectionPool)
 
 
-def connection_source(db: Any) -> ConnectionSource:
-    """Pick the source for what the app passed as `db`."""
-    if isinstance(db, ConnectionSource):
+def connection_source(db: Any) -> "ConnectionSource | SqliteSource":
+    """Pick the source for what the app passed as `db`: SQLite by type or `sqlite:` scheme, else Postgres."""
+    if isinstance(db, (ConnectionSource, SqliteSource)):
         return db
+    if is_sqlite(db):
+        return SqliteSource(db)
     if isinstance(db, str):
         if db.startswith(("postgresql://", "postgres://")):
             return UrlSource(db)
-        if db.startswith("sqlite:"):
-            raise NotImplementedError(_SQLITE)
-        raise TypeError(f"unsupported database URL {db.split('://')[0]!r}://...; db must be {ACCEPTED}")
-    if isinstance(db, sqlite3.Connection):
-        raise NotImplementedError(_SQLITE)
+        raise TypeError(f"unsupported database URL {db.split('://')[0]!r}://...; db must be {ACCEPTED}, or {SQLITE_FORMS}")
     if _is_pool(db):
         return PoolSource(db)
     if isinstance(db, psycopg.Connection):
