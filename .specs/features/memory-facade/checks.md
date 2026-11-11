@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub`
 Plan: `.specs/features/memory-facade/plan.md`
 
-48 checks in 6 slices · 6 one-way doors · 0 open
+50 checks in 7 slices · 6 one-way doors · 0 open
 
 ## Checks
 
@@ -171,6 +171,15 @@ Proof: `.venv/bin/python -m pytest tests/test_packaging.py::test_core_imports_no
 Proof: `.venv/bin/python -m pytest tests/e2e/test_pr1_memory.py::test_pr1_demo`
 Proof: `.venv/bin/python -m pytest tests/e2e/test_pr1_memory.py::test_call_without_user_id_fails`
 
+### S7 - Found by verification
+
+**C49** - A `SET search_path` undone by a rollback (memhub's own failure, or the app's rollback around memhub's first call) is run again on the next call (AC 49)
+Proof: `.venv/bin/python -m pytest tests/test_connection_source.py::test_rolled_back_search_path_is_set_again`
+Proof: `.venv/bin/python -m pytest tests/test_connection_source.py::test_app_rollback_does_not_lose_the_schema`
+
+**C50** - `ingest()` with one message through a pool of `max_size=1` completes with `threads_seen == 1` and a run row, no `PoolTimeout` (AC 50)
+Proof: `.venv/bin/python -m pytest tests/test_memory_api.py::test_ingest_through_pool_of_one`
+
 ## Coverage
 
 | Set (size) | Member -> proof | Unproven |
@@ -192,10 +201,10 @@ Proof: `.venv/bin/python -m pytest tests/e2e/test_pr1_memory.py::test_call_witho
 ## Swept
 
 - validation: C17, C19, C40, C6
-- failure modes: C10, C11, C12
+- failure modes: C10, C11, C12, C49
 - idempotency: C2
 - authorization: C21, C22, C31
-- concurrency: C15, C16
+- concurrency: C15, C16, C50
 - data lifecycle: C30, C31, C2
 - dependency failure: C3, C9
 - state transitions: C23, C24, C29, C33, C34
@@ -203,7 +212,7 @@ Proof: `.venv/bin/python -m pytest tests/e2e/test_pr1_memory.py::test_call_witho
 
 ## Handoff
 
-- **Settled mid-build:** none
-- **Dispatched:** none
+- **Settled mid-build:** user: "push to the branch of the issue" - pushed to `1-memhub-as-a-pluggable-memory-package` (created linked to #1 with `gh issue develop`)
+- **Dispatched:** Verifier at `da0aa17` (code at `fdec080`), diff `e93c070..da0aa17` - returned FAIL, 7 findings
 - **Boundary:** C1-C48 closed in the feature commit on `feat/memory-facade`; full suite 598 passed (398 existing + 200 new)
 - **Abandoned:** `conn.transaction()` for connections memhub opens itself - it forbids the explicit `conn.rollback()` existing code does inside `store.connect()` (`test_reembed_retypes_the_column_and_clears_old_vectors`); owned connections keep today's commit/rollback
