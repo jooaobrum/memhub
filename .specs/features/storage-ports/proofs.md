@@ -1,8 +1,8 @@
 # storage-ports proofs
 
-**HEAD**: cc32367
+**HEAD**: 473e944
 **Tree**: clean
-**Result**: 40 pass, 0 fail; mutations 1 killed, 2 not
+**Result**: 47 pass, 0 fail; mutations 0 killed, 1 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -15,7 +15,7 @@
 | C6 | `.venv/bin/python -m pytest tests/test_storage_ports.py::test_no_psycopg_outside_the_postgres_backend` | 1 | 1 | pass |
 | C7 | `.venv/bin/python -m pytest tests/test_storage_ports.py::test_store_shim_exports_every_name_from_before_the_por` | 1 | 1 | pass |
 | C8 | `.venv/bin/python -m pytest tests/test_storage_ports.py::test_pure_helpers_import_without_psycopg` | 1 | 1 | pass |
-| C9 | `.venv/bin/python -m pytest -q tests` | 665 | 665 | pass |
+| C9 | `.venv/bin/python -m pytest -q tests` | 680 | 680 | pass |
 | C10 | `.venv/bin/python -m pytest tests/test_storage_ports.py::test_old_test_files_change_only_at_pipeline_call_sites` | 1 | 1 | pass |
 | C11 | `.venv/bin/python -m pytest tests/test_search_sql.py::test_search_issues_the_sql_recorded_before_the_ports` | 1 | 1 | pass |
 | C12 | `.venv/bin/python -m pytest tests/test_storage_ports.py::test_missing_capability_message_is_exact` | 1 | 1 | pass |
@@ -35,8 +35,8 @@
 | C22 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_parallel_ingest_capability` | 1 | 1 | pass |
 | C23 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_search_ranks_by_cosine_similarity` | 1 | 1 | pass |
 | C23 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_search_ranks_by_cosine_similarity` | 1 | 1 | pass |
-| C24 | `.venv/bin/python -m pytest tests/test_contract_memory.py -k "test_search_filters or test_search_boosts"` | 3 | 3 | pass |
-| C24 | `.venv/bin/python -m pytest tests/test_contract_postgres.py -k "test_search_filters or test_search_boosts"` | 3 | 3 | pass |
+| C24 | `.venv/bin/python -m pytest tests/test_contract_memory.py -k "test_search_filters or test_search_boosts"` | 4 | 4 | pass |
+| C24 | `.venv/bin/python -m pytest tests/test_contract_postgres.py -k "test_search_filters or test_search_boosts"` | 4 | 4 | pass |
 | C25 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_ingest_writes_the_expected_rows` | 1 | 1 | pass |
 | C25 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_ingest_writes_the_expected_rows` | 1 | 1 | pass |
 | C26 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_failed_segment_leaves_nothing_and_is_retried` | 1 | 1 | pass |
@@ -45,12 +45,17 @@
 | C27 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_reembed_to_new_dims` | 1 | 1 | pass |
 | C28 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_a_call_before_init_names_init` | 1 | 1 | pass |
 | C28 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_a_call_before_init_names_init` | 1 | 1 | pass |
+| C29 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_keyed_slot_compares_keys_as_json_text` | 1 | 1 | pass |
+| C29 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_keyed_slot_compares_keys_as_json_text` | 1 | 1 | pass |
+| C30 | `.venv/bin/python -m pytest tests/e2e/test_pr3_memory_backend.py::test_a_named_url_keeps_one_ledger_per_table_p` | 1 | 1 | pass |
+| C31 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_naive_datetimes_are_stored_as_utc` | 1 | 1 | pass |
+| C31 | `.venv/bin/python -m pytest tests/test_contract_postgres.py::test_naive_datetimes_are_stored_as_utc` | 1 | 1 | pass |
+| C32 | `.venv/bin/python -m pytest tests/test_contract_memory.py::test_a_unit_of_work_inside_another_in_one_thread_is_` | 1 | 1 | pass |
+| C33 | `.venv/bin/python -m pytest tests/test_storage_ports.py::test_contract_capability_tests_assert_the_error_on_a_b` | 1 | 1 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub` | - | - | pass |
 
 ## Mutations
 
 | Mutation | Location | Killed |
 | --- | --- | --- |
-| C24: in-memory stale boundary valid_until < now -> <= (Postgres keeps `<`) | `src/memhub/storage/memory.py:129` | no |
-| C21: keyed-slot uniqueness ignores workspace_id | `src/memhub/storage/memory.py:116` | no |
-| C3: unit of work writes the live tables (no snapshot, no rollback) | `src/memhub/storage/memory.py:655` | yes |
+| spec refused | `  mutation 1: row["valid_until"] is not None and row[… occurs 0 times in src/m` | no |

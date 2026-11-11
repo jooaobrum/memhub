@@ -1,8 +1,8 @@
 [
   {
     "file": "src/memhub/storage/memory.py",
-    "old": "row[\"valid_until\"] is not None and row[\"valid_until\"] < at",
-    "new": "row[\"valid_until\"] is not None and row[\"valid_until\"] <= at",
+    "old": "row[\"valid_until\"] is not None and row[\"valid_until\"] < _utc(at)",
+    "new": "row[\"valid_until\"] is not None and row[\"valid_until\"] <= _utc(at)",
     "proof": ".venv/bin/python -m pytest tests/test_contract_memory.py -k \"test_search_filters or test_search_boosts\"",
     "label": "C24: in-memory stale boundary valid_until < now -> <= (Postgres keeps `<`)"
   },
