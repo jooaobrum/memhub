@@ -23,13 +23,13 @@ from typing import Any, Literal
 import psycopg
 from pydantic import BaseModel, Field
 
-from memhub.config import EmbeddingConfig, Settings, TypeConfig, read_config
+from memhub.config import Config, EmbeddingConfig
 from memhub.connection import connection_source
+from memhub.settings import Parts, Resolved, embedding_model_id, resolve
 from memhub.middleware import MemoryMiddleware
 from memhub.service import MemoryService, NotFound, ValidationError
 from memhub.store import Actor, EmbeddingMismatch, MemoryStore, Row
 from memhub.toolkit import MemoryToolkit
-from memhub.types import BUILTIN_TYPES
 
 __all__ = ["AddResult", "CallContext", "Dropped", "Memory", "MemoryEvent", "ScopedMemory"]
 
@@ -92,44 +92,6 @@ class CallContext(BaseModel):
         return ADMIN in self.roles
 
 
-# --- settings ---------------------------------------------------------------------------------------------
-
-_DEFAULT_TYPES: dict[str, dict[str, Any]] = {
-    "fact": {"type_prior": 0.6},
-    "preference": {"type_prior": 0.8},
-    "profile": {"type_prior": 0.8},
-    "episode": {"type_prior": 0.4},
-    "case": {"type_prior": 0.7, "extract": False, "on_remember": True},
-    "skill": {"retrieval": "index_then_load", "extract": False},
-    "area": {"extract": False, "scopes": ["user"]},
-    "term": {"scopes": ["workspace"]},
-}
-
-
-def default_config() -> dict[str, Any]:
-    """memhub's behaviour when the app gives no config: every built-in type, user and workspace scopes."""
-    return {
-        "project_prefix": "memhub",
-        "workspace_default": "default",
-        "scopes": ["user", "workspace"],
-        "types": {name: {"class": f"memhub.types:{BUILTIN_TYPES[name].__name__}", **opts} for name, opts in _DEFAULT_TYPES.items()},
-    }
-
-
-def _settings(config: str | Path | dict | Settings | None) -> Settings:
-    if isinstance(config, Settings):
-        return config.model_copy(deep=True)
-    if config is None:
-        data: dict[str, Any] = {}
-    elif isinstance(config, dict):
-        data = config
-    elif isinstance(config, (str, Path)):
-        data = read_config(config)
-    else:
-        raise TypeError(f"config must be a path, a dict or a Settings, not {type(config).__name__}")
-    return Settings.model_validate({**default_config(), **data})
-
-
 def _clean(row: Row) -> dict[str, Any]:
     """A row as an app sees it: everything but the embedding."""
     return {k: v for k, v in row.items() if k != "embedding"}
@@ -155,32 +117,39 @@ class Memory:
 
     def __init__(
         self,
-        db: Any,
+        db: Any = None,
         llm: Any = None,
         embedder: Any = None,
         judge: Any = None,
         *,
-        config: str | Path | dict | Settings | None = None,
+        config: str | Path | dict | Config | Resolved | None = None,
+        overrides: dict[str, Any] | None = None,
         roles: list[str] | None = None,
     ) -> None:
-        """`roles` are the default roles of every call (`["user"]`); a call or `scope(...)` may pass its own."""
-        if embedder is None:
-            raise TypeError("Memory needs an embedder (a LangChain Embeddings, or anything with embed_query)")
-        self.source = connection_source(db)
-        self.settings = _settings(config)
-        self.llm = llm
-        self.judge = judge if judge is not None else llm
-        self.embedder = embedder
-        self._embedding_model = (
-            self.settings.embeddings.model if self.settings.embeddings is not None
-            else getattr(embedder, "model", None) or getattr(embedder, "model_name", None) or type(embedder).__name__
-        )
+        """`roles` are the default roles of every call (`["user"]`); a call or `scope(...)` may pass its own.
+        What is not passed comes from memhub.yaml, `MEMHUB_*` and `overrides` (see `memhub.settings`): the app's own
+        `connect: "module:function"`, else `db:` and `models:`. `Memory()` with no arguments is all of that."""
+        self.resolved = resolve(config, overrides)
+        self.settings = self.resolved.config.model_copy(deep=True)
+        self.parts = Parts(self.resolved, passed={"db": db, "llm": llm, "embedder": embedder, "judge": judge})
+        self.source = connection_source(self.parts.db)
+        self.embedder = self.parts.embedder
+        self._embedding_model = embedding_model_id(self.embedder, self.settings)
         self.settings.embeddings = None  # known once one probe embed gives the dims; see `_ready`
         self.store = MemoryStore(self.source, self.settings.project_prefix, self.settings.database_schema)
         self.registry = self.settings.build_registry()
-        self.service = MemoryService(store=self.store, settings=self.settings, registry=self.registry, embeddings=embedder)
+        self.service = MemoryService(store=self.store, settings=self.settings, registry=self.registry, embeddings=self.embedder)
         self.roles = list(roles) if roles is not None else ["user"]
         self._checked = False
+
+    @property
+    def llm(self) -> Any:
+        """The app's chat model (built from the config the first time it is needed)."""
+        return self.parts.llm
+
+    @property
+    def judge(self) -> Any:
+        return self.parts.judge
 
     # --- setup ------------------------------------------------------------------------------------------------
 
