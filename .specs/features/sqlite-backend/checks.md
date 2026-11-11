@@ -95,6 +95,7 @@ Proof: `.venv/bin/python -m pytest tests/e2e/test_pr4_sqlite_ingest.py::test_ini
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_backend.py::test_ingest_matches_the_in_memory_backend`
 Proof: `.venv/bin/python -m pytest tests/test_contract_sqlite.py::test_failed_segment_leaves_nothing_and_is_retried`
 Proof: `.venv/bin/python -m pytest tests/test_sqlite_packaging.py::test_sqlite_vec_is_an_extra_not_a_core_dependency`
+Proof: `.venv/bin/python -m pytest tests/test_sqlite_packaging.py::test_wheel_contains_the_sqlite_schema`
 Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Coverage
@@ -133,8 +134,8 @@ Proof: `.venv/bin/python -m pytest -q tests`
 
 ## Handoff
 
-- **Settled mid-build:** user: "Any question you need from me, I'll let you decide the best decision, manage all problems." - door 4 uses `vec_distance_cosine` over the BLOB column, no `vec0` table
-- **Dispatched:** none yet
-- **Boundary:** none yet
-- **Abandoned:** none
+- **Settled mid-build:** user: "Any question you need from me, I'll let you decide the best decision, manage all problems." - door 4 uses `vec_distance_cosine` over the BLOB column, no `vec0` table; a callable `db` is detected on first use (`DeferredBackend`, AD-002); PR 3's guard pinned to PR 3's diff (AD-021); `FIXES[parallel_ingest]` takes the PRD's wording; minimum SQLite 3.38
+- **Dispatched:** Verifier at `da95bfb`, diff `3db6080..da95bfb` (no screens sub-agent: no capture)
+- **Boundary:** C1-C24 closed at `da95bfb`; `check_proofs.py` 35 pass, 0 fail; full suite 836 passed
+- **Abandoned:** probing a callable `db` inside `open_backend` (opened a connection in `Memory(...)`, against AD-002)
 - **Walked:** n/a - no screen

@@ -160,5 +160,5 @@ Proof: `.venv/bin/python -m pytest tests/test_storage_ports.py::test_contract_ca
 
 - **Settled mid-build:** user chose "Own worktree": PR 3 builds in `~/worktrees/memhub-storage`; the PR 1 fix `2a58e6c` is its base, so C7, C10, C11 compare against `2a58e6c` (the last commit before the ports) instead of `fdec080`
 - **Dispatched:** Verifier at `77f11ce` (diff `2a58e6c..77f11ce`) - returned: FAIL, 8 findings, mutations 1 killed / 2 not
-- **Boundary:** C1-C28 closed at `21e2f48` (refactor `b8f70ae`, backend and suites `21e2f48`); full suite on Postgres 602 passed before the new tests; N4 bench: ratio 0.954 and 0.998 (interleaved, 5 rounds)
+- **Boundary:** C1-C33 closed at `473e944` after the verification fix pass (8 findings closed, mutations 3/3 killed at `0ad1f48`); C1-C28 first closed at `21e2f48` (refactor `b8f70ae`, backend and suites `21e2f48`); full suite on Postgres 602 passed before the new tests; N4 bench: ratio 0.954 and 0.998 (interleaved, 5 rounds)
 - **Abandoned:** a bench that ran base then tree once (ratios 1.19 / 1.12 / 0.97: the second side always met a fuller database); replaced by interleaved rounds

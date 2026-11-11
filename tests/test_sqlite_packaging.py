@@ -23,3 +23,13 @@ def test_sqlite_docs():
         assert needle in text, needle
     assert re.search(r"[Ww]ithout `memhub\[sqlite\]`[^.]*Python", text)  # the fallback is said, not implied
     assert "docs/sqlite.md" in (ROOT / "README.md").read_text()
+
+
+def test_wheel_contains_the_sqlite_schema(tmp_path, monkeypatch):
+    import zipfile
+
+    monkeypatch.chdir(ROOT)  # hatchling reads pyproject.toml from the cwd
+    from hatchling.build import build_wheel
+
+    names = zipfile.ZipFile(tmp_path / build_wheel(str(tmp_path))).namelist()
+    assert "memhub/storage/sqlite_schema.sql" in names
