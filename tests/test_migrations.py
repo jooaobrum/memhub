@@ -303,3 +303,15 @@ def test_migrate_docs():
     for doc in ("README.md", "docs/integration.md"):
         text = (ROOT / doc).read_text()
         assert "memhub migrate" in text and "SchemaOutdated" in text, doc
+
+
+def test_wheel_ships_the_migrations(tmp_path, monkeypatch):
+    import zipfile
+
+    monkeypatch.chdir(ROOT)  # hatchling reads pyproject.toml from the cwd
+    from hatchling.build import build_wheel
+
+    names = zipfile.ZipFile(tmp_path / build_wheel(str(tmp_path))).namelist()
+    for backend in ("postgres", "sqlite"):
+        for m in migrations(backend):
+            assert f"memhub/storage/migrations/{backend}/{m.name}.sql" in names, (backend, m.name)

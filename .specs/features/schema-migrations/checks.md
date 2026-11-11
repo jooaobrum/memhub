@@ -18,6 +18,7 @@ Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_no_version_row
 
 **C3** - `pending(b, 1)` is `["0002_run_and_agent_ids"]` and `pending(b, 2)` is `[]` for `postgres`, `sqlite`, `memory`; `pending(b, None)` raises; `postgres/` and `sqlite/` each hold exactly versions `2..SCHEMA_VERSION`, one file each, named `NNNN_name.sql` (AC 3)
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_pending_and_the_files`
+Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_wheel_ships_the_migrations`
 
 ### S2 - An old ledger is refused, then upgraded
 
