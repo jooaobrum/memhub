@@ -22,6 +22,7 @@ from typing import Any, Iterator
 from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not_available, require
 from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.rules import (
+    EntityFilter,
     MEMORY_COLUMNS,
     NO_TABLES,
     RUN_COLUMNS,
@@ -502,6 +503,7 @@ class _Tx:
         now: datetime | None = None,
         area_boost: uuid.UUID | None = None,
         text_boost: list[str] | None = None,
+        entities: EntityFilter | None = None,
     ) -> list[Row]:
         now = now or datetime.now(timezone.utc)
         rows = [
@@ -510,6 +512,7 @@ class _Tx:
             and (r["scope"] == "workspace" or (r["scope"] == "user" and user_id is not None and r["user_id"] == user_id))
             and (include_stale or not self._stale(r, now))
             and (r["type"] == type if type is not None else r["type"] != "area")
+            and (entities is None or entities.matches(r["entities"]))
         ]
         return apply_boosts(
             self._nearest(rows, query_embedding, max(k * 4, 20)), k=k, boost=boost, area_boost=area_boost,
@@ -525,10 +528,12 @@ class _Tx:
         user_id: str | None,
         query_embedding: list[float],
         limit: int = 5,
+        entities: EntityFilter | None = None,
     ) -> list[Row]:
         rows = [r for r in self._mem().values()
                 if r["status"] in ("active", "candidate") and r["type"] == type and r["scope"] == scope
-                and r["workspace_id"] == workspace_id and (scope != "user" or r["user_id"] == user_id)]
+                and r["workspace_id"] == workspace_id and (scope != "user" or r["user_id"] == user_id)
+                and (entities is None or entities.matches(r["entities"]))]
         return self._nearest(rows, query_embedding, limit)
 
     def iter_for_reembed(self, *, batch_size: int = 100) -> Iterator[list[Row]]:

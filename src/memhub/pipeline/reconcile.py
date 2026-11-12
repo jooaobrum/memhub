@@ -13,7 +13,7 @@ from memhub.pipeline.ground import Proposal
 from memhub.pipeline.llm import invoke_structured
 from memhub.pipeline.segment import Segment
 from memhub.storage import UnitOfWork
-from memhub.storage.rules import Row, area_ids as area_link_ids
+from memhub.storage.rules import EntityFilter, Row, area_ids as area_link_ids
 from memhub.types import Term, term_content
 
 
@@ -33,13 +33,23 @@ class Decision:
     extends: bool = False  # `supersede` whose new version merges the two statements and keeps both evidences
 
 
-def _entity_keys(entities) -> set[tuple[str, str]]:
-    return {(e["type"], e["id"]) if isinstance(e, dict) else (e.type, e.id) for e in entities}
+def _subjects(entities, isolated: list[str]) -> frozenset[tuple[str, str]]:
+    """The isolated subjects a memory is about: `(type, id)` of each entity whose type isolates."""
+    keys = ((e["type"], e["id"]) if isinstance(e, dict) else (e.type, e.id) for e in entities)
+    return frozenset(k for k in keys if k[0] in isolated)
 
 
-def _comparable(p: Proposal, row: Row) -> bool:
-    mine, theirs = _entity_keys(p.memory.entities), _entity_keys(row["entities"])
-    return bool(mine & theirs) or (not mine and not theirs)
+def _same_subjects(p: Proposal, row: Row, isolated: list[str]) -> bool:
+    """Two memories are compared, merged or judged only when they are about the same subjects (none = none)."""
+    return _subjects(p.memory.entities, isolated) == _subjects(row["entities"], isolated)
+
+
+def _subject_filter(p: Proposal, isolated: list[str]) -> EntityFilter | None:
+    """What the storage can narrow to before the exact set is checked: one of the subjects, or none of them."""
+    if not isolated:
+        return None
+    mine = _subjects(p.memory.entities, isolated)
+    return EntityFilter(any_of=tuple(sorted(mine))) if mine else EntityFilter(none_of_types=tuple(isolated))
 
 
 def _shares_area(row: Row, area_ids: set[str] | None) -> bool:
@@ -248,16 +258,22 @@ class _Reconciler:
                 status="active", type=p.candidate.type, user_id=owner, workspace_id=self.segment.workspace_id
             ):
                 if row["scope"] == p.scope and row["user_id"] == owner and row["payload"].get("key") == p.memory.key:
+                    if not _same_subjects(p, row, s.isolated_types()):
+                        return Decision("conflict", row)  # one slot per owner: another subject's value, a person decides
                     return self.against([row], keyed=True)
             return Decision("create")
+        isolated = s.isolated_types()
+        by_subject = {"entities": f} if (f := _subject_filter(p, isolated)) is not None else {}
         rows = [
             r for t in s.compare_types(p.candidate.type) for r in self.uow.vectors.top_similar(
                 type=t, scope=p.scope, workspace_id=self.segment.workspace_id,
                 user_id=self.segment.user_id, query_embedding=p.embedding, limit=5 if self.area_ids is None else 25,
+                **by_subject,
             )
         ]
-        rows = sorted((r for r in rows if r["similarity"] is not None and _shares_area(r, self.area_ids)),
-                      key=lambda r: -r["similarity"])
+        # Another subject's memory is never the same memory, whatever the words (`isolate`).
+        rows = sorted((r for r in rows if r["similarity"] is not None and _shares_area(r, self.area_ids)
+                       and _same_subjects(p, r, isolated)), key=lambda r: -r["similarity"])
         for row in rows:  # the same words: nothing new to say
             if _same_text(row["content"], p.memory.content):
                 return Decision("merge", row)
@@ -265,7 +281,7 @@ class _Reconciler:
             return Decision("merge", rows[0])
         # A later state of the same thing ("vegan" -> "eats meat again", a new city) embeds far below the duplicate
         # threshold, so the judge sees the nearest rows whatever their similarity, not only those in the band.
-        near = [r for r in rows if r["similarity"] >= s.reconcile.compare_floor and _comparable(p, r)]
+        near = [r for r in rows if r["similarity"] >= s.reconcile.compare_floor]
         if near:
             return self.against(near[: s.reconcile.compare_max], keyed=False)
         return Decision("create")

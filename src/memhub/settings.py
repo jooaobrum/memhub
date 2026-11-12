@@ -350,7 +350,7 @@ def _with_memory_file(layers: list[tuple[str, dict[str, Any]]], path: Path | Non
         where = (path.resolve().parent if label == "yaml" and path is not None else Path.cwd()) / where
     memory = read_memory_file(where)
     namer = path.name if label == "yaml" and path is not None else _LAYER_NAMES.get(label, label)
-    clashes = [k for k in ("types", "areas", "strict") if k in memory and k in layer]
+    clashes = [k for k in ("types", "areas", "strict", "entities") if k in memory and k in layer]
     if "extraction" in memory and isinstance(layer.get("extraction"), dict) and "instructions" in layer["extraction"]:
         clashes.append("extraction.instructions")
     if clashes:

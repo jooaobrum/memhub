@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 
 from memhub.storage.base import Backend, Capability
-from memhub.storage.rules import MEMORY_COLUMNS, RUN_COLUMNS, NotFound, area_link, as_vector_list
+from memhub.storage.rules import MEMORY_COLUMNS, RUN_COLUMNS, EntityFilter, NotFound, area_link, as_vector_list
 
 DIMS = 16
 MODEL = "contract-embed"
@@ -301,6 +301,35 @@ def test_search_filters_stale_boundary_is_strictly_before_now(backend):
         assert contents(uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id="alice", now=NOW)) == ["ends now"]
         stale = {r["content"]: r["stale"] for r in uow.memories.list_memories(now=NOW)}
         assert stale == {"ends now": False, "ended a second ago": True}
+
+
+def test_search_and_top_similar_filter_by_entities(backend):
+    """Criterion 18: the `EntityFilter` keeps the same rows on every backend, before `k` is applied."""
+    p101, p102, cr32 = {"type": "machine", "id": "P-101"}, {"type": "machine", "id": "P-102"}, {"type": "model", "id": "CR-32"}
+    with backend.unit_of_work() as uow:
+        add(uow, "p102", vec(0.99), entities=[p102])
+        add(uow, "p101 and cr32", vec(0.95), entities=[p101, cr32])
+        add(uow, "cr32 only", vec(0.90), entities=[cr32])
+        add(uow, "tagged topic", vec(0.85), entities=[{"type": "topic", "id": "noise"}])
+        add(uow, "untagged", vec(0.80))
+        add(uow, "p101 low", vec(0.31), entities=[p101])
+    with backend.unit_of_work() as uow:
+        def search(flt, **kw):
+            return contents(uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id="alice",
+                                               entities=flt, **kw))
+
+        assert search(EntityFilter(any_of=(("machine", "P-101"),))) == ["p101 and cr32", "p101 low"]
+        assert search(EntityFilter(any_of=(("machine", "P-101"),)), k=1) == ["p101 and cr32"]
+        assert search(EntityFilter(any_of=(("machine", "P-102"), ("model", "CR-32")))) == ["p102", "p101 and cr32", "cr32 only"]
+        assert search(EntityFilter(of_type="machine")) == ["p102", "p101 and cr32", "p101 low"]
+        assert search(EntityFilter(none_of_types=("machine", "model"))) == ["tagged topic", "untagged"]
+        assert search(EntityFilter(of_type="model", none_of_types=("machine",))) == ["cr32 only"]
+        assert search(EntityFilter(any_of=(("machine", "P-9"),))) == []
+        assert len(search(None)) == 6
+        similar = uow.vectors.top_similar(type="fact", scope="user", workspace_id="ws", user_id="alice",
+                                          query_embedding=vec(1.0), limit=1,
+                                          entities=EntityFilter(any_of=(("machine", "P-101"),)))
+        assert contents(similar) == ["p101 and cr32"]
 
 
 def test_search_boosts_area_text_and_entity_capped_at_one(backend):

@@ -172,7 +172,7 @@ Decision only; `route.py` writes. Outcomes: `create | merge | supersede | confli
 | 6 | M stale and key mutable | supersede |
 | 7 | Judge verdict: `same` → merge · `extends` → supersede with merged content (only if the merged text uses words from both statements, else conflict) · `updates` and key mutable → supersede · `updates` on immutable key, `conflicts`, or unreadable verdict → conflict |
 
-**Non-keyed candidate:** nearest rows of same type(s)/scope/owner sharing an area (or with no area). Equal text or similarity ≥ `duplicate` (0.92) → merge. Otherwise rows with similarity ≥ `compare_floor` (0.30) and matching entities go to the judge together (max `compare_max`); `unrelated` → create; else rules 3–5 above, then the verdict table. A target that is not an active row of the same type always yields a conflict (a person decides).
+**Non-keyed candidate:** nearest rows of same type(s)/scope/owner sharing an area (or with no area). Only rows with the same set of isolated subjects (`entities` types marked `isolate`; none = none) are considered at all. Equal text or similarity ≥ `duplicate` (0.92) → merge. Otherwise rows with similarity ≥ `compare_floor` (0.30) go to the judge together (max `compare_max`); `unrelated` → create; else rules 3–5 above, then the verdict table. A target that is not an active row of the same type always yields a conflict (a person decides).
 
 **Terms** use a separate path: same term (case-insensitive) adds aliases up to `terms.max_aliases`; an alias owned by a different active term is a conflict for the admin.
 
@@ -242,7 +242,7 @@ One YAML per deployment (`memhub.yaml`, `${ENV}` interpolation over the raw text
 |---|---|
 | `project_prefix`, `database_url`, `workspace_default` | Table names, DSN, implicit workspace |
 | `llm.extractor`, `llm.judge`, `embeddings` | `{provider, model, base_url?, api_key_env, params?}` (+ `dims`) |
-| `scopes`, `entity_types` | Enabled scopes; allowed `{type,id}` entity types |
+| `scopes`, `entity_types`, `entities` | Enabled scopes; allowed `{type,id}` entity types: `entity_types` names isolated subjects, `entities` (in `memory.md`) gives each type `isolate` / `require_filter` ([subjects.md](subjects.md)) |
 | `types.<name>` | `class, retrieval (search|always|index_then_load), type_prior, max_chars, max_active, extract, ttl, keyed, keys, strict_keys, area (required|optional), scopes` |
 | `areas`, `terms` | Seeds, caps, merge/page thresholds; term caps and confidence |
 | `sources.<name>` | `kind: jsonl|mlflow`, field mapping, signals file |

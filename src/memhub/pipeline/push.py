@@ -118,7 +118,7 @@ class PushedSegment:
 def push_messages(
     data: Any, *, store: Any, settings: Any, registry: Any, extractor: Any, judge: Any, embeddings: Any,
     workspace_id: str, user_id: str, run_id: str, agent_id: str | None, thread_id: str | None = None,
-    now: datetime | None = None,
+    now: datetime | None = None, subjects: list[dict] | None = None,
 ) -> list[PushedSegment]:
     """Run the pipeline on the messages not extracted yet. A segment that raises rolls back alone and the
     exception reaches the caller; the segments before it stay committed."""
@@ -128,22 +128,24 @@ def push_messages(
                            trace_id=run_id, now=now)
     if Capability.PARALLEL_INGEST not in store.capabilities:  # one worker assumed (AD-016)
         return _push(msgs, store=store, settings=settings, registry=registry, extractor=extractor, judge=judge,
-                     embeddings=embeddings, run_id=run_id, agent_id=agent_id, thread=thread, now=now)
+                     embeddings=embeddings, run_id=run_id, agent_id=agent_id, thread=thread, now=now,
+                     subjects=subjects or [])
     with store.thread_lock(SOURCE, thread) as locked:
         if not locked:
             raise Conflict(f"thread {thread!r} is being ingested by another call; push again when it is done")
         return _push(msgs, store=store, settings=settings, registry=registry, extractor=extractor, judge=judge,
-                     embeddings=embeddings, run_id=run_id, agent_id=agent_id, thread=thread, now=now)
+                     embeddings=embeddings, run_id=run_id, agent_id=agent_id, thread=thread, now=now,
+                     subjects=subjects or [])
 
 
-def _push(msgs, *, store, settings, registry, extractor, judge, embeddings, run_id, agent_id, thread, now):
+def _push(msgs, *, store, settings, registry, extractor, judge, embeddings, run_id, agent_id, thread, now, subjects):
     with store.unit_of_work() as uow:
         mark = uow.runs.get_watermark(source=SOURCE, thread_id=thread)
     new = after_watermark(msgs, mark["last_message_id"] if mark else None)
     if not new:
         return []
     first = new[0]
-    segments = [Segment(thread, first.workspace_id, first.user_id, part, False)
+    segments = [Segment(thread, first.workspace_id, first.user_id, part, False, subjects)
                 for part in _slices(new, settings.ingestion.segment_max_user_turns)]
     llm_check = make_llm_check(judge) if settings.ingestion.llm_correction_check else None
     out: list[PushedSegment] = []

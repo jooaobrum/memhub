@@ -268,7 +268,7 @@ def _sample(
 ) -> tuple[ExtractResult, list[Candidate]]:
     """`passes` independent structured calls for the given types; their candidates united, a repeat counted once."""
     messages = [
-        ("system", _prompt(names, registry, max_c, segment.is_final_pass, settings.entity_types, instructions,
+        ("system", _prompt(names, registry, max_c, segment.is_final_pass, settings.declared_entity_types(), instructions,
                            settings.keyed_types(), settings.area_types(),
                            areas if areas is not None else seed_areas(settings), settings.areas.open,
                            frozenset(settings.open_key_types()))),

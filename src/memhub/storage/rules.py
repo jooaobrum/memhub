@@ -126,3 +126,22 @@ def apply_boosts(
                 row["similarity"] = min(1.0, row["similarity"] + boost)
         rows.sort(key=lambda r: r["similarity"], reverse=True)
     return rows[:k]
+
+
+@dataclass(frozen=True)
+class EntityFilter:
+    """Which rows a search keeps by their entities; every part given must hold.
+
+    `any_of`: the row names one of these `(type, id)`; `of_type`: the row names an entity of this type;
+    `none_of_types`: the row names no entity of these types (an untagged row, for these types)."""
+
+    any_of: tuple[tuple[str, str], ...] = ()
+    of_type: str | None = None
+    none_of_types: tuple[str, ...] = ()
+
+    def matches(self, entities: list[dict]) -> bool:
+        keys = {(e["type"], e["id"]) for e in entities}
+        types = {t for t, _ in keys}
+        return ((not self.any_of or bool(keys & set(self.any_of)))
+                and (self.of_type is None or self.of_type in types)
+                and not types & set(self.none_of_types))

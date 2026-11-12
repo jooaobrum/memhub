@@ -289,6 +289,42 @@ def _short_type(name: str, text: str) -> dict[str, Any]:
     return {"fields": fields, "content_template": template}
 
 
+class EntityConfig(BaseModel):
+    """A subject type (`machine`, `customer`, `patient`): `isolate` keeps memories about different ids apart in
+    reconcile; `require_filter` leaves its tagged memories out of a search that does not name the type."""
+
+    model_config = {"extra": "forbid"}
+
+    isolate: bool = True
+    require_filter: bool = False
+
+
+def _short_entities(value: Any) -> dict[str, Any]:
+    """`[machine, model]` (all isolated), or `{machine: isolate, topic: tag, patient: {isolate: true, ...}}`."""
+    if value is None:
+        return {}
+    if isinstance(value, list):
+        if not all(isinstance(n, str) for n in value):
+            raise ValueError(f"entities: a list holds type names, got {value!r}")
+        return {n: {} for n in value}
+    if not isinstance(value, dict):
+        raise ValueError(f"entities: a list of type names or a mapping, not {type(value).__name__}")
+    out: dict[str, Any] = {}
+    for name, spec in value.items():
+        if spec is None or spec == "isolate":
+            out[name] = {"isolate": True}
+        elif spec == "tag":
+            out[name] = {"isolate": False}
+        elif isinstance(spec, dict):
+            unknown = [k for k in spec if k not in EntityConfig.model_fields]
+            if unknown:
+                raise ValueError(f"entities.{name}: unknown key {unknown[0]!r} (allowed: isolate, require_filter)")
+            out[name] = spec
+        else:
+            raise ValueError(f"entities.{name}: {spec!r} is not isolate, tag or a mapping of isolate / require_filter")
+    return out
+
+
 # `project` and `db` are the short names `memhub init` writes; the long ones stay valid.
 KEY_ALIASES = {"project": "project_prefix", "db": "database_url"}
 
@@ -319,7 +355,8 @@ class Config(BaseModel):
     strict: bool = False  # a domain filter: areas closed, and every project type needs an area
     connect: str | None = None  # "package.module:function" returning {db, embedder, llm?, judge?}: the app's own objects
     models: ModelsConfig | None = None  # `provider:model` strings, used when `connect` is absent and no `llm` / `embeddings` block
-    entity_types: list[str] = Field(default_factory=list)
+    entity_types: list[str] = Field(default_factory=list)  # shorthand: each name is an isolated subject type
+    entities: dict[str, EntityConfig] = Field(default_factory=dict)  # subject types with their rules (memory.md)
     scopes: list[str] = Field(default_factory=lambda: ["user"])
     types: dict[str, TypeConfig]
     # Default lifetime by durability, used when neither the text nor the type sets `valid_until`; null = never.
@@ -357,6 +394,35 @@ class Config(BaseModel):
                 spec = _short_type(str(name), spec.strip())
             types[name] = spec
         return {**data, "types": types}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _short_entities(cls, data: Any) -> Any:
+        """`entities:` short forms become `EntityConfig` mappings."""
+        if not isinstance(data, dict) or "entities" not in data:
+            return data
+        return {**data, "entities": _short_entities(data["entities"])}
+
+    @model_validator(mode="after")
+    def _entity_types_declared_once(self) -> "Config":
+        both = [n for n in self.entity_types if n in self.entities]
+        if both:
+            raise ValueError(f"entity type {both[0]!r} is declared in both entity_types and entities: keep one")
+        return self
+
+    def entity_rules(self) -> dict[str, EntityConfig]:
+        """Every declared entity type and its rules: an `entity_types` name is an isolated subject."""
+        return {**{n: EntityConfig() for n in self.entity_types}, **self.entities}
+
+    def declared_entity_types(self) -> list[str]:
+        return list(self.entity_rules())
+
+    def isolated_types(self) -> list[str]:
+        return [n for n, c in self.entity_rules().items() if c.isolate]
+
+    def guarded_types(self) -> list[str]:
+        """The types whose tagged memories a search returns only when its filter names the type."""
+        return [n for n, c in self.entity_rules().items() if c.require_filter]
 
     def save(self, path: str | Path) -> None:
         """Write this config as yaml: `${VAR}` references only, never a literal secret."""

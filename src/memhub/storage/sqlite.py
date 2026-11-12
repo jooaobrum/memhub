@@ -31,6 +31,7 @@ from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not
 from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.memory import _contains, _cosine
 from memhub.storage.rules import (
+    EntityFilter,
     MEMORY_COLUMNS,
     NO_TABLES,
     RUN_COLUMNS,
@@ -163,6 +164,27 @@ def choose_vector_path(environ: Any = None) -> str:
 
 # --- one transaction --------------------------------------------------------------------------------------------
 
+
+
+def _entity_sql(table: str, flt: EntityFilter | None) -> tuple[list[str], list[Any]]:
+    """The `EntityFilter` as SQL over the JSON `entities` column."""
+    if flt is None:
+        return [], []
+    each = f"SELECT 1 FROM json_each({table}.entities) e WHERE "
+    clauses: list[str] = []
+    params: list[Any] = []
+    if flt.any_of:
+        pairs = " OR ".join("(json_extract(e.value, '$.type') = ? AND json_extract(e.value, '$.id') = ?)" for _ in flt.any_of)
+        clauses.append(f"EXISTS ({each}{pairs})")
+        params += [x for pair in flt.any_of for x in pair]
+    if flt.of_type is not None:
+        clauses.append(f"EXISTS ({each}json_extract(e.value, '$.type') = ?)")
+        params.append(flt.of_type)
+    if flt.none_of_types:
+        marks = ", ".join("?" for _ in flt.none_of_types)
+        clauses.append(f"NOT EXISTS ({each}json_extract(e.value, '$.type') IN ({marks}))")
+        params += list(flt.none_of_types)
+    return clauses, params
 
 class _Tx:
     """One transaction on `conn`: the `MemoryStore` methods, without the cursor."""
@@ -588,6 +610,7 @@ class _Tx:
         now: datetime | None = None,
         area_boost: uuid.UUID | None = None,
         text_boost: list[str] | None = None,
+        entities: EntityFilter | None = None,
     ) -> list[Row]:
         clauses = ["status = 'active'", "workspace_id = ?", "(scope = 'workspace' OR (scope = 'user' AND user_id = ?))"]
         params: list[Any] = [workspace_id, user_id]
@@ -599,6 +622,9 @@ class _Tx:
             params.append(type)
         else:  # an area row is a page header (derived text), not a claim
             clauses.append("type <> 'area'")
+        more, more_params = _entity_sql(self.mem, entities)
+        clauses += more
+        params += more_params
         return apply_boosts(
             self._nearest(" AND ".join(clauses), params, query_embedding, max(k * 4, 20)), k=k, boost=boost,
             area_boost=area_boost, text_boost=text_boost, entity_boost=entity_boost,
@@ -613,9 +639,13 @@ class _Tx:
         user_id: str | None,
         query_embedding: list[float],
         limit: int = 5,
+        entities: EntityFilter | None = None,
     ) -> list[Row]:
         clauses, params = self._owner(type, scope, workspace_id, user_id)
         clauses.append("status IN ('active', 'candidate')")
+        more, more_params = _entity_sql(self.mem, entities)
+        clauses += more
+        params += more_params
         return self._nearest(" AND ".join(clauses), params, query_embedding, limit)
 
     def iter_for_reembed(self, *, batch_size: int = 100) -> Iterator[list[Row]]:

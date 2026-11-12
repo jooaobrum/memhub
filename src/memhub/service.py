@@ -20,7 +20,7 @@ from pydantic import ValidationError as PydanticValidationError
 from memhub import injection
 from memhub.config import Settings
 from memhub.storage import Backend, UnitOfWork
-from memhub.storage.rules import Actor, NotFound, Row, area_ids, as_vector_list
+from memhub.storage.rules import Actor, EntityFilter, NotFound, Row, area_ids, as_vector_list
 from memhub.types import TypeRegistry
 
 __all__ = [
@@ -106,8 +106,8 @@ class MemoryService:
         if matched:
             raise InjectionDetected(f"a field matches an injection pattern ({matched!r})")
         for e in instance.entities:
-            if e.type not in self.settings.entity_types:
-                raise ValidationError(f"unknown entity type {e.type!r} (config.entity_types = {self.settings.entity_types})")
+            if e.type not in self.settings.declared_entity_types():
+                raise ValidationError(f"unknown entity type {e.type!r} (declared: {self.settings.declared_entity_types()})")
 
     def _authorize_owner_or_admin(self, actor: Actor, row: Row) -> None:
         if row["scope"] == "user":
@@ -321,13 +321,19 @@ class MemoryService:
         stale: bool = False,
         now: datetime | None = None,
         area: str | None = None,
+        subjects: list[dict] | None = None,
+        entity_type: str | None = None,
     ) -> list[Row]:
         """Every row (stale ones marked); `stale=True` lists only the stale ones; `area` (key, title or id)
-        keeps the rows linked to that area of the owner."""
+        keeps the rows linked to that area of the owner; `subjects` / `entity_type` keep the rows about one of
+        those subjects / about any subject of that type."""
         with self.store.unit_of_work() as uow:
             rows = uow.memories.list_memories(
                 status=status, type=type, user_id=user_id, workspace_id=workspace_id, stale=stale, now=now
             )
+            if subjects or entity_type:
+                flt = EntityFilter(any_of=tuple((e["type"], e["id"]) for e in subjects or []), of_type=entity_type)
+                rows = [r for r in rows if flt.matches(r["entities"])]
             if area is None:
                 return rows
             found = self._find_area(uow, area, workspace_id or self.settings.workspace_default, user_id)
@@ -345,10 +351,17 @@ class MemoryService:
         include_stale: bool = False,
         now: datetime | None = None,
         area: str | None = None,
+        subjects: list[dict] | None = None,
+        entity_type: str | None = None,
+        widen: bool = False,
     ) -> list[Row]:
         """Nearest memories. Rows in the query's best area are boosted (never filtered); that area is `area`
         (a key, title or id) when given, else the owner's area whose description is nearest the query.
-        Each row carries `areas`, the titles of the areas it is linked to."""
+        Each row carries `areas`, the titles of the areas it is linked to.
+
+        `subjects`: only rows about one of them, in tiers by the order given (AD-030), then, with `widen`, rows
+        about no isolated subject (`general`); `entity_type`: rows about any subject of that type. With either,
+        each row carries `matched_on`. A `require_filter` type the filter does not name is left out (AD-033)."""
         workspace_id = workspace_id or self.settings.workspace_default
         with self.store.unit_of_work() as uow:
             expansion = self._expand(uow, query, workspace_id, include_stale, now)
@@ -359,17 +372,48 @@ class MemoryService:
                 scope="user" if user_id else "workspace", workspace_id=workspace_id, user_id=user_id,
                 query_embedding=embedding,
             )
-            rows = uow.vectors.search(
-                query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=k, type=type,
-                include_stale=include_stale, now=now, area_boost=best["memory_id"] if best else None,
-                text_boost=expansion.related,
-            )
+
+            def nearest(entities: EntityFilter | None) -> list[Row]:
+                return uow.vectors.search(
+                    query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=k, type=type,
+                    include_stale=include_stale, now=now, area_boost=best["memory_id"] if best else None,
+                    text_boost=expansion.related, **({"entities": entities} if entities is not None else {}),
+                )
+
+            rows = self._subject_tiers(nearest, subjects or [], entity_type, widen, k)
             titles = uow.memories.areas_by_memory_id([i for r in rows for i in area_ids(r["links"])])
             for r in rows:
                 r["areas"] = [titles[i]["payload"]["title"] for i in area_ids(r["links"]) if i in titles]
                 if expansion.terms:  # which terms widened the query, so the effect can be seen
                     r["expanded_by"] = list(expansion.terms)
             return rows
+
+    def _subject_tiers(self, nearest, subjects: list[dict], entity_type: str | None, widen: bool, k: int) -> list[Row]:
+        """One search per tier (a subject, in order; then `general`), each its own top `k`, so a subject's rows
+        are never cut by another's; a row is kept in the first tier it matches."""
+        named = {e["type"] for e in subjects} | ({entity_type} if entity_type else set())
+        guard = tuple(t for t in self.settings.guarded_types() if t not in named)
+        if not subjects and entity_type is None:
+            return nearest(EntityFilter(none_of_types=guard) if guard else None)
+        if not subjects:
+            rows = nearest(EntityFilter(of_type=entity_type, none_of_types=guard))
+            for r in rows:
+                r["matched_on"] = next(f"{e['type']}:{e['id']}" for e in r["entities"] if e["type"] == entity_type)
+            return rows
+        tiers = [(f"{e['type']}:{e['id']}", EntityFilter(any_of=((e["type"], e["id"]),), none_of_types=guard))
+                 for e in subjects]
+        if widen:
+            isolated = tuple(dict.fromkeys([*self.settings.isolated_types(), *guard]))
+            tiers.append(("general", EntityFilter(none_of_types=isolated)))
+        out: list[Row] = []
+        seen: set[Any] = set()
+        for label, flt in tiers:
+            for r in nearest(flt):
+                if r["memory_id"] not in seen:
+                    seen.add(r["memory_id"])
+                    r["matched_on"] = label
+                    out.append(r)
+        return out[:k]
 
     def expansion(
         self, actor: Actor, query: str, *, workspace_id: str | None = None, include_stale: bool = False,

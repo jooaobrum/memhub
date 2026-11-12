@@ -32,6 +32,7 @@ from memhub.connection import ConnectionSource, advisory_lock, advisory_unlock, 
 from memhub.storage.base import FIXES, BoundUnitOfWork, Capability, require
 from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.rules import (
+    EntityFilter,
     ACTIVE_STATUSES,
     NO_TABLES,
     Actor,
@@ -80,6 +81,26 @@ _MERGE_VALID_UNTIL = (
     "ELSE GREATEST(valid_until, %s::timestamptz) END"
 )
 
+
+
+def _entity_sql(flt: EntityFilter | None, params: dict[str, Any]) -> list[str]:
+    """The `EntityFilter` as `jsonb @>` containment, which the GIN index on `entities` serves."""
+    if flt is None:
+        return []
+    clauses: list[str] = []
+    if flt.any_of:
+        names = []
+        for i, (t, id_) in enumerate(flt.any_of):
+            params[f"ent{i}"] = Jsonb([{"type": t, "id": id_}])
+            names.append(f"entities @> %(ent{i})s")
+        clauses.append(f"({' OR '.join(names)})")
+    if flt.of_type is not None:
+        params["ent_type"] = Jsonb([{"type": flt.of_type}])
+        clauses.append("entities @> %(ent_type)s")
+    for i, t in enumerate(flt.none_of_types):
+        params[f"ent_not{i}"] = Jsonb([{"type": t}])
+        clauses.append(f"NOT entities @> %(ent_not{i})s")
+    return clauses
 
 class MemoryStore:
     """The Postgres backend. Its methods take an open cursor; `unit_of_work()` / `bind(cur)` give the same
@@ -657,6 +678,7 @@ class MemoryStore:
         now: datetime | None = None,
         area_boost: uuid.UUID | None = None,
         text_boost: list[str] | None = None,
+        entities: EntityFilter | None = None,
     ) -> list[Row]:
         """`area_boost` (an area's memory_id) lifts the rows linked to that area; `text_boost` lifts the rows whose
         content mentions one of the words. Neither filters."""
@@ -674,6 +696,7 @@ class MemoryStore:
             params["type"] = type
         else:  # an area row is a page header (derived text), not a claim
             clauses.append("type <> 'area'")
+        clauses += _entity_sql(entities, params)
         sql = (
             f"SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {self._t('memory')} "
             f"WHERE {' AND '.join(clauses)} ORDER BY embedding <=> %(qe)s::vector LIMIT %(limit)s"
@@ -693,6 +716,7 @@ class MemoryStore:
         user_id: str | None,
         query_embedding: list[float],
         limit: int = 5,
+        entities: EntityFilter | None = None,
     ) -> list[Row]:
         clauses = ["status IN ('active','candidate')", "type=%(type)s", "scope=%(scope)s", "workspace_id=%(ws)s"]
         params: dict[str, Any] = {
@@ -701,6 +725,7 @@ class MemoryStore:
         if scope == "user":
             clauses.append("user_id=%(uid)s")
             params["uid"] = user_id
+        clauses += _entity_sql(entities, params)
         sql = (
             f"SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {self._t('memory')} "
             f"WHERE {' AND '.join(clauses)} ORDER BY embedding <=> %(qe)s::vector LIMIT %(limit)s"
