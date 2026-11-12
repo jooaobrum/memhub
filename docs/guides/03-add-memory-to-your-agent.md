@@ -21,14 +21,16 @@ m = Memory(
     db="sqlite:///travel.db",                      # or a postgresql:// URL, or your own pool / sqlite3 connection
     llm=ChatOpenAI(model="gpt-4.1-mini"),          # any LangChain chat model
     embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
-    config={"project": "travel"},                  # no types given: fact, preference and profile
+    config={"project": "travel", "memory": "./memory.md"},   # what this assistant remembers
 )
 m.init()                                           # creates the tables; safe to call on every start
 ```
 
-With no memory types given, memhub keeps facts, preferences and who the user is. To decide what this assistant
-remembers, name a memory file, `config={"project": "travel", "memory": "./memory.md"}` (see
-[docs/memory.md](../memory.md)). You can also pass the same keys inline:
+`memory.md` says what the assistant remembers: its kinds of memory, and the rules for what to keep in plain words.
+Start from the one `memhub init` writes (run it once in a scratch folder and copy the file); it keeps facts,
+preferences and who the user is, with rules tuned on real conversations. [docs/memory.md](../memory.md) describes
+the file. With no memory file at all, memhub keeps the same three kinds of memory, but with short built-in rules. You
+can also pass the keys inline:
 
 ```python
 config={"project": "travel",
