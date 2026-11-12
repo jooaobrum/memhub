@@ -92,6 +92,23 @@ def test_init_accepts_literal_url_password(pg_dsn, monkeypatch):
     result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", pg_dsn, "--embeddings", "fake:emb", "--preset", "assistant"])
     assert result.exit_code == 0, result.output
     assert _loaded()["db"] == pg_dsn
+    # written as given (AD-007), with a warning on stderr that never repeats the password
+    assert "literal password" in result.stderr and "${MEMHUB_DB_PASSWORD}" in result.stderr
+    assert ":postgres@" not in result.stderr and "literal password" not in result.stdout
+
+
+def test_init_does_not_warn_without_a_literal_password(pg_dsn, tmp_path, monkeypatch):
+    _inits(monkeypatch)
+    monkeypatch.setenv("PG_PW", "postgres")
+    with_ref = pg_dsn.replace(":postgres@", ":${PG_PW}@")
+    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", with_ref, "--embeddings", "fake:emb", "--preset", "assistant"])
+    assert result.exit_code == 0, result.output
+    assert _loaded()["db"] == with_ref and "literal password" not in result.output
+    Path("memhub.yaml").unlink()
+    lite = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", f"sqlite:///{tmp_path / 'm.db'}",
+                                   "--embeddings", "fake:emb", "--preset", "assistant"])
+    assert lite.exit_code == 0, lite.output
+    assert "literal password" not in lite.output
 
 
 def test_init_connect_excludes_db_and_models(pg_dsn, tmp_path, monkeypatch):

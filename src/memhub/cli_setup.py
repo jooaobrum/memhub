@@ -85,6 +85,17 @@ def _init_tables(cli: Any, config: Optional[Path], check_model: bool) -> None:
     typer.echo(f"initialized {settings.project_prefix}_memory / {settings.project_prefix}_memory_runs")
 
 
+def _literal_password(url: str) -> bool:
+    """Whether a database URL carries a password in clear (a `${VAR}` reference is not one)."""
+    from urllib.parse import urlsplit
+
+    try:
+        password = urlsplit(url).password
+    except ValueError:
+        return False
+    return bool(password) and not re.fullmatch(r"\$\{\w+\}", password)
+
+
 def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, preset, connect, force) -> None:
     target = Path.cwd() / CONFIG_FILE
     if target.exists() and not force:
@@ -142,6 +153,12 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
     except _INIT_ERRORS as exc:
         cli._fail(exc)
     write_yaml(target, data)
+    if db is not None and _literal_password(db):  # written as given (AD-007), but never silently
+        typer.secho(
+            "warning: the --db URL holds a literal password, written to memhub.yaml as given. "
+            "Put ${MEMHUB_DB_PASSWORD} in its place and export MEMHUB_DB_PASSWORD to keep it out of the file.",
+            fg=typer.colors.YELLOW, err=True,
+        )
     typer.echo(f"initialized {settings.project_prefix}_memory / {settings.project_prefix}_memory_runs")
     typer.echo(f"wrote {target}")
 
