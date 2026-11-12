@@ -119,7 +119,7 @@ Proof: `.venv/bin/python -m pytest tests/test_docs.py::test_memory_docs_exist`
 **C30** - Every fenced block opening with `---` in `README.md`, `docs/` and `examples/` resolves when written to a `memory.md` (AC 30)
 Proof: `.venv/bin/python -m pytest tests/test_docs.py::test_memory_blocks_load`
 
-**C31** - `README.md`, `memhub.example.yaml`, `src/`, `docs/` and `examples/` contain no `preset` (case-insensitive) (AC 31)
+**C31** - `README.md`, `memhub.example.yaml`, `src/`, `docs/` and `examples/` contain no `preset` (case-insensitive), except the refusal lines C19 requires in `src/memhub/settings.py` (`PRESET_REMOVED`, the `preset` key check, `MEMHUB_PRESET`) (AC 31)
 Proof: `.venv/bin/python -m pytest tests/test_docs.py::test_no_preset_left`
 
 **C32** - `docs/memory.md` and `docs/memory-setup.md` do not contain `Claude` (AC 32)
