@@ -31,6 +31,7 @@ from memhub.storage.base import FIXES
 from memhub.storage.migrations import check as check_schema
 from memhub.storage.rules import NO_TABLES, Actor, EmbeddingMismatch, Row
 from memhub.toolkit import MemoryToolkit
+from memhub.types import INTERNAL_TYPES
 
 __all__ = ["AddResult", "CallContext", "Dropped", "Memory", "MemoryEvent", "ScopedMemory"]
 
@@ -272,6 +273,9 @@ class Memory:
             return self._push(data, ctx, type=type, thread_id=thread_id)
         if isinstance(data, list):
             raise ValidationError("a list of messages is a conversation: pass infer=True to extract memories from it")
+        if type is None and "fact" not in self.settings.types:
+            listed = ", ".join(t for t in self.settings.types if t not in INTERNAL_TYPES)
+            raise ValidationError(f"type is required: this project has no 'fact' type (types: {listed})")
         self._ready()
         fields = {"content": data} if isinstance(data, str) else dict(data)
         row = self.service.add(

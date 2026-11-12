@@ -41,7 +41,8 @@ def test_core_imports_no_azure():
             assert not any(n == "azure" or n.startswith("azure.") or n.startswith("langchain_openai") for n in names), path
 
 
-def test_wheel_contains_presets(tmp_path, monkeypatch):
+def test_wheel_has_no_presets(tmp_path, monkeypatch):
+    """C20: no type set ships in the package."""
     import zipfile
 
     monkeypatch.chdir(ROOT)  # hatchling reads pyproject.toml from the cwd
@@ -49,8 +50,8 @@ def test_wheel_contains_presets(tmp_path, monkeypatch):
 
     wheel = tmp_path / build_wheel(str(tmp_path))
     names = zipfile.ZipFile(wheel).namelist()
-    for preset in ("maintenance", "support", "assistant"):
-        assert f"memhub/presets/{preset}.yaml" in names, preset
+    assert any(n.startswith("memhub/") for n in names)  # the wheel is the package
+    assert not [n for n in names if n.startswith("memhub/presets")]
 
 
 def test_readme_quickstart_commands():
@@ -60,7 +61,7 @@ def test_readme_quickstart_commands():
 
     readme = (ROOT / "README.md").read_text()
     quick = readme.split("## Quickstart", 1)[1].split("\n## ", 1)[0]
-    for needle in ("memhub init --preset", "memhub add", "memhub search", "Memory()"):
+    for needle in ("memhub init", "memory.md", "memhub add", "memhub search", "Memory()"):
         assert needle in quick, needle
     commands = set()
     for block in re.findall(r"```bash\n(.*?)```", quick, re.S):

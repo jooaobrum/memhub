@@ -79,6 +79,7 @@ Who: whoever can run the CLI in the folder with the config's credentials, as tod
 | 3. Presets removed | `src/memhub/presets/` deleted. `preset_names`, `load_preset` and the `preset` layer are gone. `preset:` in any layer raises `ConfigError("preset: is removed: list your memory types in memory.md (see docs/memory.md)")` | One release of expansion with a deprecation warning: nobody uses presets, and the user asked to start from scratch (AD-025) |
 | 4. Starter types | When no layer lists `types`: `fact`, `preference`, `profile` as built-ins with today's options (`type_prior` 0.6 / 0.8 / 0.8), plus internal `area` and `term`. `types: {}` given explicitly raises `ConfigError("memhub.yaml defines no memory types: add types to memory.md (see docs/memory.md)")` | Raise when nothing lists types: breaks `Memory(db=...)` with no file. Keep all six built-ins: a bare `Memory()` would keep `episode`, `case` and `skill`, which nobody chose (AD-029) |
 
+- Door 4, found mid-build: a starter type whose own `scopes` the project does not enable is left out (`term` needs `workspace`), so `scopes: [user]` with no types still loads; the alternative, raising, would make the starter fail for a user-only project
 - Nothing else in this change is hard to reverse
 
 ## Criteria

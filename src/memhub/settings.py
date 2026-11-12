@@ -1,8 +1,12 @@
 """Where memhub's configuration comes from, and how it becomes a `Config` and the app's objects.
 
-Layers, last wins:  built-in defaults < preset < `memhub.yaml` < `MEMHUB_*` env < `config=` / `overrides=` in code.
+Layers, last wins:  built-in defaults < `memhub.yaml` < `MEMHUB_*` env < `config=` / `overrides=` in code.
 A dict key is merged key by key; a scalar or a list is replaced whole. The one exception is `types:`: a type named
-in a higher layer replaces that type whole, `name: null` removes it (a preset's types are then a starting point).
+in a higher layer replaces that type whole, `name: null` removes it. When no layer lists a type, the starter types
+apply (`fact`, `preference`, `profile`, and memhub's own `area` and `term`).
+
+The project's memory file (`memory: ./memory.md`, see `memhub.memory_file`) is read as a layer just above the one that
+names it; a key it sets may not also be set in that layer. memhub ships no type sets (`PRESET_REMOVED`).
 
 `resolve(...)` returns a `Resolved`: the `Config`, the layer each key came from (`memhub config show`), and the
 file read. The files are read *raw*: `${VAR}` references stay in `Config._raw`, so `Config.save` and
@@ -22,7 +26,6 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import timedelta
-from importlib import resources
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -33,13 +36,15 @@ from memhub.config import KEY_ALIASES, Config, ConfigError, EmbeddingConfig, Mod
 
 __all__ = [
     "CONFIG_FILE", "Parts", "Resolved", "SECRET_KEYS", "context_path", "default_layer", "discover", "load_raw",
-    "mask", "preset_names", "read_context", "resolve", "save_config", "set_key", "write_context", "write_yaml",
+    "mask", "read_context", "resolve", "save_config", "set_key", "write_context", "write_yaml",
 ]
 
 CONFIG_FILE = "memhub.yaml"
 SECRET_KEYS = ("password", "api_key", "token", "secret")  # a key with one of these names holds `${VAR}`, never a value
 RESERVED_ENV = {"CONFIG", "CLI_ROLES", "WORKSPACE", "USER"}  # MEMHUB_<name> variables that are not config keys
-LAYERS = ("default", "preset", "yaml", "env", "code")
+LAYERS = ("default", "yaml", "env", "code")
+PRESET_REMOVED = "preset: is removed: list your memory types in memory.md (see docs/memory.md)"
+NO_TYPES = "memhub.yaml defines no memory types: add types to memory.md (see docs/memory.md)"
 
 _REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _GUARD = re.compile(r"__memhub_ref_([A-Za-z_][A-Za-z0-9_]*)__")
@@ -126,40 +131,17 @@ SEARCH_PLACES = f"./{CONFIG_FILE}, $MEMHUB_CONFIG, ~/.config/memhub/{CONFIG_FILE
 # --- layers -----------------------------------------------------------------------------------------------------
 
 
-_DEFAULT_TYPES: dict[str, dict[str, Any]] = {
-    "fact": {"type_prior": 0.6},
-    "preference": {"type_prior": 0.8},
-    "profile": {"type_prior": 0.8},
-    "episode": {"type_prior": 0.4},
-    "case": {"type_prior": 0.7, "extract": False, "on_remember": True},
-    "skill": {"retrieval": "index_then_load", "extract": False},
-    "area": {"extract": False, "scopes": ["user"]},
-    "term": {"scopes": ["workspace"]},
-}
-
-
 def default_layer() -> dict[str, Any]:
-    """memhub's behaviour when nothing says otherwise: every built-in type, user and workspace scopes."""
-    from memhub.types import BUILTIN_TYPES
+    """memhub's behaviour when nothing says otherwise: the starter types (AD-029), user and workspace scopes."""
+    from memhub.types import INTERNAL_TYPES, STARTER_TYPES, builtin_spec
 
     return {
         "project_prefix": "memhub",
         "workspace_default": "default",
         "scopes": ["user", "workspace"],
         "ttl": {"stable": None, "ongoing": "365d", "temporary": "30d"},
-        "types": {name: {"class": f"memhub.types:{BUILTIN_TYPES[name].__name__}", **opts} for name, opts in _DEFAULT_TYPES.items()},
+        "types": {name: builtin_spec(name) for name in (*STARTER_TYPES, *INTERNAL_TYPES)},
     }
-
-
-def preset_names() -> list[str]:
-    return sorted(p.name[: -len(".yaml")] for p in resources.files("memhub.presets").iterdir() if p.name.endswith(".yaml"))
-
-
-def load_preset(name: str) -> dict[str, Any]:
-    names = preset_names()
-    if name not in names:
-        raise ConfigError(f"unknown preset {name!r}; available: {', '.join(names)}")
-    return parse_raw(resources.files("memhub.presets").joinpath(f"{name}.yaml").read_text(), f"preset {name}")
 
 
 def env_layer(environ: Mapping[str, str]) -> dict[str, Any]:
@@ -169,6 +151,8 @@ def env_layer(environ: Mapping[str, str]) -> dict[str, Any]:
     for name in sorted(environ):
         if not name.startswith("MEMHUB_") or name[len("MEMHUB_"):] in RESERVED_ENV:
             continue
+        if name == "MEMHUB_PRESET":
+            raise ConfigError(f"MEMHUB_PRESET: {PRESET_REMOVED}")
         path = name[len("MEMHUB_"):].lower().split("__")
         if not all(path) or path[0] not in known:
             continue
@@ -298,39 +282,45 @@ def _resolve(
 ) -> Resolved:
     yaml_layer = canonical_keys(yaml_layer, str(path) if path else "config")
     layers: list[tuple[str, dict[str, Any]]] = [("yaml", yaml_layer), ("env", env_layer(environ)), ("code", code_layer)]
-    name = None
-    for _, layer in layers:
-        if layer.get("preset") is not None:
-            name = layer["preset"]
-    preset = load_preset(name) if name else {}
+    for label, layer in layers:
+        if "preset" in layer:
+            raise ConfigError(PRESET_REMOVED)
+    user_layers = list(layers)
+    layers = _with_memory_file(layers, path)
 
     merged: dict[str, Any] = {}
     sources: dict[str, str] = {}
     types: dict[str, Any] | None = None
     typed_by: dict[str, str] = {}
-    if preset.get("types"):
-        types = _overlay_types({}, preset["types"])
-        typed_by = {t: "preset" for t in types}
-    for label, layer in [("default", default_layer()), ("preset", preset), *layers]:
+    for label, layer in [("default", default_layer()), *layers]:
         if label == "default":
             default_types = layer["types"]
         for key, leaf in _leaves({k: v for k, v in layer.items() if k != "types"}).items():
             sources[key] = label
+        if label not in ("default", "yaml", "env", "code"):  # the memory file: name what its short forms become
+            if "areas" in layer:
+                sources["areas.seeds"] = label
+            if layer.get("strict"):
+                sources["areas.open"] = label
         merged = _deep(merged, {k: v for k, v in layer.items() if k != "types"})
-        if label not in ("default", "preset") and "types" in layer:
+        if label != "default" and "types" in layer:
             types = _overlay_types(types or {}, layer["types"])
             for t, spec in (layer["types"] or {}).items():
                 if spec is None:
                     typed_by.pop(t, None)
                 else:
                     typed_by[t] = label
-    if types is None:
-        types, typed_by = default_types, {t: "default" for t in default_types}
+    if types is None:  # the starter types, less a type whose scope the project does not enable (`term` needs workspace)
+        enabled = set(merged.get("scopes") or [])
+        types = {t: spec for t, spec in default_types.items() if set(spec.get("scopes") or enabled) <= enabled}
+        typed_by = {t: "default" for t in types}
+    elif not types:
+        raise ConfigError(NO_TYPES)
     merged["types"] = types
     sources.update({f"types.{t}": label for t, label in typed_by.items()})
 
     user_raw: dict[str, Any] = {}
-    for _, layer in layers:
+    for _, layer in user_layers:  # what `save` writes back: never the memory file's keys
         user_raw = _merge_layers(user_raw, layer)
     values = interpolate(merged, environ, strict=strict)
     try:
@@ -340,6 +330,32 @@ def _resolve(
         raise ConfigError(f"invalid configuration: {problems}") from exc
     config._raw = user_raw
     return Resolved(config=config, sources=sources, path=path, values=values)
+
+
+_LAYER_NAMES = {"env": "MEMHUB_* env", "code": "code"}
+
+
+def _with_memory_file(layers: list[tuple[str, dict[str, Any]]], path: Path | None) -> list[tuple[str, dict[str, Any]]]:
+    """The memory file named by the highest layer that sets `memory:`, inserted just above that layer. A relative
+    path is relative to the yaml that names it, else to the working directory."""
+    from memhub.memory_file import read_memory_file
+
+    named = [i for i, (_, layer) in enumerate(layers) if layer.get("memory")]
+    if not named:
+        return layers
+    i = named[-1]
+    label, layer = layers[i]
+    where = Path(str(layer["memory"])).expanduser()
+    if not where.is_absolute():
+        where = (path.resolve().parent if label == "yaml" and path is not None else Path.cwd()) / where
+    memory = read_memory_file(where)
+    namer = path.name if label == "yaml" and path is not None else _LAYER_NAMES.get(label, label)
+    clashes = [k for k in ("types", "areas", "strict") if k in memory and k in layer]
+    if "extraction" in memory and isinstance(layer.get("extraction"), dict) and "instructions" in layer["extraction"]:
+        clashes.append("extraction.instructions")
+    if clashes:
+        raise ConfigError(f"{clashes[0]} is set in both {namer} and {where.name}: keep one")
+    return [*layers[: i + 1], (where.name, memory), *layers[i + 1:]]
 
 
 def _env_beside(path: Path, environ: Mapping[str, str]) -> None:

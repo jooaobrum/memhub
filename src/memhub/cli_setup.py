@@ -14,7 +14,7 @@ import yaml
 from memhub.config import ConfigError
 from memhub.connection import _is_pool
 from memhub.settings import (
-    CONFIG_FILE, SEARCH_PLACES, Parts, Resolved, discover, embedding_model_id, load_preset, preset_names, resolve,
+    CONFIG_FILE, SEARCH_PLACES, Parts, Resolved, discover, embedding_model_id, resolve,
     set_key, write_context, write_yaml,
 )
 from memhub.storage import open_backend
@@ -44,19 +44,19 @@ def _folder_project() -> str:
 
 def init_command(
     *, config: Optional[Path], project: Optional[str], db: Optional[str], chat: Optional[str],
-    embeddings: Optional[str], preset: Optional[str], connect: Optional[str], force: bool, check_model: bool,
+    embeddings: Optional[str], memory: Optional[str], connect: Optional[str], force: bool, check_model: bool,
 ) -> None:
     from memhub import cli
 
     given = [name for name, v in (("--project", project), ("--db", db), ("--chat", chat), ("--embeddings", embeddings),
-                                  ("--preset", preset), ("--connect", connect)) if v is not None]
+                                  ("--memory", memory), ("--connect", connect)) if v is not None]
     if config is not None:
         if given:
             _die(f"-c FILE creates the tables of that file; it cannot be combined with {', '.join(given)}")
         return _init_tables(cli, config, check_model)
     if not given and discover() is not None:
         return _init_tables(cli, None, check_model)
-    _init_write(cli, given=given, project=project, db=db, chat=chat, embeddings=embeddings, preset=preset, connect=connect, force=force)
+    _init_write(cli, given=given, project=project, db=db, chat=chat, embeddings=embeddings, memory=memory, connect=connect, force=force)
 
 
 def _init_tables(cli: Any, config: Optional[Path], check_model: bool) -> None:
@@ -96,7 +96,31 @@ def _literal_password(url: str) -> bool:
     return bool(password) and not re.fullmatch(r"\$\{\w+\}", password)
 
 
-def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, preset, connect, force) -> None:
+MEMORY_FILE = "memory.md"
+KEEP_QUESTION = "In a sentence, what should this memory keep?"
+DEFAULT_BODY = (
+    "Durable facts about the user and their work, what they prefer, and who they are.\n"
+    "Never store secrets, one-off questions, or something only the assistant said."
+)
+
+
+def starter_memory(body: str | None = None) -> str:
+    """The `memory.md` that `memhub init` writes (AD-027): the starter types and what to remember."""
+    return (
+        "---\n"
+        "# Each type is `builtin`, a template such as \"Saw {species} at {location}[ on {seen_on?}]\", or a mapping.\n"
+        "# Add `areas:` and `strict: true` to keep only your own domain. See docs/memory.md.\n"
+        "types:\n"
+        "  fact: builtin\n"
+        "  preference: builtin\n"
+        "  profile: builtin\n"
+        "---\n"
+        "# What to remember\n\n"
+        f"{(body or '').strip() or DEFAULT_BODY}\n"
+    )
+
+
+def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, memory, connect, force) -> None:
     target = Path.cwd() / CONFIG_FILE
     if target.exists() and not force:
         _die(f"{target} already exists: edit it with `memhub config set`, or pass --force to overwrite it")
@@ -104,8 +128,9 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         _die("--connect and --db are two ways to say where the database is: give one")
     if connect is not None and (chat is not None or embeddings is not None):
         _die("with --connect the models come from your function: do not give --chat or --embeddings")
-    if preset is not None and preset not in preset_names():
-        _die(f"unknown preset {preset!r}; available: {', '.join(preset_names())}")
+    memory_path = (Path.cwd() / Path(memory).expanduser()) if memory is not None else None
+    if memory_path is not None and not memory_path.is_file():
+        _die(f"memory file not found: {memory}")
     if project is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", project):
         _die(f"--project {project!r} must start with a letter and use only letters, digits and underscores (max 41)")
     if connect is not None and not re.fullmatch(r"[\w.]+:\w+", connect):
@@ -119,7 +144,6 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
             _die(f"memhub init needs {' and '.join(missing)} (or --connect), e.g. "
                  "memhub init --db sqlite:///memhub.db --embeddings openai:text-embedding-3-small --chat openai:gpt-4.1-mini")
         project = project or _folder_project()
-        preset = preset or "assistant"
     if project is None:
         project = typer.prompt("Project (table prefix)", default=_folder_project())
     if connect is None and db is None:
@@ -130,11 +154,11 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         embeddings = typer.prompt("Embedding model (provider:model)")
     if connect is None and chat is None and not given:  # optional: only a person answering every question is asked
         chat = typer.prompt("Chat model (provider:model, empty to skip)", default="", show_default=False) or None
-    if preset is None:
-        preset = typer.prompt(f"Preset ({', '.join(preset_names())})", default="assistant")
-    for name, value, check in (("project", project, r"[A-Za-z][A-Za-z0-9_]{0,40}"), ("preset", preset, "|".join(preset_names()))):
-        if not re.fullmatch(check, value):
-            _die(f"{name} {value!r} is not valid" + (f"; available: {', '.join(preset_names())}" if name == "preset" else ""))
+    body = None
+    if memory is None and not given:  # a person at a terminal says, in their words, what the memory is for (AD-028)
+        body = typer.prompt(KEEP_QUESTION, default="", show_default=False)
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", project):
+        _die(f"project {project!r} is not valid")
 
     data: dict[str, Any] = {"project": project}
     if connect is not None:
@@ -144,11 +168,11 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         models = {k: v for k, v in (("chat", chat), ("embeddings", embeddings)) if v}
         if models:
             data["models"] = models
-    data["preset"] = preset
-    data["scopes"] = load_preset(preset).get("scopes", ["user"])
+    data["memory"] = memory if memory is not None else f"./{MEMORY_FILE}"
 
-    try:  # validate, build the embedder and embed one text, create the tables - and only then write the file
-        resolved = resolve(data)
+    try:  # validate, build the embedder and embed one text, create the tables - and only then write the files
+        # the yaml's `memory:` is relative to the yaml, which sits in this folder; the starter file needs no reading
+        resolved = resolve({**data, "memory": str(memory_path)} if memory_path is not None else {k: v for k, v in data.items() if k != "memory"})
         cli._require_db_and_embedder(resolved)
         parts = cli._parts(resolved)
         embedder = parts.embedder
@@ -162,6 +186,13 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
     except _INIT_ERRORS as exc:
         cli._fail(exc)
     write_yaml(target, data)
+    if memory is None:
+        memory_target = Path.cwd() / MEMORY_FILE
+        if memory_target.exists() and not force:
+            typer.echo(f"kept {MEMORY_FILE}", err=True)
+        else:
+            memory_target.write_text(starter_memory(body))
+            typer.echo(f"wrote {memory_target}")
     if db is not None and _literal_password(db):  # written as given (AD-007), but never silently
         typer.secho(
             "warning: the --db URL holds a literal password, written to memhub.yaml as given. "
@@ -184,7 +215,7 @@ def _text(value: Any) -> str:
 
 @config_app.command("show")
 def config_show(all: bool = typer.Option(False, "--all", help="Also the settings left at their defaults"), config: Optional[Path] = ConfigOpt) -> None:
-    """One line per setting: KEY, VALUE, SOURCE (default, preset, yaml, env, code)."""
+    """One line per setting: KEY, VALUE, SOURCE (default, yaml, the memory file, env, code)."""
     from memhub import cli
 
     try:

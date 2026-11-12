@@ -31,7 +31,7 @@ WS = "ws"
 IDS = {"workspace_id": WS, "user_id": "alice", "run_id": "run-1"}
 BOB = {"workspace_id": WS, "user_id": "bob", "run_id": "run-b"}
 ADMIN = {"workspace_id": WS, "user_id": "boss", "run_id": "run-a", "roles": ["workspace_admin"]}
-BUILTINS = {"fact", "preference", "profile", "episode", "case", "skill", "area", "term"}
+STARTER = {"fact", "preference", "profile", "area", "term"}
 
 
 class EmptySource:
@@ -91,7 +91,7 @@ def test_defaults_without_config_touch_nothing(pg_dsn):
     m = Memory(db=db, llm=llm, embedder=emb)
     assert m.settings.project_prefix == "memhub"
     assert m.settings.scopes == ["user", "workspace"]
-    assert set(m.settings.types) == BUILTINS and len(m.settings.types) == 8
+    assert set(m.settings.types) == STARTER and len(m.settings.types) == 5
     assert (db.calls, emb.calls, llm.calls) == (0, 0, 0)
 
 
@@ -579,3 +579,23 @@ def test_add_result_dumps_to_json(mem):
     result = mem.add("serialisable", **IDS)
     back = json.loads(json.dumps(result.model_dump()))
     assert back["run_id"] == "run-1" and back["results"][0]["content"] == "serialisable" and back["dropped"] == []
+
+
+def test_bare_memory_uses_starter_types():
+    """C21: an in-memory Memory with no config gets the starter types and adds and searches a fact."""
+    m = Memory(db="memory://", llm=FakeChatModel(), embedder=FakeEmbeddings(16))
+    m.init()
+    assert set(m.settings.types) == STARTER
+    added = m.add("Uses Postgres 16 in staging", **IDS)
+    assert added.results[0].type == "fact" and added.results[0].event == "ADD"
+    hits = m.search("Postgres 16 in staging", **IDS)
+    assert [h["content"] for h in hits][:1] == ["Uses Postgres 16 in staging"]
+
+
+def test_add_without_type_needs_fact():
+    """C23: no `type` and no `fact` in the project: a ValidationError naming the project's types, before any call
+    (the store is never initialised: a database call would fail with the init message instead)."""
+    m = Memory(db="memory://", llm=FakeChatModel(), embedder=FakeEmbeddings(16),
+               config={"types": {"sighting": "Saw {species}", "species_note": "{common_name}: {note}"}})
+    with pytest.raises(ValidationError, match=r"type is required: this project has no 'fact' type \(types: sighting, species_note\)"):
+        m.add("Saw a heron", **IDS)

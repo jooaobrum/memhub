@@ -525,7 +525,7 @@ def test_doctor_reports_the_vector_path(tmp_path, monkeypatch):
     monkeypatch.setattr(langchain.embeddings, "init_embeddings", lambda spec, **kw: FakeEmbeddings(16))
     runner = CliRunner()
     init = runner.invoke(cli.app, ["init", "--db", "sqlite:///m.db", "--embeddings", "openai:text-embedding-3-small",
-                                   "--preset", "assistant", "--project", "doc"])
+                                   "--project", "doc"])
     assert init.exit_code == 0, init.output
     for flag, path in (("1", "sqlite-vec"), ("0", "python")):
         monkeypatch.setenv(VEC_ENV, flag)

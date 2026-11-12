@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from dataclasses import dataclass
 
 from pydantic import ValidationError
@@ -11,7 +10,7 @@ from memhub import injection
 from memhub.config import Settings
 from memhub.pipeline.extract import Candidate
 from memhub.pipeline.segment import Segment
-from memhub.types import MemoryBase, Term, TypeRegistry
+from memhub.types import MemoryBase, Term, TypeRegistry, render_template
 
 
 # Relative time that means something different when read later. A claim's `content` must carry absolute dates
@@ -125,7 +124,7 @@ def _check(c: Candidate, segment: Segment, settings: Settings, registry: TypeReg
         return None, "relative_time"  # an Episode is the situation as told; claims must be timeless or dated
     template = settings.types[c.type].content_template if c.type in settings.types else None
     if template:  # the content is composed from the fields, so it embeds and reads the same everywhere
-        memory = memory.model_copy(update={"content": template.format_map(defaultdict(str, {k: "" if v is None else v for k, v in memory.model_dump().items()}))})
+        memory = memory.model_copy(update={"content": render_template(template, memory.model_dump())})
     if c.type in ("fact", "profile") and len(memory.content.split()) < 2:
         return None, "too_thin"  # a bare word ("Mari") says nothing
     if c.type in ("fact", "profile") and not explicit and _NEED.search(memory.content) and not _HABITUAL.search(memory.content):

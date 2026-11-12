@@ -137,15 +137,15 @@ def init(
     db: Optional[str] = typer.Option(None, "--db", help="postgresql://... (a `${VAR}` for the password keeps it out of the file), or sqlite:///memhub.db"),
     chat: Optional[str] = typer.Option(None, "--chat", help="Chat model as provider:model (needed by `ingest`)"),
     embeddings: Optional[str] = typer.Option(None, "--embeddings", help="Embedding model as provider:model"),
-    preset: Optional[str] = typer.Option(None, "--preset", help="maintenance | support | assistant"),
+    memory: Optional[str] = typer.Option(None, "--memory", help="Your memory file (types, areas, what to keep); default: write a starter memory.md"),
     connect: Optional[str] = typer.Option(None, "--connect", help="module:function returning {db, embedder, llm?, judge?}: your app's own objects"),
-    force: bool = typer.Option(False, "--force", help="Overwrite an existing memhub.yaml"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing memhub.yaml and memory.md"),
     check_model: bool = typer.Option(True, "--check-model/--no-check-model", help="Embed one text to check the model answers with `embeddings.dims`"),
 ) -> None:
-    """Write memhub.yaml (from flags, or asking), check the embedding model and create the tables. With `-c FILE`, or
-    with no flags and a yaml found, only create the tables from that file."""
+    """Write memhub.yaml and memory.md (from flags, or asking), check the embedding model and create the tables. With
+    `-c FILE`, or with no flags and a yaml found, only create the tables from that file."""
     cli_setup.init_command(
-        config=config, project=project, db=db, chat=chat, embeddings=embeddings, preset=preset, connect=connect,
+        config=config, project=project, db=db, chat=chat, embeddings=embeddings, memory=memory, connect=connect,
         force=force, check_model=check_model,
     )
 
