@@ -176,5 +176,5 @@ Proof: `.venv/bin/python -m pytest tests/test_e2e_record.py::test_s4_birds_recor
 
 - **Settled mid-build:** 2026-11-12, after the S3/S2 reruns showed weaker extraction than the presets' tuned prompts - asked "What should `memhub init` write as the starter body?" - user chose "Tuned rules in the body (Recommended)" (AD-034); then, after the S1 rerun filed coding facts as workspace candidates - asked "What should init write?" - user chose "scopes: [user] (Recommended)" (AD-035)
 - **Dispatched:** Verifier (independent sub-agent), at `d5ddf85`, diff `8d62476..d5ddf85` - returned (FAIL, 8 findings)
-- **Boundary:** none yet
-- **Abandoned:** none
+- **Boundary:** C1-C37 closed at `72588c8`; Verifier findings closed at `5c4b783`
+- **Abandoned:** a birds e2e drop case built on a `fact` candidate in a project without `fact` - `ground.py` raises `KeyError` on an unlisted type (unreachable with a real model: the schema lists the types); noted in scenarios.md "Still open"
