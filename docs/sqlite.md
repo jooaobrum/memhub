@@ -5,9 +5,9 @@ The tables, the review flow and the search rules are the ones Postgres has; the 
 on both.
 
 ```bash
-pip install "memhub[sqlite]"          # sqlite-vec: vector search in SQL. Optional.
-memhub init --db sqlite:///memhub.db  # writes memhub.yaml and creates the tables
-memhub ingest
+pip install "memhub[openai,sqlite] @ git+https://github.com/jooaobrum/memhub.git"   # not `pip install memhub`: that PyPI name is another project
+memhub init --db sqlite:///memhub.db --embeddings openai:text-embedding-3-small --chat openai:gpt-4.1-mini
+memhub ingest --source <name>         # a source from `sources:` in memhub.yaml, or claude_code
 memhub queue
 memhub search "what does the user prefer?"
 ```
@@ -36,6 +36,10 @@ me.search("language")
 Every memhub transaction starts with `BEGIN IMMEDIATE`, so a second writer waits (up to 5 s on a connection
 memhub opened) for the first to commit. On your own connection, when you already have a transaction open,
 memhub works in a savepoint inside it: your `commit()` or `rollback()` decides.
+
+Keep the database file out of folders a sync client manages (Google Drive, Dropbox, iCloud, OneDrive): the client
+can take the file mid-write and SQLite then fails with `attempt to write a readonly database`. `~/.memhub/` is a
+good place.
 
 ## Vector search
 

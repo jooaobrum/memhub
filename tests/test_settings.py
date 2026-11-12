@@ -37,18 +37,13 @@ def test_layers_last_wins_over_each_lower_layer():
     assert resolve(environ=env).config.reconcile.duplicate == 0.95  # env
     r = resolve(overrides={"reconcile": {"duplicate": 0.97}}, environ=env)
     assert r.config.reconcile.duplicate == 0.97  # code
-    # the preset sits under the yaml: `support` sets ingestion.max_candidates 5, the yaml says 2
-    _here({"preset": "support", "ingestion": {"max_candidates": 2}})
-    assert resolve().config.ingestion.max_candidates == 2
-    _here({"preset": "support"})
-    assert resolve().config.ingestion.max_candidates == 5
 
 
 def test_blocks_merge_per_key_scalars_and_lists_replace():
-    _here({"ttl": {"temporary": "7d"}, "preset": "support", "scopes": ["user"], "types": {"account": None, "ticket": None, "fact": None}})
+    _here({"ttl": {"temporary": "7d"}, "scopes": ["user"]})
     cfg = resolve().config
     assert cfg.ttl["temporary"] == timedelta(days=7) and cfg.ttl["ongoing"] == timedelta(days=365)
-    assert cfg.scopes == ["user"]  # the preset's [user, workspace] is replaced whole
+    assert cfg.scopes == ["user"]  # the default [user, workspace] is replaced whole
 
 
 def test_discovery_takes_first_existing_place(tmp_path):
@@ -67,9 +62,9 @@ def test_discovery_takes_first_existing_place(tmp_path):
 def test_no_yaml_anywhere_gives_defaults():
     assert discover({}) is None
     cfg = resolve().config
-    assert cfg.project_prefix == "memhub" and set(cfg.types) == {"fact", "preference", "profile", "episode", "case", "skill", "area", "term"}
+    assert cfg.project_prefix == "memhub" and set(cfg.types) == {"fact", "preference", "profile", "area", "term"}
     m = Memory(db="postgresql://nobody@127.0.0.1:1/none", embedder=FakeEmbeddings(16))
-    assert m.settings.project_prefix == "memhub" and len(m.settings.types) == 8
+    assert m.settings.project_prefix == "memhub" and len(m.settings.types) == 5
 
 
 def test_memhub_config_env_pointing_nowhere_is_error(tmp_path):
@@ -86,21 +81,20 @@ def test_config_path_dict_and_object_skip_discovery(tmp_path):
     with pytest.raises(ConfigError, match="gone.yaml"):
         resolve(tmp_path / "gone.yaml")
     assert resolve({"project": "a"}).config.project_prefix == "a"  # the file in ./ is not read
-    assert resolve(Config(project_prefix="obj", workspace_default="w", types={})).config.project_prefix == "obj"
+    assert resolve(Config(project_prefix="obj", workspace_default="w", types={"fact": {"class": "memhub.types:Fact"}})).config.project_prefix == "obj"
     assert resolve({"project": "a"}, environ={"MEMHUB_PROJECT": "b"}).config.project_prefix == "a"  # code beats env
     assert resolve({"workspace_default": "w2"}, environ={"MEMHUB_PROJECT": "b"}).config.project_prefix == "b"  # env still applies
 
 
 def test_env_keys_map_to_nested_yaml_values():
     env = {
-        "MEMHUB_PRESET": "support",
         "MEMHUB_DB": "postgresql://u@h/d",
         "MEMHUB_INGESTION__MAX_CANDIDATES": "9",
         "MEMHUB_SCOPES": "[user, workspace]",
     }
     r = resolve(environ=env)
     cfg = r.config
-    assert cfg.preset == "support" and cfg.database_url == "postgresql://u@h/d"
+    assert cfg.database_url == "postgresql://u@h/d"
     assert cfg.ingestion.max_candidates == 9 and isinstance(cfg.ingestion.max_candidates, int)
     assert cfg.scopes == ["user", "workspace"]
     assert r.source_of("ingestion.max_candidates") == "env"
@@ -151,35 +145,58 @@ def test_examples_still_load(monkeypatch):
 
 
 def test_optional_keys_may_be_absent():
-    _here({"project": "p", "preset": "assistant"})
+    _here({"project": "p"})
     cfg = resolve().config
     assert cfg.database_url is None and cfg.llm is None and cfg.embeddings is None and cfg.project_prefix == "p"
 
 
-def test_preset_layer_and_unknown_preset(tmp_path):
-    _here({"preset": "maintenance"})
-    assert set(resolve().config.types) == {"incident"}
-    assert set(resolve(environ={"MEMHUB_PRESET": "support"}).config.types) == {"account", "preference", "ticket", "fact"}  # env beats yaml
-    assert set(resolve(overrides={"preset": "assistant"}, environ={"MEMHUB_PRESET": "support"}).config.scopes) == {"user"}  # code beats env
-    _here({"preset": "nope"})
-    with pytest.raises(ConfigError, match="assistant, maintenance, support"):
+PRESET_REMOVED = "preset: is removed: list your memory types in memory.md (see docs/memory.md)"
+
+
+def test_preset_is_refused():
+    """C19: `preset:` in the yaml, `MEMHUB_PRESET` in env, `preset` in code: each refused, with the same message."""
+    _here({"preset": "support"})
+    with pytest.raises(ConfigError) as yaml_err:
         resolve()
+    (Path.cwd() / "memhub.yaml").unlink()
+    with pytest.raises(ConfigError) as env_err:
+        resolve(environ={"MEMHUB_PRESET": "support"})
+    with pytest.raises(ConfigError) as code_err:
+        resolve({"preset": "assistant"})
+    for err in (yaml_err, env_err, code_err):
+        assert PRESET_REMOVED in str(err.value)
+
+
+def test_starter_types():
+    """C21: with no layer listing types, exactly the starter types, with today's options."""
+    cfg = resolve({"project": "p"}).config
+    assert set(cfg.types) == {"fact", "preference", "profile", "area", "term"}
+    assert (cfg.types["fact"].class_path, cfg.types["fact"].type_prior) == ("memhub.types:Fact", 0.6)
+    assert cfg.types["preference"].type_prior == 0.8 and cfg.types["profile"].type_prior == 0.8
+    assert cfg.types["area"].extract is False and cfg.types["term"].scopes == ["workspace"]
+
+
+def test_empty_types_refused():
+    """C22: an explicit empty `types:` is refused."""
+    with pytest.raises(ConfigError, match=r"memhub.yaml defines no memory types: add types to memory.md \(see docs/memory.md\)"):
+        resolve({"types": {}})
 
 
 def test_types_block_replaces_adds_removes():
-    base = {"preset": "support"}
-    over = resolve({**base, "types": {"ticket": {"fields": {"symptom": "str"}}}}).config
+    _here({"types": {"ticket": {"fields": {"symptom": "str", "fix": "str"}}, "account": {"fields": {"name": "str"}}}})
+    over = resolve(overrides={"types": {"ticket": {"fields": {"symptom": "str"}}}}).config
     assert set(over.types["ticket"].fields) == {"symptom"} and "account" in over.types  # replaced whole, others kept
-    assert "account" not in resolve({**base, "types": {"account": None}}).config.types
-    added = resolve({**base, "types": {"faq": {"fields": {"q": "str"}}}}).config
+    assert "account" not in resolve(overrides={"types": {"account": None}}).config.types
+    added = resolve(overrides={"types": {"faq": {"fields": {"q": "str"}}}}).config
     assert "faq" in added.types and {"account", "ticket"} <= set(added.types)
-    # without a preset the types given are the types (as in PR 1), not added to the built-in eight
+    (Path.cwd() / "memhub.yaml").unlink()
+    # the types given are the types, not added to the starter types
     assert set(resolve({"types": {"faq": {"fields": {"q": "str"}}}, "scopes": ["user"]}).config.types) == {"faq"}
 
 
 def test_save_round_trips_and_keeps_var_refs(tmp_path, monkeypatch):
     monkeypatch.setenv("K", "sk-real")
-    _here({"project": "p", "preset": "support", "llm": {
+    _here({"project": "p", "llm": {
         "extractor": {"provider": "openai", "model": "x", "params": {"api_key": "${K}"}},
         "judge": {"provider": "openai", "model": "y"}}, "ttl": {"temporary": "7d"}})
     cfg = resolve().config

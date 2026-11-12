@@ -31,6 +31,7 @@ from memhub.storage.base import FIXES
 from memhub.storage.migrations import check as check_schema
 from memhub.storage.rules import NO_TABLES, Actor, EmbeddingMismatch, Row
 from memhub.toolkit import MemoryToolkit
+from memhub.types import INTERNAL_TYPES
 
 __all__ = ["AddResult", "CallContext", "Dropped", "Memory", "MemoryEvent", "ScopedMemory"]
 
@@ -272,6 +273,9 @@ class Memory:
             return self._push(data, ctx, type=type, thread_id=thread_id)
         if isinstance(data, list):
             raise ValidationError("a list of messages is a conversation: pass infer=True to extract memories from it")
+        if type is None and "fact" not in self.settings.types:
+            listed = ", ".join(t for t in self.settings.types if t not in INTERNAL_TYPES)
+            raise ValidationError(f"type is required: this project has no 'fact' type (types: {listed})")
         self._ready()
         fields = {"content": data} if isinstance(data, str) else dict(data)
         row = self.service.add(
@@ -414,7 +418,10 @@ class Memory:
                    k: int = 5) -> MemoryMiddleware:
         """A LangChain `MemoryMiddleware` on this memory. The ids are the defaults; `workspace_from` / `user_from`
         (callables over `runtime.context`) override them per invocation."""
-        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        # One middleware serves every user of the app: a `*_from` resolver stands in for its fixed id, and the run is
+        # the agent's own (a middleware writes no run rows), so neither a fixed user nor a run_id is asked for here.
+        ctx = self._call(workspace_id if workspace_from is None else (workspace_id or "-"),
+                         user_id if user_from is None else (user_id or "-"), run_id or "middleware", agent_id, roles)
         return MemoryMiddleware(self.service, workspace_from=workspace_from or ctx.workspace_id,
                                 user_from=user_from or ctx.user_id, k=k, actor=Actor(id=ctx.agent_id or "agent"))
 

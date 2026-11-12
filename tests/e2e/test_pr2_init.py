@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from memhub import Memory, cli
 
 runner = CliRunner()
+SUPPORT_MEMORY = Path(__file__).resolve().parents[2] / "examples" / "support" / "memory.md"  # the support project's types
 
 
 def test_pr2_demo(pg_dsn, tmp_path, monkeypatch):
@@ -20,11 +21,12 @@ def test_pr2_demo(pg_dsn, tmp_path, monkeypatch):
     monkeypatch.setenv("PR2_DSN", pg_dsn)
     project = f"e{uuid.uuid4().hex[:8]}"
     assert list(app.iterdir()) == []
+    (app / "memory.md").write_text(SUPPORT_MEMORY.read_text())
 
-    init = runner.invoke(cli.app, ["init", "--preset", "support", "--project", project, "--connect", "tests.e2e.pr2_app:build"])
+    init = runner.invoke(cli.app, ["init", "--memory", "./memory.md", "--project", project, "--connect", "tests.e2e.pr2_app:build"])
     assert init.exit_code == 0, init.output
     written = yaml.safe_load((app / "memhub.yaml").read_text())
-    assert written["connect"] == "tests.e2e.pr2_app:build" and written["preset"] == "support" and "db" not in written
+    assert written["connect"] == "tests.e2e.pr2_app:build" and written["memory"] == "./memory.md" and "db" not in written
 
     fact = app / "fact.json"
     fact.write_text(json.dumps({"content": "Compressor C3 trips when the inlet filter is clogged"}))

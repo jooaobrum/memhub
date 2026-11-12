@@ -34,6 +34,8 @@ from tests.fakes import FakeChatModel, FakeEmbeddings, extraction
 ROOT = Path(__file__).resolve().parents[2]
 runner = CliRunner()
 
+SUPPORT_MEMORY = Path(__file__).resolve().parents[2] / "examples" / "support" / "memory.md"  # the support project's types
+
 
 @pytest.fixture
 def no_postgres(monkeypatch):
@@ -67,9 +69,10 @@ def test_the_whole_epic_on_sqlite(no_postgres, tmp_path, monkeypatch):
     monkeypatch.chdir(project)
 
     # 1. init: memhub.yaml with the app's own connect function, the ledger on SQLite at the current schema version
-    _cli("init", "--connect", "tests.e2e.pr7_app:build", "--preset", "support", "--project", "plant")
+    (project / "memory.md").write_text(SUPPORT_MEMORY.read_text())
+    _cli("init", "--connect", "tests.e2e.pr7_app:build", "--memory", "./memory.md", "--project", "plant")
     config = yaml.safe_load((project / "memhub.yaml").read_text())
-    assert config["connect"] == "tests.e2e.pr7_app:build" and config["preset"] == "support"
+    assert config["connect"] == "tests.e2e.pr7_app:build" and config["memory"] == "./memory.md"
     assert _cli("migrate").output.strip() == "already at schema version 2"
 
     # 2. the app pushes a conversation; ids are bound once with scope()
@@ -83,7 +86,7 @@ def test_the_whole_epic_on_sqlite(no_postgres, tmp_path, monkeypatch):
                                                  thread_id="trace-1", trace_id="trace-1", now=None)]
     model = FakeChatModel([extraction(
         _cand("Prefers answers in Portuguese", "I prefer answers in Portuguese", ids[0], "user",
-              type="preference", key="language"),  # the support preset's user-scope type
+              type="preference", key="language"),  # the support project's user-scope type
         _cand("Pump P4 cavitates below half-open suction", "Pump P4 cavitates when the suction valve is under half open",
               ids[2], "workspace"),
     )], unrelated_by_default=True)

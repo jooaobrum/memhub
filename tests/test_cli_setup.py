@@ -77,11 +77,11 @@ def _lines(output: str) -> list[tuple[str, str, str]]:
 def test_init_with_flags_writes_yaml_and_tables(pg_dsn, monkeypatch):
     _inits(monkeypatch)
     p = _prefix()
-    result = runner.invoke(cli.app, ["init", "--project", p, "--db", pg_dsn, "--embeddings", "fake:emb", "--preset", "support"])
+    result = runner.invoke(cli.app, ["init", "--project", p, "--db", pg_dsn, "--embeddings", "fake:emb"])
     assert result.exit_code == 0, result.output
     assert f"initialized {p}_memory / {p}_memory_runs" in result.output
     data = _loaded()
-    assert data == {"project": p, "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "preset": "support", "scopes": ["user", "workspace"]}
+    assert data == {"project": p, "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "memory": "./memory.md", "scopes": ["user"]}
     assert resolve(Path.cwd() / "memhub.yaml").config.project_prefix == p
     assert _tables(pg_dsn, p) == [f"{p}_memory", f"{p}_memory_runs"]
 
@@ -89,7 +89,7 @@ def test_init_with_flags_writes_yaml_and_tables(pg_dsn, monkeypatch):
 def test_init_accepts_literal_url_password(pg_dsn, monkeypatch):
     _inits(monkeypatch)
     assert "postgres:postgres@" in pg_dsn  # a URL with a literal user and password
-    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", pg_dsn, "--embeddings", "fake:emb", "--preset", "assistant"])
+    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", pg_dsn, "--embeddings", "fake:emb"])
     assert result.exit_code == 0, result.output
     assert _loaded()["db"] == pg_dsn
     # written as given (AD-007), with a warning on stderr that never repeats the password
@@ -101,12 +101,12 @@ def test_init_does_not_warn_without_a_literal_password(pg_dsn, tmp_path, monkeyp
     _inits(monkeypatch)
     monkeypatch.setenv("PG_PW", "postgres")
     with_ref = pg_dsn.replace(":postgres@", ":${PG_PW}@")
-    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", with_ref, "--embeddings", "fake:emb", "--preset", "assistant"])
+    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", with_ref, "--embeddings", "fake:emb"])
     assert result.exit_code == 0, result.output
     assert _loaded()["db"] == with_ref and "literal password" not in result.output
     Path("memhub.yaml").unlink()
     lite = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", f"sqlite:///{tmp_path / 'm.db'}",
-                                   "--embeddings", "fake:emb", "--preset", "assistant"])
+                                   "--embeddings", "fake:emb"])
     assert lite.exit_code == 0, lite.output
     assert "literal password" not in lite.output
 
@@ -114,19 +114,19 @@ def test_init_does_not_warn_without_a_literal_password(pg_dsn, tmp_path, monkeyp
 def test_init_connect_excludes_db_and_models(pg_dsn, tmp_path, monkeypatch):
     connect_apps.reset(db=pg_dsn, embedder=FakeEmbeddings(16))
     p = _prefix()
-    result = runner.invoke(cli.app, ["init", "--project", p, "--connect", CONNECT, "--preset", "support"])
+    result = runner.invoke(cli.app, ["init", "--project", p, "--connect", CONNECT])
     assert result.exit_code == 0, result.output
     data = _loaded()
     assert data["connect"] == CONNECT and "db" not in data and "models" not in data
     other = _cwd(tmp_path, monkeypatch, "other")
-    result = runner.invoke(cli.app, ["init", "--project", p, "--connect", CONNECT, "--db", pg_dsn, "--preset", "support"])
+    result = runner.invoke(cli.app, ["init", "--project", p, "--connect", CONNECT, "--db", pg_dsn])
     assert result.exit_code == 1 and "--connect" in result.output and "--db" in result.output
     assert not (other / "memhub.yaml").exists()
 
 
 def test_init_chat_flag(pg_dsn, tmp_path, monkeypatch):
     _inits(monkeypatch)
-    base = ["init", "--db", pg_dsn, "--embeddings", "fake:emb", "--preset", "support"]
+    base = ["init", "--db", pg_dsn, "--embeddings", "fake:emb"]
     assert runner.invoke(cli.app, [*base, "--project", _prefix(), "--chat", "fake:chat"]).exit_code == 0
     assert _loaded()["models"] == {"chat": "fake:chat", "embeddings": "fake:emb"}
     _cwd(tmp_path, monkeypatch, "nochat")
@@ -137,20 +137,24 @@ def test_init_chat_flag(pg_dsn, tmp_path, monkeypatch):
 def test_init_prompts_for_missing_values(pg_dsn, tmp_path, monkeypatch):
     _inits(monkeypatch)
     _cwd(tmp_path, monkeypatch, "My App-2")
-    # project (default), connect (empty: a db URL instead), db, embeddings, chat (empty), preset (default)
+    # project (default), connect (empty: a db URL instead), db, embeddings, chat (empty), what to keep (empty)
     result = runner.invoke(cli.app, ["init"], input=f"\n\n{pg_dsn}\nfake:emb\n\n\n")
     assert result.exit_code == 0, result.output
-    assert _loaded() == {"project": "my_app_2", "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "preset": "assistant", "scopes": ["user"]}
-    # a value given by flag is not asked again: the one input line answers `preset`; `chat` is optional and only
-    # asked of someone who gave no flag at all
+    assert _loaded() == {"project": "my_app_2", "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "memory": "./memory.md", "scopes": ["user"]}
+    # flags mean a script or a coding agent: nothing is asked, what was not given takes its default
+    # (the folder's project, the starter memory.md, no chat model)
     _cwd(tmp_path, monkeypatch, "second")
-    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", pg_dsn, "--embeddings", "fake:emb"], input="support\n")
+    result = runner.invoke(cli.app, ["init", "--db", pg_dsn, "--embeddings", "fake:emb"], input="")
     assert result.exit_code == 0, result.output
-    assert "chat" not in _loaded()["models"] and _loaded()["preset"] == "support"
+    assert "chat" not in _loaded()["models"] and _loaded()["memory"] == "./memory.md" and _loaded()["project"] == "second"
+    # flags without a database or an embedding model stop with the flags to add, instead of asking
+    _cwd(tmp_path, monkeypatch, "fourth")
+    result = runner.invoke(cli.app, ["init", "--chat", "fake:chat"], input="")
+    assert result.exit_code == 1 and "--db and --embeddings" in result.output
     # with --connect the models are not asked either: no input is needed at all
     _cwd(tmp_path, monkeypatch, "third")
     connect_apps.reset(db=pg_dsn, embedder=FakeEmbeddings(16))
-    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--connect", CONNECT, "--preset", "support"], input="")
+    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--connect", CONNECT], input="")
     assert result.exit_code == 0, result.output
 
 
@@ -162,7 +166,7 @@ def test_init_order_probe_before_tables_before_yaml(pg_dsn, monkeypatch):
     real_init, real_write = MemoryStore.init, cli_setup.write_yaml
     monkeypatch.setattr(MemoryStore, "init", lambda self, **kw: events.append("tables") or real_init(self, **kw))
     monkeypatch.setattr(cli_setup, "write_yaml", lambda path, data: events.append("write") or real_write(path, data))
-    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", pg_dsn, "--embeddings", "fake:emb", "--preset", "support"])
+    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", pg_dsn, "--embeddings", "fake:emb"])
     assert result.exit_code == 0, result.output
     assert events == ["embed", "tables", "write"]
 
@@ -170,7 +174,7 @@ def test_init_order_probe_before_tables_before_yaml(pg_dsn, monkeypatch):
 def test_init_failure_writes_no_yaml(pg_dsn, tmp_path, monkeypatch):
     import langchain.embeddings as emb_mod
 
-    base = ["init", "--embeddings", "fake:emb", "--preset", "support"]
+    base = ["init", "--embeddings", "fake:emb"]
     # 1. the probe embed fails
     class Broken:
         def embed_query(self, text):
@@ -193,13 +197,11 @@ def test_init_failure_writes_no_yaml(pg_dsn, tmp_path, monkeypatch):
     assert result.exit_code == 1 and "reembed" in result.output and not (second / "memhub.yaml").exists()
 
 
-def test_init_rejects_bad_preset_or_project(monkeypatch):
+def test_init_rejects_bad_project(monkeypatch):
     events: list[str] = []
     _inits(monkeypatch, events=events)
     unreachable = "postgresql://nobody@127.0.0.1:1/none"
-    result = runner.invoke(cli.app, ["init", "--project", "p1", "--db", unreachable, "--embeddings", "fake:emb", "--preset", "nope"])
-    assert result.exit_code == 1 and "assistant, maintenance, support" in result.output
-    result = runner.invoke(cli.app, ["init", "--project", "1bad-name", "--db", unreachable, "--embeddings", "fake:emb", "--preset", "support"])
+    result = runner.invoke(cli.app, ["init", "--project", "1bad-name", "--db", unreachable, "--embeddings", "fake:emb"])
     assert result.exit_code == 1 and "letters, digits and underscores" in result.output
     assert events == [] and not Path("memhub.yaml").exists()  # nothing was built or dialled
 
@@ -208,16 +210,105 @@ def test_init_existing_yaml_needs_force(pg_dsn, monkeypatch):
     _inits(monkeypatch)
     p = _prefix()
     args = ["init", "--project", p, "--db", pg_dsn, "--embeddings", "fake:emb"]
-    assert runner.invoke(cli.app, [*args, "--preset", "support"]).exit_code == 0
+    assert runner.invoke(cli.app, args).exit_code == 0
     before = Path("memhub.yaml").read_bytes()
-    refused = runner.invoke(cli.app, [*args, "--preset", "assistant"])
+    refused = runner.invoke(cli.app, [*args, "--chat", "fake:chat"])
     assert refused.exit_code == 1 and "--force" in refused.output and Path("memhub.yaml").read_bytes() == before
     with psycopg.connect(pg_dsn) as conn:
         oid = conn.execute("SELECT %s::regclass::oid", (f"{p}_memory",)).fetchone()[0]
-        forced = runner.invoke(cli.app, [*args, "--preset", "assistant", "--force"])
+        forced = runner.invoke(cli.app, [*args, "--chat", "fake:chat", "--force"])
         assert forced.exit_code == 0, forced.output
         assert conn.execute("SELECT %s::regclass::oid", (f"{p}_memory",)).fetchone()[0] == oid  # tables untouched
-    assert _loaded()["preset"] == "assistant"
+    assert _loaded()["models"]["chat"] == "fake:chat"
+
+
+# --- init writes the memory file (C20, C24-C27) -----------------------------------------------------------------
+
+
+def _lite(tmp_path: Path) -> list[str]:
+    return ["--db", f"sqlite:///{tmp_path / f'{_prefix()}.db'}", "--embeddings", "fake:emb"]
+
+
+def test_init_preset_flag_is_gone(tmp_path, monkeypatch):
+    """C20: `--preset` is no option any more: typer's usage error, exit 2, nothing written."""
+    _inits(monkeypatch)
+    result = runner.invoke(cli.app, ["init", *_lite(tmp_path), "--preset", "support"])
+    assert result.exit_code == 2 and not Path("memhub.yaml").exists() and not Path("memory.md").exists()
+
+
+def test_init_flags_writes_memory_file(tmp_path, monkeypatch):
+    """C24: flags, no --memory: nothing asked, memhub.yaml names ./memory.md, the starter file resolves."""
+    _inits(monkeypatch)
+    result = runner.invoke(cli.app, ["init", *_lite(tmp_path)], input="")
+    assert result.exit_code == 0, result.output
+    assert cli_setup.KEEP_QUESTION not in result.output
+    assert _loaded()["memory"] == "./memory.md" and _loaded()["scopes"] == ["user"]  # AD-035
+    text = Path("memory.md").read_text()
+    front = yaml.safe_load(text.split("---")[1])
+    assert front == {"types": {"fact": "builtin", "preference": "builtin", "profile": "builtin"}}
+    body = text.split("---", 2)[2].strip()
+    assert body.startswith(f"# What to remember\n\n{cli_setup.DEFAULT_BODY}\n") and body.endswith(cli_setup.STARTER_RULES.strip())
+    cfg = resolve(Path.cwd() / "memhub.yaml").config
+    assert {"fact", "preference", "profile"} <= set(cfg.types) and cfg.extraction.instructions.startswith("# What to remember")
+
+
+def test_init_asks_what_to_keep(tmp_path, monkeypatch):
+    """C25: interactive init asks one question; the answer is the body; an empty answer, the default body."""
+    _inits(monkeypatch)
+    _cwd(tmp_path, monkeypatch, "asked")
+    db = f"sqlite:///{tmp_path / 'a.db'}"
+    # project, connect (empty), db, embeddings, chat (empty), what to keep
+    result = runner.invoke(cli.app, ["init"], input=f"\n\n{db}\nfake:emb\n\nOnly the club's bird sightings.\n")
+    assert result.exit_code == 0, result.output
+    assert "In a sentence, what should this memory keep?" in result.output
+    body = Path("memory.md").read_text().split("---", 2)[2].strip()
+    assert body.startswith("# What to remember\n\nOnly the club's bird sightings.\n") and cli_setup.DEFAULT_BODY not in body
+    assert body.endswith(cli_setup.STARTER_RULES.strip())  # the general rules follow the project's own line (AD-034)
+    _cwd(tmp_path, monkeypatch, "empty")
+    result = runner.invoke(cli.app, ["init"], input=f"\n\n{db}\nfake:emb\n\n\n")
+    assert result.exit_code == 0, result.output
+    assert cli_setup.DEFAULT_BODY in Path("memory.md").read_text()
+
+
+def test_init_with_memory_path(tmp_path, monkeypatch):
+    """C26: --memory names the user's file and writes no memory.md; a missing file exits 1."""
+    _inits(monkeypatch)
+    Path("mine.md").write_text("---\ntypes:\n  note: \"{text}\"\n---\nKeep notes.\n")
+    result = runner.invoke(cli.app, ["init", *_lite(tmp_path), "--memory", "./mine.md"])
+    assert result.exit_code == 0, result.output
+    assert _loaded()["memory"] == "./mine.md" and "scopes" not in _loaded() and not Path("memory.md").exists()
+    assert set(resolve(Path.cwd() / "memhub.yaml").config.types) == {"note"}
+    _cwd(tmp_path, monkeypatch, "missing")
+    result = runner.invoke(cli.app, ["init", *_lite(tmp_path), "--memory", "./nope.md"])
+    assert result.exit_code == 1 and "memory file not found: ./nope.md" in result.output
+    assert not Path("memhub.yaml").exists()
+
+
+def test_init_keeps_memory_file(tmp_path, monkeypatch):
+    """C27: an existing memory.md is kept byte for byte unless --force; `kept memory.md` on stderr."""
+    _inits(monkeypatch)
+    mine = "---\ntypes:\n  fact: builtin\n---\nMy own words.\n"
+    Path("memory.md").write_text(mine)
+    args = ["init", *_lite(tmp_path)]
+    result = runner.invoke(cli.app, args)
+    assert result.exit_code == 0, result.output
+    assert Path("memory.md").read_text() == mine and "kept memory.md" in result.stderr
+    result = runner.invoke(cli.app, [*args, "--force"])
+    assert result.exit_code == 0, result.output
+    assert Path("memory.md").read_text() != mine and cli_setup.DEFAULT_BODY in Path("memory.md").read_text()
+
+
+def test_config_show_names_the_memory_file():
+    """C7: every key the memory file sets shows source memory.md; no row shows preset."""
+    _yaml_file(Path("memhub.yaml"), {"project": "birds", "memory": "./memory.md"})
+    Path("memory.md").write_text("---\nstrict: true\ntypes:\n  sighting: \"Saw {species}\"\nareas:\n  owls: owls\n---\nOnly birds.\n")
+    result = runner.invoke(cli.app, ["config", "show"], env={})
+    assert result.exit_code == 0, result.output
+    shown = {k: (v, src) for k, v, src in _lines(result.output)}
+    for key in ("strict", "areas.open", "areas.seeds", "extraction.instructions", "types.sighting.fields.species", "types.sighting.area"):
+        assert shown[key][1] == "memory.md", key
+    assert shown["memory"] == ("./memory.md", "yaml")
+    assert not any("preset" in k or src == "preset" for k, (_, src) in shown.items())
 
 
 def _legacy_yaml(dsn: str, prefix: str) -> dict:
@@ -261,12 +352,11 @@ def _show(*args: str, env: dict | None = None):
 
 def test_config_show_lines_and_sources():
     _yaml_file(Path("memhub.yaml"), {"project": "minds"})
-    shown = _show(env={"MEMHUB_PRESET": "support"})
+    shown = _show(env={"MEMHUB_INGESTION__MAX_CANDIDATES": "5"})
     assert shown["project"] == ("minds", "yaml")
-    assert shown["preset"] == ("support", "env")
-    assert shown["ingestion.max_candidates"] == ("5", "preset")
+    assert shown["ingestion.max_candidates"] == ("5", "env")
     assert "terms.max_aliases" not in shown
-    assert _show("--all", env={"MEMHUB_PRESET": "support"})["terms.max_aliases"] == ("5", "default")
+    assert _show("--all")["terms.max_aliases"] == ("5", "default")
 
 
 def test_config_show_masks_secrets():
@@ -286,14 +376,14 @@ def test_config_show_masks_secrets():
 
 
 def test_config_set_writes_validated_value_keeps_refs():
-    _yaml_file(Path("memhub.yaml"), {"project": "p", "db": "postgresql://u:${PGPASSWORD}@h/d", "preset": "assistant"})
+    _yaml_file(Path("memhub.yaml"), {"project": "p", "db": "postgresql://u:${PGPASSWORD}@h/d"})
     assert runner.invoke(cli.app, ["config", "set", "ingestion.max_candidates", "7"]).exit_code == 0
     assert runner.invoke(cli.app, ["config", "set", "scopes", "[user, workspace]"]).exit_code == 0
     assert runner.invoke(cli.app, ["config", "set", "ttl.temporary", "7d"]).exit_code == 0
     data = _loaded()
     assert data["ingestion"]["max_candidates"] == 7 and isinstance(data["ingestion"]["max_candidates"], int)
     assert data["scopes"] == ["user", "workspace"] and data["ttl"] == {"temporary": "7d"}
-    assert data["db"] == "postgresql://u:${PGPASSWORD}@h/d" and data["project"] == "p" and data["preset"] == "assistant"
+    assert data["db"] == "postgresql://u:${PGPASSWORD}@h/d" and data["project"] == "p"
 
 
 def test_config_set_invalid_or_missing_yaml():

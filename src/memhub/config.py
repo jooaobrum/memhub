@@ -17,7 +17,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
-from memhub.types import TypeRegistry
+from memhub.types import BUILTIN_OPTIONS, INTERNAL_TYPES, TypeRegistry, builtin_spec, parse_template
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -133,7 +133,27 @@ class SeedArea(BaseModel):
     description: str = ""
 
 
+def _fits(model: type[BaseModel], field: str, value: str) -> bool:
+    """Whether text is a value of that setting (`"7"` from the environment is a valid `max_per_user`)."""
+    from pydantic import TypeAdapter
+
+    try:
+        TypeAdapter(model.model_fields[field].annotation).validate_python(value)
+    except Exception:  # noqa: BLE001 - any validation failure means the text is not this setting's value
+        return False
+    return True
+
+
+def area_title(key: str) -> str:
+    """`other_birds` -> `Other birds`."""
+    text = key.replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
 class AreasConfig(BaseModel):
+    """`areas:` takes its settings and, in the short form, its seeds as `key: description` (the title comes from the
+    key); the long form lists `seeds: [{key, title, description}]`."""
+
     seeds: list[SeedArea] = Field(default_factory=list)
     open: bool = True  # false: the model may not propose a new area
     merge_similarity: float = 0.88  # a proposed area this close to an existing one merges into it
@@ -142,6 +162,25 @@ class AreasConfig(BaseModel):
     page_max_items: int = 15
     page_max_chars: int = 1500  # budget of the page injected into a turn by the middleware
     page_min_similarity: float = 0.5  # a query less similar than this to every area gets no page
+
+    @model_validator(mode="before")
+    @classmethod
+    def _short_seeds(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        for k, v in data.items():
+            if k in cls.model_fields and k != "seeds" and isinstance(v, str) and not _fits(cls, k, v):
+                raise ValueError(f"areas: `{k}` is a setting of areas, not an area: rename that area")
+        short = {k: v for k, v in data.items() if k not in cls.model_fields and (isinstance(v, str) or v is None)}
+        for k in short:
+            if not isinstance(k, str):
+                raise ValueError(f"areas: the key {k!r} is not text: quote it in the yaml (\"{k}\")")
+        short = {k: v or "" for k, v in short.items()}
+        if not short:
+            return data
+        rest = {k: v for k, v in data.items() if k not in short}
+        seeds = [*(rest.get("seeds") or []), *({"key": k, "title": area_title(k), "description": v} for k, v in short.items())]
+        return {**rest, "seeds": seeds}
 
 
 class TermsConfig(BaseModel):
@@ -254,6 +293,20 @@ class ModelsConfig(BaseModel):
     embeddings: str | None = None
 
 
+_BUILTIN_NAMES = [n for n in BUILTIN_OPTIONS if n not in INTERNAL_TYPES]
+
+
+def _short_type(name: str, text: str) -> dict[str, Any]:
+    if text == "builtin":
+        if name not in _BUILTIN_NAMES:
+            raise ValueError(f"{name}: builtin is not a built-in type (use {', '.join(_BUILTIN_NAMES)})")
+        return builtin_spec(name)
+    if "{" not in text:
+        raise ValueError(f"{name}: a type is a template with {{fields}}, builtin, or a mapping")
+    fields, template = parse_template(name, text)
+    return {"fields": fields, "content_template": template}
+
+
 # `project` and `db` are the short names `memhub init` writes; the long ones stay valid.
 KEY_ALIASES = {"project": "project_prefix", "db": "database_url"}
 
@@ -280,7 +333,8 @@ class Config(BaseModel):
     workspace_default: str
     llm: LLMConfig | None = None  # the CLI builds models from these; `Memory(llm=, embedder=)` takes the app's own
     embeddings: EmbeddingConfig | None = None
-    preset: str | None = None  # a packaged preset (memhub/presets/<name>.yaml) under this file's own keys
+    memory: str | None = None  # the project's memory file (`memory.md`): its types, areas, `strict` and the prompt
+    strict: bool = False  # a domain filter: areas closed, and every project type needs an area
     connect: str | None = None  # "package.module:function" returning {db, embedder, llm?, judge?}: the app's own objects
     models: ModelsConfig | None = None  # `provider:model` strings, used when `connect` is absent and no `llm` / `embeddings` block
     entity_types: list[str] = Field(default_factory=list)
@@ -308,6 +362,20 @@ class Config(BaseModel):
     def _aliases(cls, data: Any) -> Any:
         return canonical_keys(data)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _short_types(cls, data: Any) -> Any:
+        """A type given as a string: `builtin` (a built-in's class and options) or a template whose placeholders
+        declare its fields. A mapping is the long form, unchanged."""
+        if not isinstance(data, dict) or not isinstance(data.get("types"), dict):
+            return data
+        types = {}
+        for name, spec in data["types"].items():
+            if isinstance(spec, str):
+                spec = _short_type(str(name), spec.strip())
+            types[name] = spec
+        return {**data, "types": types}
+
     def save(self, path: str | Path) -> None:
         """Write this config as yaml: `${VAR}` references only, never a literal secret."""
         from memhub.settings import save_config
@@ -321,6 +389,16 @@ class Config(BaseModel):
         if v is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", v):
             raise ValueError(f"{v!r} must start with a letter and use only letters, digits and underscores (max 41)")
         return v.lower() if v is not None else v
+
+    @model_validator(mode="after")
+    def _strict(self) -> "Config":
+        """`strict: true`: the model may not propose areas, and every project type without its own `area` needs one."""
+        if self.strict:
+            self.areas.open = False
+            for name, cfg in self.types.items():
+                if name not in INTERNAL_TYPES and cfg.area is None:
+                    cfg.area = "required"
+        return self
 
     @model_validator(mode="after")
     def _type_scopes_are_enabled(self) -> "Config":

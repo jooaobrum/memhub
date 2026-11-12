@@ -14,7 +14,7 @@ import yaml
 from memhub.config import ConfigError
 from memhub.connection import _is_pool
 from memhub.settings import (
-    CONFIG_FILE, SEARCH_PLACES, Parts, Resolved, discover, embedding_model_id, load_preset, preset_names, resolve,
+    CONFIG_FILE, SEARCH_PLACES, Parts, Resolved, discover, embedding_model_id, resolve,
     set_key, write_context, write_yaml,
 )
 from memhub.storage import open_backend
@@ -44,19 +44,19 @@ def _folder_project() -> str:
 
 def init_command(
     *, config: Optional[Path], project: Optional[str], db: Optional[str], chat: Optional[str],
-    embeddings: Optional[str], preset: Optional[str], connect: Optional[str], force: bool, check_model: bool,
+    embeddings: Optional[str], memory: Optional[str], connect: Optional[str], force: bool, check_model: bool,
 ) -> None:
     from memhub import cli
 
     given = [name for name, v in (("--project", project), ("--db", db), ("--chat", chat), ("--embeddings", embeddings),
-                                  ("--preset", preset), ("--connect", connect)) if v is not None]
+                                  ("--memory", memory), ("--connect", connect)) if v is not None]
     if config is not None:
         if given:
             _die(f"-c FILE creates the tables of that file; it cannot be combined with {', '.join(given)}")
         return _init_tables(cli, config, check_model)
     if not given and discover() is not None:
         return _init_tables(cli, None, check_model)
-    _init_write(cli, given=given, project=project, db=db, chat=chat, embeddings=embeddings, preset=preset, connect=connect, force=force)
+    _init_write(cli, given=given, project=project, db=db, chat=chat, embeddings=embeddings, memory=memory, connect=connect, force=force)
 
 
 def _init_tables(cli: Any, config: Optional[Path], check_model: bool) -> None:
@@ -96,7 +96,102 @@ def _literal_password(url: str) -> bool:
     return bool(password) and not re.fullmatch(r"\$\{\w+\}", password)
 
 
-def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, preset, connect, force) -> None:
+MEMORY_FILE = "memory.md"
+KEEP_QUESTION = "In a sentence, what should this memory keep?"
+DEFAULT_BODY = "Durable facts about the user and their work, what they prefer, and who they are."
+
+# The general rules a starter memory keeps under its purpose line (AD-034): tuned on real conversations, and the
+# project's to edit like the rest of the file.
+STARTER_RULES = """\
+## Kinds
+
+- `profile`: who the user is: identity, role, where they live or work, what they study, their team, lasting
+  constraints and goals. One free sentence per statement, only what the user said.
+- `fact`: other lasting knowledge about the user's situation or environment: their projects, tools, conventions,
+  household, commitments.
+- `preference`: how the user wants the assistant to answer or to work for them.
+
+Ask of every candidate: will this help me serve this user better in a month? If not, emit nothing.
+
+## Voice
+
+Write `content` in the third person, in the language the user wrote in, never in the first person and without
+"The user": "Prefers pytest over unittest", "Lives in Lisbon", not "I prefer pytest". Do not guess the user's gender.
+A statement about someone else (a child, partner, colleague, pet) names that person: "Daughter Alice is lactose
+intolerant", never "Is lactose intolerant". Jokes and sarcasm are never memories.
+
+## Keep
+
+What the user stated in a declarative sentence and that is still true and useful in a month: role and employer, team,
+projects and the stack they use, coding conventions they want followed, where they live, studies, family, pets, health
+constraints and diet, habits, budget, language level, decisions already taken, and dated commitments (a trip, a start
+date, a deadline) written with the absolute date and `valid_until` set to that date. One memory per distinct fact (up
+to 5 per segment), even when the message also asks a question.
+
+## Never
+
+- Questions, how-to requests, searches or recommendation requests ("how do I configure X?", "looking for a good gym"),
+  and "The user asked / wants to know / is looking for ...".
+- Something deduced from the topic of a question: asking about Paris rents does not mean the user lives in Paris.
+- Facts that only appear in the assistant's answers.
+- Vague intentions ("I'm thinking of", "maybe I'll"): keep only a durable fact behind them, if any.
+- An acute one-off errand: a lost card, a single bug being fixed right now.
+- Something too thin to be useful ("Works", "Has a project"): keep it only with the concrete detail.
+- Secrets: passwords, keys, tokens.
+
+If in doubt, emit nothing: an empty list is a good answer.
+
+## Time
+
+Every message shows its date, e.g. [#3 2026-07-21]. Never write relative time ("next year", "recently", "soon",
+"now") in `content`: rewrite it with the date of the message that says it ("next year" said on 2026-07-21 -> "in
+2027"), or drop it. A fact whose text gives an end gets `valid_until` = the last day of that period.
+
+## Preferences
+
+Store one when the user asks for a way of working or answering ("keep answers short", "always use type hints", "no
+emoji", "call me Sam"), or praises a format ("perfect, keep it this short"). A request that only concerns the current
+answer ("this time give me details") is not a preference. Set `key` to a short snake_case name (`format`, `language`,
+`logging`); one row per key, the latest wins. Write `content` as a complete sentence saying what is wanted. A request
+covering two things gives two memories.
+
+## Examples
+
+These only illustrate the rules: never emit a memory from them.
+
+- "I'm the tech lead on the payments API, we deploy on Fly.io. How do I set secrets there?" -> profile "Tech lead on
+  the payments API." and fact "The payments API is deployed on Fly.io." The question is dropped.
+- "Moved from Lyon to Annecy last month." (dated 2026-05-02) -> profile "Lives in Annecy since around April 2026."
+- "Please never use print for logging, we use structlog." -> preference (key `logging`) "Wants structlog for logging,
+  never print."
+- "What's a good restaurant around here?" -> nothing. "I'm thinking about learning Rust." -> nothing.
+
+Quote verbatim from a user message. Never use `assertion: inferred`. Utility (1-5): 5 = a constraint the assistant
+must respect in almost every answer (an allergy, a required convention, a format they asked for, where they live);
+4 = another lasting circumstance (job, project, stack, family, dated commitment); 3 = mildly useful (a hobby, a
+taste); 1-2 = trivia.
+"""
+
+
+def starter_memory(body: str | None = None) -> str:
+    """The `memory.md` that `memhub init` writes (AD-027, AD-034): the starter types, then what to remember: the
+    project's purpose (the interactive answer, or a default) and the general rules."""
+    return (
+        "---\n"
+        "# Each type is `builtin`, a template such as \"Saw {species} at {location}[ on {seen_on?}]\", or a mapping.\n"
+        "# Add `areas:` and `strict: true` to keep only your own domain. See docs/memory.md.\n"
+        "types:\n"
+        "  fact: builtin\n"
+        "  preference: builtin\n"
+        "  profile: builtin\n"
+        "---\n"
+        "# What to remember\n\n"
+        f"{(body or '').strip() or DEFAULT_BODY}\n\n"
+        f"{STARTER_RULES}"
+    )
+
+
+def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, memory, connect, force) -> None:
     target = Path.cwd() / CONFIG_FILE
     if target.exists() and not force:
         _die(f"{target} already exists: edit it with `memhub config set`, or pass --force to overwrite it")
@@ -104,13 +199,22 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         _die("--connect and --db are two ways to say where the database is: give one")
     if connect is not None and (chat is not None or embeddings is not None):
         _die("with --connect the models come from your function: do not give --chat or --embeddings")
-    if preset is not None and preset not in preset_names():
-        _die(f"unknown preset {preset!r}; available: {', '.join(preset_names())}")
+    memory_path = (Path.cwd() / Path(memory).expanduser()) if memory is not None else None
+    if memory_path is not None and not memory_path.is_file():
+        _die(f"memory file not found: {memory}")
     if project is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", project):
         _die(f"--project {project!r} must start with a letter and use only letters, digits and underscores (max 41)")
     if connect is not None and not re.fullmatch(r"[\w.]+:\w+", connect):
         _die(f"--connect must be 'package.module:function', not {connect!r}")
 
+    # Flags mean a script, a CI job or a coding agent: what was not given takes its default, nothing is asked.
+    # Questions are only for a person running a bare `memhub init` in a terminal.
+    if given:
+        missing = [] if connect is not None else [f for f, v in (("--db", db), ("--embeddings", embeddings)) if v is None]
+        if missing:
+            _die(f"memhub init needs {' and '.join(missing)} (or --connect), e.g. "
+                 "memhub init --db sqlite:///memhub.db --embeddings openai:text-embedding-3-small --chat openai:gpt-4.1-mini")
+        project = project or _folder_project()
     if project is None:
         project = typer.prompt("Project (table prefix)", default=_folder_project())
     if connect is None and db is None:
@@ -121,11 +225,11 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         embeddings = typer.prompt("Embedding model (provider:model)")
     if connect is None and chat is None and not given:  # optional: only a person answering every question is asked
         chat = typer.prompt("Chat model (provider:model, empty to skip)", default="", show_default=False) or None
-    if preset is None:
-        preset = typer.prompt(f"Preset ({', '.join(preset_names())})", default="assistant")
-    for name, value, check in (("project", project, r"[A-Za-z][A-Za-z0-9_]{0,40}"), ("preset", preset, "|".join(preset_names()))):
-        if not re.fullmatch(check, value):
-            _die(f"{name} {value!r} is not valid" + (f"; available: {', '.join(preset_names())}" if name == "preset" else ""))
+    body = None
+    if memory is None and not given:  # a person at a terminal says, in their words, what the memory is for (AD-028)
+        body = typer.prompt(KEEP_QUESTION, default="", show_default=False)
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", project):
+        _die(f"project {project!r} is not valid")
 
     data: dict[str, Any] = {"project": project}
     if connect is not None:
@@ -135,11 +239,13 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         models = {k: v for k, v in (("chat", chat), ("embeddings", embeddings)) if v}
         if models:
             data["models"] = models
-    data["preset"] = preset
-    data["scopes"] = load_preset(preset).get("scopes", ["user"])
+    data["memory"] = memory if memory is not None else f"./{MEMORY_FILE}"
+    if memory is None:
+        data["scopes"] = ["user"]  # the starter is one person's memory (AD-035); a project sharing memory says so
 
-    try:  # validate, build the embedder and embed one text, create the tables - and only then write the file
-        resolved = resolve(data)
+    try:  # validate, build the embedder and embed one text, create the tables - and only then write the files
+        # the yaml's `memory:` is relative to the yaml, which sits in this folder; the starter file needs no reading
+        resolved = resolve({**data, "memory": str(memory_path)} if memory_path is not None else {k: v for k, v in data.items() if k != "memory"})
         cli._require_db_and_embedder(resolved)
         parts = cli._parts(resolved)
         embedder = parts.embedder
@@ -153,6 +259,10 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
     except _INIT_ERRORS as exc:
         cli._fail(exc)
     write_yaml(target, data)
+    memory_target = Path.cwd() / MEMORY_FILE
+    kept = memory is None and memory_target.exists() and not force
+    if memory is None and not kept:
+        memory_target.write_text(starter_memory(body))
     if db is not None and _literal_password(db):  # written as given (AD-007), but never silently
         typer.secho(
             "warning: the --db URL holds a literal password, written to memhub.yaml as given. "
@@ -161,6 +271,10 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
         )
     typer.echo(f"initialized {settings.project_prefix}_memory / {settings.project_prefix}_memory_runs")
     typer.echo(f"wrote {target}")
+    if kept:
+        typer.echo(f"kept {MEMORY_FILE}", err=True)
+    elif memory is None:
+        typer.echo(f"wrote {memory_target}")
 
 
 # --- config show / set ------------------------------------------------------------------------------------------
@@ -175,7 +289,7 @@ def _text(value: Any) -> str:
 
 @config_app.command("show")
 def config_show(all: bool = typer.Option(False, "--all", help="Also the settings left at their defaults"), config: Optional[Path] = ConfigOpt) -> None:
-    """One line per setting: KEY, VALUE, SOURCE (default, preset, yaml, env, code)."""
+    """One line per setting: KEY, VALUE, SOURCE (default, yaml, the memory file, env, code)."""
     from memhub import cli
 
     try:

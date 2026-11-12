@@ -10,6 +10,13 @@ from pydantic import ValidationError
 log = logging.getLogger(__name__)
 
 
+def _cut_off(exc: Exception) -> bool:
+    """The model ran into its output-token limit (a runaway generation): OpenAI raises `LengthFinishReasonError`,
+    other providers say "max_tokens" / "length". Same failure as truncated JSON: sample again, never crash the app."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "lengthfinishreason" in text or "length limit" in text or "max_tokens" in text or "max tokens" in text
+
+
 def invoke_structured(model: Any, schema: Any, messages: list, *, retries: int = 0, what: str = "call") -> tuple[Any, int, int]:
     """(parsed or None, tokens in, tokens out). Cheap models truncate their JSON now and then (`EOF while parsing`);
     that is a ValidationError raised by the provider parser, not a `parsing_error`, and must not abort the run."""
@@ -19,6 +26,11 @@ def invoke_structured(model: Any, schema: Any, messages: list, *, retries: int =
             out = model.with_structured_output(schema, include_raw=True).invoke(messages)
         except (ValidationError, OutputParserException):
             log.warning("unparseable %s (attempt %d)", what, attempt + 1)
+            continue
+        except Exception as exc:  # noqa: BLE001 - only a cut-off answer is retried; anything else propagates
+            if not _cut_off(exc):
+                raise
+            log.warning("%s hit the model's output limit (attempt %d): %s", what, attempt + 1, type(exc).__name__)
             continue
         usage = getattr(out["raw"], "usage_metadata", None) or {}
         tokens_in += usage.get("input_tokens", 0)

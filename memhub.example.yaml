@@ -19,6 +19,8 @@ embeddings:
 entity_types: []
 scopes: [user, workspace]                 # workspace is used only by `term` (the shared glossary)
 
+# Types, areas and the extraction prompt can sit here, as below, or in a memory.md that `memory: ./memory.md`
+# names (see docs/memory.md): keep each in one place.
 types:
   fact:       {class: "memhub.types:Fact",       retrieval: search,          type_prior: 0.6, scopes: [user]}
   # A keyed type stores one active row per (owner, key): a change (a new city) updates that row.

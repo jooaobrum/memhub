@@ -8,6 +8,8 @@ so an old row is never silently reinterpreted by a newer class.
 from __future__ import annotations
 
 import importlib
+import re
+from collections import defaultdict
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, create_model
@@ -138,6 +140,87 @@ def model_from_fields(name: str, fields: dict[str, Any]) -> type[MemoryBase]:
     return create_model("".join(p.title() for p in name.split("_")), __base__=MemoryBase, **spec)
 
 
+_PLACEHOLDER = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?::([^?]+))?(\?)?")
+
+
+def _pieces(template: str) -> list[tuple[bool, str]]:
+    """`template` cut into `(optional, text)` pieces: text outside `[...]`, and each `[...]` section. `[[` and `]]` are
+    literal brackets; a bracket inside `{...}` (`{tags:list[str]}`) belongs to the placeholder."""
+    out: list[tuple[bool, str]] = []
+    buf, section, depth, i = "", False, 0, 0
+    while i < len(template):
+        ch, two = template[i], template[i:i + 2]
+        if depth == 0 and two in ("[[", "]]"):
+            buf += ch
+            i += 2
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+        elif depth == 0 and ch == "[":
+            if section:
+                raise ValueError(f"template {template!r}: a [section] cannot hold another")
+            out.append((False, buf))
+            buf, section = "", True
+            i += 1
+            continue
+        elif depth == 0 and ch == "]":
+            if not section:
+                raise ValueError(f"template {template!r}: ']' closes no section (write ']]' for a literal bracket)")
+            out.append((True, buf))
+            buf, section = "", False
+            i += 1
+            continue
+        buf += ch
+        i += 1
+    if section or depth:
+        raise ValueError(f"template {template!r}: a {'[section' if section else '{placeholder'} is never closed")
+    out.append((False, buf))
+    return [(opt, text) for opt, text in out if text or opt]
+
+
+def parse_template(type_name: str, template: str) -> tuple[dict[str, str], str]:
+    """A type written as a template: `"Saw {species} at {location}[ on {seen_on?}][ (count {count:int?})]"`.
+    Each placeholder `{name}`, `{name?}`, `{name:type}`, `{name:type?}` declares a field (type default `str`, `?`
+    optional); returns the fields and the template with bare `{name}` placeholders, sections kept."""
+    fields: dict[str, str] = {}
+
+    def field(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if inner.startswith("{"):  # `{{` is a literal brace
+            return m.group(0)
+        p = _PLACEHOLDER.fullmatch(inner.strip())
+        if p is None:
+            raise ValueError(f"type {type_name!r}: {{{inner}}} is not a field (write {{name}}, {{name?}} or {{name:int?}})")
+        name, kind, optional = p.group(1), (p.group(2) or "str").strip(), p.group(3) or ""
+        if kind not in _SCALARS:
+            raise ValueError(f"field {name!r} of type {type_name!r}: unknown type {kind!r} (use {', '.join(sorted(_SCALARS))})")
+        spec = kind + optional
+        if fields.get(name, spec) != spec:
+            raise ValueError(f"field {name!r} of type {type_name!r} is declared twice with different types ({fields[name]}, {spec})")
+        fields[name] = spec
+        return "{" + name + "}"
+
+    _pieces(template)  # refuse an unbalanced template before anything else
+    bare = re.sub(r"\{(\{?[^{}]*)\}", field, template)
+    return fields, bare
+
+
+def render_template(template: str, values: dict[str, Any]) -> str:
+    """`content` composed from a type's `content_template`. A `[...]` section is left out when one of its placeholders
+    has no value (None, "" or an empty list); outside sections a missing value is empty text."""
+    from string import Formatter
+
+    filled = defaultdict(str, {k: "" if v is None else v for k, v in values.items()})
+    out = []
+    for optional, text in _pieces(template):  # `[[` / `]]` come back as single brackets
+        if optional and any(name and values.get(name.split(".")[0].split("[")[0]) in (None, "", []) for _, name, _, _ in Formatter().parse(text)):
+            continue
+        out.append(text.format_map(filled))
+    return "".join(out)
+
+
 BUILTIN_TYPES: dict[str, type[MemoryBase]] = {
     "fact": Fact,
     "preference": Preference,
@@ -148,6 +231,26 @@ BUILTIN_TYPES: dict[str, type[MemoryBase]] = {
     "area": Area,
     "term": Term,
 }
+
+# A built-in type's options when a project turns it on (`fact: builtin`) or gets the starter types; `area` and `term`
+# are memhub's own (area pages, the glossary) and come with the starter only.
+BUILTIN_OPTIONS: dict[str, dict[str, Any]] = {
+    "fact": {"type_prior": 0.6},
+    "preference": {"type_prior": 0.8},
+    "profile": {"type_prior": 0.8},
+    "episode": {"type_prior": 0.4},
+    "case": {"type_prior": 0.7, "extract": False, "on_remember": True},
+    "skill": {"retrieval": "index_then_load", "extract": False},
+    "area": {"extract": False, "scopes": ["user"]},
+    "term": {"scopes": ["workspace"]},
+}
+INTERNAL_TYPES = ("area", "term")
+STARTER_TYPES = ("fact", "preference", "profile")
+
+
+def builtin_spec(name: str) -> dict[str, Any]:
+    """The long form of a built-in type: its class and options."""
+    return {"class": f"memhub.types:{BUILTIN_TYPES[name].__name__}", **BUILTIN_OPTIONS[name]}
 
 
 class TypeRegistry:

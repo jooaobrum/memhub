@@ -178,5 +178,6 @@ def test_connect_db_left_open(pg_dsn):
 
 
 def test_memory_accepts_overrides():
-    m = Memory(db="postgresql://a@h/d", embedder=FakeEmbeddings(16), overrides={"preset": "maintenance"})
-    assert "incident" in m.settings.types and m.settings.scopes == ["workspace"]
+    m = Memory(db="postgresql://a@h/d", embedder=FakeEmbeddings(16),
+               overrides={"scopes": ["workspace"], "types": {"incident": "{equipment}: {fix}"}})
+    assert set(m.settings.types) == {"incident"} and m.settings.scopes == ["workspace"]
