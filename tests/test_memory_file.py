@@ -55,6 +55,10 @@ def test_env_and_code_name_the_file(tmp_path, monkeypatch):
     Path("m.md").write_text(BIRDS)
     assert set(resolve({"project": "p"}, environ={"MEMHUB_MEMORY": "./m.md"}).config.types) == {"sighting", "species_note"}
     assert set(resolve({"project": "p", "memory": "./m.md"}, environ={}).config.types) == {"sighting", "species_note"}
+    # two layers name a file: the higher one wins (env over the yaml)
+    Path("other.md").write_text("---\ntypes:\n  note: \"{text}\"\n---\n")
+    Path("memhub.yaml").write_text("project: p\nmemory: ./m.md\n")
+    assert set(resolve(Path("memhub.yaml"), environ={"MEMHUB_MEMORY": "./other.md"}).config.types) == {"note"}
 
 
 def test_missing_file(tmp_path):

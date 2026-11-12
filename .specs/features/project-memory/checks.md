@@ -24,6 +24,7 @@ Proof: `.venv/bin/python -m pytest tests/test_memory_file.py::test_unknown_front
 
 **C5** - `types`, `areas`, or `extraction.instructions` (with a non-empty body) set in both the naming layer and the file each raise `ConfigError` with `<key> is set in both memhub.yaml and memory.md: keep one`; `extraction.instructions` in the yaml with an empty body loads (AC 5)
 Proof: `.venv/bin/python -m pytest tests/test_memory_file.py::test_key_in_both_places`
+Proof: `.venv/bin/python -m pytest tests/test_memory_file.py::test_instructions_in_yaml_with_an_empty_body_load`
 
 **C6** - A file with no frontmatter is all body and gets the starter types; an empty body leaves the default instructions (AC 6)
 Proof: `.venv/bin/python -m pytest tests/test_memory_file.py::test_no_frontmatter_and_empty_body`
@@ -48,6 +49,7 @@ Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_placehol
 **C11** - Optional sections render as the plan's four examples: `seen_on=None, count=2` → `Saw Heron at canal (count 2)`; both empty → `Saw Heron at canal`; both set → `Saw Heron at canal on 2026-11-12 (count 2)`; `[[x]] {a}` → `[x] A`; a template with no `[` renders as today (AC 11)
 Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_optional_sections_render`
 Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_written_memory_content_uses_sections`
+Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_literal_brackets_and_plain_templates_render`
 
 **C12** - `<name>: builtin` equals today's built-in entry for each of `fact preference profile episode case skill`; `sighting: builtin` raises `ConfigError` listing the six (AC 12)
 Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_builtin`
@@ -57,6 +59,7 @@ Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_plain_st
 
 **C14** - Areas as `key: text` become seeds: `raptors` → `Raptors`, `other_birds` → `Other birds`, `shorebirds_seabirds` → `Shorebirds seabirds`, description kept (AC 14)
 Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_area_short_form`
+Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_area_short_form_edges`
 
 **C15** - Each long-form example config resolves to the same project types, areas and instructions as at the base snapshot `tests/fixtures/examples_resolved_base.json`, through the long forms alone (AC 15)
 Proof: `.venv/bin/python -m pytest tests/test_type_short_forms.py::test_long_forms_unchanged`
@@ -172,6 +175,6 @@ Proof: `.venv/bin/python -m pytest tests/test_e2e_record.py::test_s4_birds_recor
 ## Handoff
 
 - **Settled mid-build:** 2026-11-12, after the S3/S2 reruns showed weaker extraction than the presets' tuned prompts - asked "What should `memhub init` write as the starter body?" - user chose "Tuned rules in the body (Recommended)" (AD-034); then, after the S1 rerun filed coding facts as workspace candidates - asked "What should init write?" - user chose "scopes: [user] (Recommended)" (AD-035)
-- **Dispatched:** none
+- **Dispatched:** Verifier (independent sub-agent), at `d5ddf85`, diff `8d62476..d5ddf85` - returned (FAIL, 8 findings)
 - **Boundary:** none yet
 - **Abandoned:** none

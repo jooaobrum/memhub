@@ -1,0 +1,17 @@
+[
+  {"file": "src/memhub/types.py",
+   "old": "values.get(name.split(\".\")[0].split(\"[\")[0]) in (None, \"\", [])",
+   "new": "values.get(name.split(\".\")[0].split(\"[\")[0]) in (None, \"\")",
+   "proof": ".venv/bin/python -m pytest -q -p no:cacheprovider tests/test_type_short_forms.py::test_optional_sections_render",
+   "label": "optional section with an empty list placeholder is rendered (empty list no longer counts as empty)"},
+  {"file": "src/memhub/settings.py",
+   "old": "    i = named[-1]\n",
+   "new": "    i = named[0]\n",
+   "proof": ".venv/bin/python -m pytest -q -p no:cacheprovider tests/test_memory_file.py",
+   "label": "memory file named by the lowest layer setting memory: wins instead of the highest"},
+  {"file": "src/memhub/config.py",
+   "old": "    return text[:1].upper() + text[1:]\n",
+   "new": "    return text.capitalize()\n",
+   "proof": ".venv/bin/python -m pytest -q -p no:cacheprovider tests/test_type_short_forms.py::test_area_short_form",
+   "label": "area title lowercases the rest of the key (DNA_samples -> Dna samples)"}
+]

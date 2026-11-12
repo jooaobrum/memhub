@@ -58,6 +58,8 @@ def test_optional_sections_render(values, expected):
     """C11"""
     template = _types({"sighting": SIGHTING})["sighting"].content_template
     assert render_template(template, {"species": "Heron", "location": "canal", **values}) == expected
+    tags = _types({"t": "{name}[ tagged {tags:list[str]?}]"})["t"].content_template
+    assert render_template(tags, {"name": "Heron", "tags": []}) == "Heron"  # an empty list is no value
 
 
 def test_literal_brackets_and_plain_templates_render():
@@ -107,6 +109,19 @@ def test_area_short_form():
     assert [(s.key, s.title, s.description) for s in cfg.areas.seeds] == [
         ("raptors", "Raptors", "hawks, eagles"), ("other_birds", "Other birds", "pigeons"),
         ("shorebirds_seabirds", "Shorebirds seabirds", "gulls")]
+    # only the first letter goes upper; the rest of the key keeps its case
+    assert resolve({"project": "p", "areas": {"DNA_samples": "lab"}}, environ={}).config.areas.seeds[0].title == "DNA samples"
+
+
+def test_area_short_form_edges():
+    """C14: an area with no description is kept; a key that is not text, or that names a setting, is refused clearly."""
+    cfg = resolve({"project": "p", "areas": {"raptors": None, "owls": "owls"}}, environ={}).config
+    assert [(s.key, s.title, s.description) for s in cfg.areas.seeds] == [("raptors", "Raptors", ""), ("owls", "Owls", "owls")]
+    with pytest.raises(ConfigError, match="areas: the key 2024 is not text"):
+        resolve({"project": "p", "areas": {2024: "year list"}}, environ={})
+    with pytest.raises(ConfigError, match="areas: `open` is a setting of areas, not an area: rename that area"):
+        resolve({"project": "p", "areas": {"open": "open-country birds"}}, environ={})
+    assert resolve({"project": "p", "areas": {"max_per_user": "7"}}, environ={}).config.areas.max_per_user == 7  # a setting from env text
 
 
 def test_long_forms_unchanged(monkeypatch):
