@@ -98,14 +98,84 @@ def _literal_password(url: str) -> bool:
 
 MEMORY_FILE = "memory.md"
 KEEP_QUESTION = "In a sentence, what should this memory keep?"
-DEFAULT_BODY = (
-    "Durable facts about the user and their work, what they prefer, and who they are.\n"
-    "Never store secrets, one-off questions, or something only the assistant said."
-)
+DEFAULT_BODY = "Durable facts about the user and their work, what they prefer, and who they are."
+
+# The general rules a starter memory keeps under its purpose line (AD-034): tuned on real conversations, and the
+# project's to edit like the rest of the file.
+STARTER_RULES = """\
+## Kinds
+
+- `profile`: who the user is: identity, role, where they live or work, what they study, their team, lasting
+  constraints and goals. One free sentence per statement, only what the user said.
+- `fact`: other lasting knowledge about the user's situation or environment: their projects, tools, conventions,
+  household, commitments.
+- `preference`: how the user wants the assistant to answer or to work for them.
+
+Ask of every candidate: will this help me serve this user better in a month? If not, emit nothing.
+
+## Voice
+
+Write `content` in the third person, in the language the user wrote in, never in the first person and without
+"The user": "Prefers pytest over unittest", "Lives in Lisbon", not "I prefer pytest". Do not guess the user's gender.
+A statement about someone else (a child, partner, colleague, pet) names that person: "Daughter Alice is lactose
+intolerant", never "Is lactose intolerant". Jokes and sarcasm are never memories.
+
+## Keep
+
+What the user stated in a declarative sentence and that is still true and useful in a month: role and employer, team,
+projects and the stack they use, coding conventions they want followed, where they live, studies, family, pets, health
+constraints and diet, habits, budget, language level, decisions already taken, and dated commitments (a trip, a start
+date, a deadline) written with the absolute date and `valid_until` set to that date. One memory per distinct fact (up
+to 5 per segment), even when the message also asks a question.
+
+## Never
+
+- Questions, how-to requests, searches or recommendation requests ("how do I configure X?", "looking for a good gym"),
+  and "The user asked / wants to know / is looking for ...".
+- Something deduced from the topic of a question: asking about Paris rents does not mean the user lives in Paris.
+- Facts that only appear in the assistant's answers.
+- Vague intentions ("I'm thinking of", "maybe I'll"): keep only a durable fact behind them, if any.
+- An acute one-off errand: a lost card, a single bug being fixed right now.
+- Something too thin to be useful ("Works", "Has a project"): keep it only with the concrete detail.
+- Secrets: passwords, keys, tokens.
+
+If in doubt, emit nothing: an empty list is a good answer.
+
+## Time
+
+Every message shows its date, e.g. [#3 2026-07-21]. Never write relative time ("next year", "recently", "soon",
+"now") in `content`: rewrite it with the date of the message that says it ("next year" said on 2026-07-21 -> "in
+2027"), or drop it. A fact whose text gives an end gets `valid_until` = the last day of that period.
+
+## Preferences
+
+Store one when the user asks for a way of working or answering ("keep answers short", "always use type hints", "no
+emoji", "call me Sam"), or praises a format ("perfect, keep it this short"). A request that only concerns the current
+answer ("this time give me details") is not a preference. Set `key` to a short snake_case name (`format`, `language`,
+`logging`); one row per key, the latest wins. Write `content` as a complete sentence saying what is wanted. A request
+covering two things gives two memories.
+
+## Examples
+
+These only illustrate the rules: never emit a memory from them.
+
+- "I'm the tech lead on the payments API, we deploy on Fly.io. How do I set secrets there?" -> profile "Tech lead on
+  the payments API." and fact "The payments API is deployed on Fly.io." The question is dropped.
+- "Moved from Lyon to Annecy last month." (dated 2026-05-02) -> profile "Lives in Annecy since around April 2026."
+- "Please never use print for logging, we use structlog." -> preference (key `logging`) "Wants structlog for logging,
+  never print."
+- "What's a good restaurant around here?" -> nothing. "I'm thinking about learning Rust." -> nothing.
+
+Quote verbatim from a user message. Never use `assertion: inferred`. Utility (1-5): 5 = a constraint the assistant
+must respect in almost every answer (an allergy, a required convention, a format they asked for, where they live);
+4 = another lasting circumstance (job, project, stack, family, dated commitment); 3 = mildly useful (a hobby, a
+taste); 1-2 = trivia.
+"""
 
 
 def starter_memory(body: str | None = None) -> str:
-    """The `memory.md` that `memhub init` writes (AD-027): the starter types and what to remember."""
+    """The `memory.md` that `memhub init` writes (AD-027, AD-034): the starter types, then what to remember: the
+    project's purpose (the interactive answer, or a default) and the general rules."""
     return (
         "---\n"
         "# Each type is `builtin`, a template such as \"Saw {species} at {location}[ on {seen_on?}]\", or a mapping.\n"
@@ -116,7 +186,8 @@ def starter_memory(body: str | None = None) -> str:
         "  profile: builtin\n"
         "---\n"
         "# What to remember\n\n"
-        f"{(body or '').strip() or DEFAULT_BODY}\n"
+        f"{(body or '').strip() or DEFAULT_BODY}\n\n"
+        f"{STARTER_RULES}"
     )
 
 
@@ -186,13 +257,10 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, me
     except _INIT_ERRORS as exc:
         cli._fail(exc)
     write_yaml(target, data)
-    if memory is None:
-        memory_target = Path.cwd() / MEMORY_FILE
-        if memory_target.exists() and not force:
-            typer.echo(f"kept {MEMORY_FILE}", err=True)
-        else:
-            memory_target.write_text(starter_memory(body))
-            typer.echo(f"wrote {memory_target}")
+    memory_target = Path.cwd() / MEMORY_FILE
+    kept = memory is None and memory_target.exists() and not force
+    if memory is None and not kept:
+        memory_target.write_text(starter_memory(body))
     if db is not None and _literal_password(db):  # written as given (AD-007), but never silently
         typer.secho(
             "warning: the --db URL holds a literal password, written to memhub.yaml as given. "
@@ -201,6 +269,10 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, me
         )
     typer.echo(f"initialized {settings.project_prefix}_memory / {settings.project_prefix}_memory_runs")
     typer.echo(f"wrote {target}")
+    if kept:
+        typer.echo(f"kept {MEMORY_FILE}", err=True)
+    elif memory is None:
+        typer.echo(f"wrote {memory_target}")
 
 
 # --- config show / set ------------------------------------------------------------------------------------------

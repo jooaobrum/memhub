@@ -246,7 +246,8 @@ def test_init_flags_writes_memory_file(tmp_path, monkeypatch):
     text = Path("memory.md").read_text()
     front = yaml.safe_load(text.split("---")[1])
     assert front == {"types": {"fact": "builtin", "preference": "builtin", "profile": "builtin"}}
-    assert text.split("---", 2)[2].strip() == f"# What to remember\n\n{cli_setup.DEFAULT_BODY}"
+    body = text.split("---", 2)[2].strip()
+    assert body.startswith(f"# What to remember\n\n{cli_setup.DEFAULT_BODY}\n") and body.endswith(cli_setup.STARTER_RULES.strip())
     cfg = resolve(Path.cwd() / "memhub.yaml").config
     assert {"fact", "preference", "profile"} <= set(cfg.types) and cfg.extraction.instructions.startswith("# What to remember")
 
@@ -260,7 +261,9 @@ def test_init_asks_what_to_keep(tmp_path, monkeypatch):
     result = runner.invoke(cli.app, ["init"], input=f"\n\n{db}\nfake:emb\n\nOnly the club's bird sightings.\n")
     assert result.exit_code == 0, result.output
     assert "In a sentence, what should this memory keep?" in result.output
-    assert Path("memory.md").read_text().split("---", 2)[2].strip() == "# What to remember\n\nOnly the club's bird sightings."
+    body = Path("memory.md").read_text().split("---", 2)[2].strip()
+    assert body.startswith("# What to remember\n\nOnly the club's bird sightings.\n") and cli_setup.DEFAULT_BODY not in body
+    assert body.endswith(cli_setup.STARTER_RULES.strip())  # the general rules follow the project's own line (AD-034)
     _cwd(tmp_path, monkeypatch, "empty")
     result = runner.invoke(cli.app, ["init"], input=f"\n\n{db}\nfake:emb\n\n\n")
     assert result.exit_code == 0, result.output

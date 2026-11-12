@@ -122,7 +122,9 @@ A candidate that fits no area is dropped with the reason `no_area`. A type that 
 
 ## Starter types
 
-`memhub init` writes this file:
+`memhub init` writes this file. Its body opens with one line on what the memory is for (your answer when `init` asks),
+followed by general rules tuned on real conversations: kinds, voice, what to keep, what never to keep, time,
+preferences and examples. Keep the rules, adapt them, or replace them with your own:
 
 ```markdown
 ---
@@ -134,7 +136,13 @@ types:
 # What to remember
 
 Durable facts about the user and their work, what they prefer, and who they are.
-Never store secrets, one-off questions, or something only the assistant said.
+
+## Kinds
+...
+## Voice
+...
+## Keep / ## Never / ## Time / ## Preferences / ## Examples
+...
 ```
 
 When neither the memory file nor any other setting lists a type, memhub uses these three types, plus its own `area`

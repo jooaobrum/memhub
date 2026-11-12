@@ -48,7 +48,8 @@ folder's name. Run `init` with no flags to have it ask instead; it then also ask
 ## 3. Say what to remember
 
 Open `memory.md`. The starter keeps three kinds of memory: facts, preferences and who the user is. Its body says what to
-keep in plain words:
+keep in plain words: one line on what this memory is for, then general rules tuned on real conversations (write in the
+third person, never keep questions or errands, date everything, how preferences work):
 
 ```markdown
 ---
@@ -60,11 +61,17 @@ types:
 # What to remember
 
 Durable facts about the user and their work, what they prefer, and who they are.
-Never store secrets, one-off questions, or something only the assistant said.
+
+## Kinds
+...
+## Voice
+...
+## Keep / ## Never / ## Time / ## Preferences / ## Examples
+...
 ```
 
-Rewrite the body for your agent. Write it the way you would brief a new colleague: what is worth remembering about a
-user, and what must never be kept. To add your own kinds of memory, add a line under `types:`, where the placeholders
+Rewrite the first line for your agent, and adapt the rules: write them the way you would brief a new colleague, with
+what is worth remembering about a user and what must never be kept. To add your own kinds of memory, add a line under `types:`, where the placeholders
 are the fields:
 
 ```yaml
