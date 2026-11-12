@@ -133,6 +133,17 @@ class SeedArea(BaseModel):
     description: str = ""
 
 
+def _fits(model: type[BaseModel], field: str, value: str) -> bool:
+    """Whether text is a value of that setting (`"7"` from the environment is a valid `max_per_user`)."""
+    from pydantic import TypeAdapter
+
+    try:
+        TypeAdapter(model.model_fields[field].annotation).validate_python(value)
+    except Exception:  # noqa: BLE001 - any validation failure means the text is not this setting's value
+        return False
+    return True
+
+
 def area_title(key: str) -> str:
     """`other_birds` -> `Other birds`."""
     text = key.replace("_", " ").strip()
@@ -157,7 +168,14 @@ class AreasConfig(BaseModel):
     def _short_seeds(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        short = {k: v for k, v in data.items() if k not in cls.model_fields and isinstance(v, str)}
+        for k, v in data.items():
+            if k in cls.model_fields and k != "seeds" and isinstance(v, str) and not _fits(cls, k, v):
+                raise ValueError(f"areas: `{k}` is a setting of areas, not an area: rename that area")
+        short = {k: v for k, v in data.items() if k not in cls.model_fields and (isinstance(v, str) or v is None)}
+        for k in short:
+            if not isinstance(k, str):
+                raise ValueError(f"areas: the key {k!r} is not text: quote it in the yaml (\"{k}\")")
+        short = {k: v or "" for k, v in short.items()}
         if not short:
             return data
         rest = {k: v for k, v in data.items() if k not in short}

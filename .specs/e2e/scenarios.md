@@ -163,6 +163,80 @@ Result: one `incident` "Carrier 50XC rooftop unit #3 fault E47: Replaced clogged
 (workspace scope waits for review); after approval Lena's search for "low pressure lockout E47" returns it, active.
 No bug found.
 
+## Rerun: project-defined memory (2026-11-12)
+
+Feature `project-memory` (issue #18): presets removed, each project's types, areas and prompt in its own `memory.md`.
+Same set-up as above: a new folder per scenario (`../memhub-e2e-r2/<scenario>`), a new venv with memhub installed
+from this working tree (`uv pip install --reinstall-package memhub --no-cache`: without it uv reused a cached build
+of 0.1.0 and the first S4 attempt ran the old code), new databases, real `gpt-4.1-mini` and
+`text-embedding-3-small`, real `claude -p`. Every memory file used is in [memory/](memory/).
+
+| # | memory.md | Result | Bugs found (fix) |
+|---|---|---|---|
+| S1 | memory/starter.md (init starter) | pass | R1 starter body too thin (1cdfdaa), R2 init no longer wrote `scopes: [user]` (6eb1327) |
+| S2 | memory/s2-support.md (guide 04) | pass | R3 guide 04 lost the support rules: raw quote stored as the preference (B16 again), `fact` not shared (1cdfdaa); R4 guide 04 runs `init --memory` after AD-035 (6eb1327) |
+| S3 | memory/starter.md (named in code) | pass | R1 (1cdfdaa); R5 guide 03 names a memory file for a code-only app (87dfa8d) |
+| S4 | memory/s4-birds.md (guide 06) | pass | none |
+| S5 | memory/starter.md (init starter) | pass | R2 (6eb1327) |
+| S6 | memory/s6-maintenance.md (guide 05) | pass | none |
+
+Bugs found and fixed in this rerun:
+
+- **R1** (S3, then S1/S5): the starter `memory.md` had a two-line body. S3 merged "vegetarian, lives in Porto,
+  travels to Berlin" into one profile row written "The user travels...". The removed `assistant` preset carried a
+  tuned prompt. Fix (AD-034): `init` writes those domain-neutral rules into the starter body.
+- **R2** (S1): without the `assistant` preset `init` no longer wrote `scopes: [user]`; 3 of 5 coding facts became
+  workspace candidates waiting for review. Fix (AD-035): `init` writes `scopes: [user]` with the starter.
+- **R3** (S2): guide 04's `memory.md` dropped the support preset's third-person rule and the workspace scope of
+  `fact`; the preference was stored as the customer's raw words and a solved webhook incident was kept.
+- **R4/R5**: guides 04 and 03 follow from R2 and R1.
+
+### S1
+
+Two real sessions in `acme-api/`, then `memhub init` (starter), `ingest --source claude_code` (5 created, 3 dropped
+`ungrounded`), all active, user scope: profile "Joana is the tech lead of acme-api.", preferences "In this project
+every code uses type hints, and tests use pytest, never unittest." and "Logging must use structlog, never print.",
+facts "Deployment is done on Fly.io." and "Staging environment runs Postgres 16.". A new `claude -p` session told to
+use only memhub's `search_memory` quotes all five.
+
+### S2
+
+`init --memory ./memory.md` on Postgres; dry-run preview: `account` "Globex - plan Enterprise, contact Anna"
+(workspace, candidate) and a third-person preference "Wants answers in short bullet points to facilitate reading on
+mobile." (user, active); ingest wrote the same; approve -> active, `reviewed_by: cli:<user>`; edit -> v2 verified, v1
+superseded; `config show` names `memory.md`. Model variance: one of five extractions (the first real ingest) missed
+the preference; three repeated fresh ingests all wrote both.
+
+### S3
+
+`Memory(..., config={"project": "travel", "memory": "./memory.md"})` with the starter; three runs in a row, each:
+profile "Is vegetarian.", profile "Lives in Porto.", fact "Travels to Berlin for work every month." (three memories,
+where the old preset gave two); the agent answers "Kopps, a top-rated vegetarian restaurant" in Berlin from the
+injected memory.
+
+### S4
+
+Written: sighting "Saw Eurasian Hoopoe at Camargue salt flats on 2026-11-12 (count 2)", species_note "Eurasian
+Hoopoe: Raises its crest when it lands; call is a soft 'oop-oop-oop'.", sighting "Saw Grey Heron at canal on
+2026-11-12 (count 1)". Hoopoe -> Other birds, Heron -> Waterbirds.
+
+Not stored: the job (nurse), the coffee, the move to Lyon, the phone, the binocular question, the falcon fact said
+only by the assistant. No candidate was even proposed for them. 12 frontmatter lines, no `null`, no threshold
+(the default 0.5 kept the heron note that the preset's 0.75 dropped).
+
+### S5
+
+Fresh project folder: session 1 proposed a preference (key `python-linter`) and a fact, both candidates with the
+user's quote; `memhub approve` x2; session 2, told to use only memhub, quotes both; session 3 writes CONTRIBUTING.md
+with ruff and GitHub Actions. Note: Claude Code now keeps its own per-project memory notes. In the `shop-web` folder
+reused from an earlier run, session 1 found its own notes and proposed nothing to memhub, so the clean run uses a
+new folder, and session 2 is asked to use memhub only.
+
+### S6
+
+`config={"project": "field", "scopes": ["workspace"], "entity_types": ["machine"], "memory": "./memory.md"}`:
+`incident` PENDING (+ MERGE of the `/remember` repeat), approved, then Lena's search returns it active. As before.
+
 ## Still open / not changed
 
 - `memhub ingest --source claude_code` with no `projects:` reads every local session (154 here) with no confirmation
@@ -172,3 +246,7 @@ No bug found.
 - `Memory.search(top_k=)` versus the CLI/service `k`: different names for the same thing.
 - A project folder with its own `memhub.yaml` (like S2) makes Claude Code's `memhub mcp` use that config there,
   because `./memhub.yaml` comes first in the lookup.
+- `pipeline/ground.py` raises `KeyError` on a candidate whose type the project does not list. A real model cannot
+  produce one (the structured-output schema lists the types); found with a fake model in the PR 9 e2e test.
+- `memhub edit ""` (an empty or malformed id) prints a traceback instead of an error line.
+- Claude Code's own per-project memory can answer before memhub does; a scenario that checks memhub must ask for it.
