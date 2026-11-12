@@ -140,11 +140,12 @@ def test_a_newer_ledger_is_refused(pg_dsn, tmp_path):
     for name, backend in _backends(pg_dsn, tmp_path).items():
         backend.init(embedding_model="FakeEmbeddings", dims=16)
         _set_version(backend, 3)
-        m = Memory(db="memory" + "://", embedder=FakeEmbeddings(16))
-        m.store = m.service.store = backend
-        with pytest.raises(SchemaOutdated) as exc:
-            m.search("x", **IDS)
-        assert str(exc.value) == NEWER, name
+        for method, args in (("add", ("x",)), ("search", ("x",)), ("get_all", ()), ("queue", ())):
+            m = Memory(db="memory" + "://", embedder=FakeEmbeddings(16))
+            m.store = m.service.store = backend
+            with pytest.raises(SchemaOutdated) as exc:
+                getattr(m, method)(*args, **IDS)
+            assert str(exc.value) == NEWER, (name, method)
         with pytest.raises(SchemaOutdated) as exc:
             backend.migrate()
         assert str(exc.value) == NEWER and backend.schema_version() == 3, name
@@ -164,6 +165,29 @@ def test_migrate_a_v0_1_0_postgres_ledger(pg_dsn):
     assert (row["run_id"], row["agent_id"], row["verified"], str(row["memory_id"])) == (
         None, None, True, "6f1d0c9e-0000-4000-8000-000000000002")
     assert store.schema_version() == 2
+
+
+def test_dry_run_changes_nothing(pg_dsn, tmp_path):
+    for name, backend in _backends(pg_dsn, tmp_path).items():
+        backend.init(embedding_model="m", dims=16)
+        _set_version(backend, None)
+        assert backend.migrate(dry_run=True) == ["0002_run_and_agent_ids"], name
+        assert backend.schema_version() == 1, name
+
+
+def test_a_schema_scoped_store_never_reads_public(pg_dsn):
+    """A ledger in `public` and an empty schema with the same prefix: the schema has no ledger."""
+    prefix, schema = _prefix(), f"tenant_{uuid.uuid4().hex[:6]}"
+    load_v0_1_0(pg_dsn, prefix)
+    with psycopg.connect(pg_dsn, autocommit=True) as conn:
+        conn.execute(f"CREATE SCHEMA {schema}")
+    scoped = MemoryStore(pg_dsn, prefix, schema)
+    assert scoped.schema_version() is None
+    with pytest.raises(EmbeddingMismatch, match=r"init\(\)"):
+        scoped.migrate()
+    assert MemoryStore(pg_dsn, prefix).schema_version() == 1 and "run_id" not in _columns(pg_dsn, prefix)
+    scoped.init(embedding_model="m", dims=16)  # its own ledger, migrated in its own schema
+    assert scoped.schema_version() == 2 and MemoryStore(pg_dsn, prefix).schema_version() == 1
 
 
 def test_migrate_is_idempotent(pg_dsn, tmp_path):
@@ -267,12 +291,13 @@ def test_cli_migrate_failures(pg_dsn, tmp_path, monkeypatch):
     prefix = _prefix()
     _yaml(pg_dsn, prefix, tmp_path, monkeypatch)
     none = runner.invoke(cli.app, ["migrate"])
-    assert none.exit_code == 1 and "init" in none.output
+    assert none.exit_code == 1 and none.stdout == ""
+    assert "the ledger has no tables yet: run `memhub init` (or `Memory.init()`) first" in none.stderr
     store = MemoryStore(pg_dsn, prefix)
     store.init(embedding_model="fake-embed", dims=16)
     _set_version(store, 3)
     newer = runner.invoke(cli.app, ["migrate"])
-    assert newer.exit_code == 1 and NEWER in newer.output
+    assert newer.exit_code == 1 and newer.stdout == "" and NEWER in newer.stderr
 
 
 def test_cli_commands_refuse_an_old_ledger(pg_dsn, tmp_path, monkeypatch):

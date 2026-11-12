@@ -271,8 +271,12 @@ class MemoryStore:
 
     # --- schema version ----------------------------------------------------------------------------------------
 
+    def _qualified(self, name: str) -> str:
+        """A table by its full name: with `database_schema`, never one that `search_path` finds in `public`."""
+        return f"{self.schema}.{name}" if self.schema else name
+
     def _version(self, cur: Cursor) -> int | None:
-        cur.execute("SELECT to_regclass(%s) AS t", (self._t("memhub_meta"),))
+        cur.execute("SELECT to_regclass(%s) AS t", (self._qualified(self._t("memhub_meta")),))
         if cur.fetchone()["t"] is None:
             return None
         saved = self.get_meta(cur, SCHEMA_KEY)
@@ -296,7 +300,7 @@ class MemoryStore:
             todo = pending(self.name, version)
             if not dry_run:
                 for migration in todo:
-                    for statement in migration.statements(self.prefix):
+                    for statement in migration.statements(self._qualified(self.prefix)):
                         cur.execute(statement)
                 if version != SCHEMA_VERSION:
                     self.set_meta(cur, SCHEMA_KEY, SCHEMA_VERSION)

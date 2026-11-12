@@ -25,7 +25,7 @@ Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_wheel_ships_th
 **C4** - On a version-1 ledger, `add`, `search`, `get_all` and `queue` each raise `SchemaOutdated` with exactly ``the ledger is at schema version 1 and this memhub needs 2: run `memhub migrate` `` and the ledger is unchanged afterwards (AC 4)
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_memory_refuses_an_old_ledger`
 
-**C5** - On a version-3 ledger every call and `migrate()` raise `SchemaOutdated` with exactly `the ledger is at schema version 3, newer than this memhub (2): upgrade memhub`, and the version stays 3 (AC 5)
+**C5** - On a version-3 ledger `add`, `search`, `get_all`, `queue` and `migrate()` raise `SchemaOutdated` with exactly `the ledger is at schema version 3, newer than this memhub (2): upgrade memhub`, and the version stays 3 (AC 5)
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_a_newer_ledger_is_refused`
 
 **C6** - `migrate()` on the v0.1.0 Postgres fixture adds nullable `run_id` and `agent_id`, keeps the old row's values with both new columns `NULL`, sets the version to 2 and returns `["0002_run_and_agent_ids"]` (AC 6)
@@ -44,18 +44,20 @@ Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_two_migrations
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_init_upgrades_an_old_ledger`
 Proof: `.venv/bin/python -m pytest tests/test_memory_api.py::test_init_upgrades_previous_ledger`
 
-**C11** - `migrate()` where no ledger exists raises `EmbeddingMismatch` naming `init()` and creates no table (AC 11)
+**C11** - `migrate()` where no ledger exists raises `EmbeddingMismatch` naming `init()` and creates no table - also on a Postgres `database_schema` with no ledger while `public` holds one of the same prefix, which stays at version 1 (AC 11)
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_migrate_without_a_ledger`
+Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_a_schema_scoped_store_never_reads_public`
 
 ### S3 - The CLI
 
 **C12** - `memhub migrate` on a version-1 ledger prints `applied 0002_run_and_agent_ids` and `schema version 1 -> 2`, exit 0; again: `already at schema version 2`, exit 0 (AC 12)
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_cli_migrate`
 
-**C13** - `memhub migrate --dry-run` on a version-1 ledger prints `pending 0002_run_and_agent_ids`, exit 0, and the version stays 1 (AC 13)
+**C13** - `memhub migrate --dry-run` on a version-1 ledger prints `pending 0002_run_and_agent_ids`, exit 0, and the version stays 1; `migrate(dry_run=True)` returns that name and leaves version 1 on each backend (AC 13)
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_cli_migrate_dry_run`
+Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_dry_run_changes_nothing`
 
-**C14** - `memhub migrate` exits 1 with the reason when there is no ledger and when the ledger is version 3 (AC 14)
+**C14** - `memhub migrate` exits 1 with the full reason on stderr and nothing on stdout when there is no ledger and when the ledger is version 3 (AC 14)
 Proof: `.venv/bin/python -m pytest tests/test_migrations.py::test_cli_migrate_failures`
 
 **C15** - On a version-1 ledger `memhub search`, `add`, `queue` and `list` exit 1 and print the `SchemaOutdated` message naming `memhub migrate` (AC 15)
