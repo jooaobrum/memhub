@@ -99,6 +99,10 @@ def _clean(row: Row) -> dict[str, Any]:
     return {k: v for k, v in row.items() if k != "embedding"}
 
 
+def _entity_type(e: Any) -> Any:
+    return e.get("type") if isinstance(e, dict) else getattr(e, "type", None)
+
+
 def _event(row: Row, event: Event) -> MemoryEvent:
     return MemoryEvent(
         id=str(row["memory_id"]), version_id=str(row["id"]), version=row["version"], event=event,
@@ -259,7 +263,8 @@ class Memory:
 
     def add(self, data: str | dict[str, Any] | list[dict[str, Any]], *, workspace_id: Any = None, user_id: Any = None,
             run_id: Any = None, agent_id: Any = None, roles: list[str] | None = None, type: str | None = None,
-            scope: str = "user", infer: bool = False, thread_id: str | None = None) -> AddResult:
+            scope: str = "user", infer: bool = False, thread_id: str | None = None,
+            entities: list[dict[str, Any]] | None = None) -> AddResult:
         """`infer=False` (the default, AD-019): a memory from its fields (or a text, stored as a `fact`), with no
         model call. User scope is active at once; a workspace memory waits for review (`PENDING`) unless the caller
         is a `workspace_admin`.
@@ -269,8 +274,9 @@ class Memory:
         extraction, grounding, admission, reconcile and routing; the result lists every memory written (`ADD`,
         `PENDING`, `UPDATE`, `MERGE`, `CONFLICT`) and every candidate dropped, with its reason."""
         ctx = self._ctx(workspace_id, user_id, run_id, agent_id, roles)
+        subjects = self._subjects(entities)
         if infer:
-            return self._push(data, ctx, type=type, thread_id=thread_id)
+            return self._push(data, ctx, type=type, thread_id=thread_id, subjects=subjects)
         if isinstance(data, list):
             raise ValidationError("a list of messages is a conversation: pass infer=True to extract memories from it")
         if type is None and "fact" not in self.settings.types:
@@ -278,13 +284,56 @@ class Memory:
             raise ValidationError(f"type is required: this project has no 'fact' type (types: {listed})")
         self._ready()
         fields = {"content": data} if isinstance(data, str) else dict(data)
+        if subjects:  # the bound subjects replace the given entities of their types (AD-032)
+            bound = {e["type"] for e in subjects}
+            fields["entities"] = [*(e for e in fields.get("entities") or [] if _entity_type(e) not in bound), *subjects]
         row = self.service.add(
             ctx.actor, type=type or "fact", scope=scope, fields=fields, workspace_id=ctx.workspace_id,
             user_id=ctx.user_id, run_id=ctx.run_id, agent_id=ctx.agent_id,
         )
         return AddResult(run_id=ctx.run_id, results=[_event(row, "ADD" if row["status"] == "active" else "PENDING")])
 
-    def _push(self, data: Any, ctx: CallContext, *, type: str | None, thread_id: str | None) -> AddResult:
+    def _subjects(self, entities: Any) -> list[dict[str, str]]:
+        """`entities=` checked before any model or database work: `{"type", "id"}` items of declared types."""
+        if entities is None:
+            return []
+        if not isinstance(entities, list):
+            raise ValidationError(f'entities must be a list of {{"type", "id"}}, not {type(entities).__name__}')
+        declared = self.settings.declared_entity_types()
+        out = []
+        for e in entities:
+            if not isinstance(e, dict) or not isinstance(e.get("type"), str) or not isinstance(e.get("id"), str) \
+                    or not e["type"] or not e["id"] or set(e) - {"type", "id"}:
+                raise ValidationError(f'an entity is {{"type": str, "id": str}}, got {e!r}')
+            if e["type"] not in declared:
+                raise ValidationError(f"unknown entity type {e['type']!r} in {e!r} (declared: {declared})")
+            out.append({"type": e["type"], "id": e["id"]})
+        return out
+
+    def _filters(self, filters: Any, types: list[str] | None, widen: bool) -> tuple[list[dict], str | None, list[str] | None]:
+        """`filters` checked: `(subjects, entity_type, types)`."""
+        if filters is None:
+            if widen:
+                raise ValidationError('widen=True needs filters={"entities": [...]} to widen from')
+            return [], None, types
+        if not isinstance(filters, dict):
+            raise ValidationError(f"filters must be a dict, not {type(filters).__name__}")
+        unknown = [k for k in filters if k not in ("entities", "entity_type", "types")]
+        if unknown:
+            raise ValidationError(f"unknown filter {unknown[0]!r} (allowed: entities, entity_type, types)")
+        if "types" in filters and types:
+            raise ValidationError("types is given both as a parameter and in filters: keep one")
+        subjects = self._subjects(filters.get("entities"))
+        entity_type = filters.get("entity_type")
+        if entity_type is not None and entity_type not in self.settings.declared_entity_types():
+            raise ValidationError(
+                f"unknown entity type {entity_type!r} (declared: {self.settings.declared_entity_types()})")
+        if widen and not subjects:
+            raise ValidationError('widen=True needs filters={"entities": [...]} to widen from')
+        return subjects, entity_type, filters.get("types", types)
+
+    def _push(self, data: Any, ctx: CallContext, *, type: str | None, thread_id: str | None,
+              subjects: list[dict] | None = None) -> AddResult:
         from memhub.pipeline.push import push_messages, to_messages
 
         if type is not None:
@@ -298,6 +347,7 @@ class Memory:
         pushed = push_messages(
             data, store=self.store, settings=self.settings, registry=self.registry, extractor=self.llm,
             judge=self.judge, embeddings=self.embedder, workspace_id=ctx.workspace_id, user_id=ctx.user_id,
+            subjects=subjects or None,
             run_id=ctx.run_id, agent_id=ctx.agent_id, thread_id=thread_id,
         )
         results = [_event(row, _push_event(routed.outcome, row)) for seg in pushed for routed, row in seg.written]
@@ -379,15 +429,25 @@ class Memory:
 
     def search(self, query: str, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
                agent_id: Any = None, roles: list[str] | None = None, top_k: int = 5,
-               types: list[str] | None = None) -> list[dict[str, Any]]:
-        """Your active user memories and the workspace's, nearest first, stale ones left out."""
+               types: list[str] | None = None, filters: dict[str, Any] | None = None,
+               widen: bool = False) -> list[dict[str, Any]]:
+        """Your active user memories and the workspace's, nearest first, stale ones left out.
+
+        `filters={"entities": [{"type", "id"}, ...]}` keeps the memories about one of those subjects, ranked in
+        that order; `widen=True` then adds the memories about no isolated subject (`general`).
+        `filters={"entity_type": "machine"}` keeps the memories about any machine. `filters["types"]` is the
+        `types` parameter. With `filters`, each hit says what it matched in `matched_on`."""
+        subjects, entity_type, types = self._filters(filters, types, widen)
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        by = dict(subjects=subjects, entity_type=entity_type, widen=widen) if filters is not None else {}
         if not types:
-            rows = self.service.search(ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k)
+            rows = self.service.search(ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k,
+                                       **by)
         else:
             rows = [r for t in types for r in self.service.search(
-                ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k, type=t)]
-            rows = sorted(rows, key=lambda r: r["similarity"], reverse=True)[:top_k]
+                ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k, type=t, **by)]
+            tier = {label: i for i, label in enumerate([f"{e['type']}:{e['id']}" for e in subjects] + ["general"])}
+            rows = sorted(rows, key=lambda r: (tier.get(r.get("matched_on"), 0), -r["similarity"]))[:top_k]
         return [_clean(r) for r in rows]
 
     def get(self, id: Any, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
@@ -397,10 +457,18 @@ class Memory:
         return _clean(self._active(id, ctx))
 
     def get_all(self, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
-                roles: list[str] | None = None, status: str = "active", type: str | None = None) -> list[dict[str, Any]]:
-        """Your user memories and the workspace's, with that status, newest first."""
+                roles: list[str] | None = None, status: str = "active", type: str | None = None,
+                filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Your user memories and the workspace's, with that status, newest first; `filters` as in `search`
+        (`entities`, `entity_type`; `types` keeps the memories of those types)."""
+        subjects, entity_type, types = self._filters(filters, None, False)
+        if types and type is not None:
+            raise ValidationError("type is given both as a parameter and as filters['types']: keep one")
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
-        rows = self.service.list(ctx.actor, status=status, type=type, workspace_id=ctx.workspace_id)
+        rows = self.service.list(ctx.actor, status=status, type=type, workspace_id=ctx.workspace_id,
+                                 subjects=subjects, entity_type=entity_type)
+        if types:
+            rows = [r for r in rows if r["type"] in types]
         return [_clean(r) for r in rows if r["scope"] == "workspace" or r["user_id"] == ctx.user_id]
 
     def history(self, id: Any, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,

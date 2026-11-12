@@ -1,7 +1,7 @@
 """Group interactions by thread and cut them into segments to extract from."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from memhub.config import IngestionConfig
@@ -15,6 +15,7 @@ class Segment:
     user_id: str
     messages: list[Interaction]
     is_final_pass: bool = False
+    subjects: list[dict] = field(default_factory=list)  # bound by the caller: every memory from it is about these
 
 
 def group_threads(interactions: list[Interaction]) -> dict[str, list[Interaction]]:

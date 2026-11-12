@@ -13,7 +13,7 @@ areas:
 Only bird species knowledge and the user's sightings.
 ```
 
-The YAML frontmatter gives `types`, `areas` and `strict` (no other key: connections stay in `memhub.yaml`); the
+The YAML frontmatter gives `types`, `areas`, `strict` and `entities` (no other key: connections stay in `memhub.yaml`); the
 Markdown body is the extraction prompt (`extraction.instructions`). A file with no frontmatter is all body.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ import yaml
 
 from memhub.config import ConfigError
 
-ALLOWED_KEYS = ("types", "areas", "strict")
+ALLOWED_KEYS = ("types", "areas", "strict", "entities")
 
 
 def split(text: str, name: str) -> tuple[dict[str, Any], str]:
@@ -49,7 +49,7 @@ def split(text: str, name: str) -> tuple[dict[str, Any], str]:
 
 
 def read_memory_file(path: Path) -> dict[str, Any]:
-    """The file as a config layer: `types`, `areas`, `strict` as written, `extraction.instructions` = the body (when
+    """The file as a config layer: `types`, `areas`, `strict`, `entities` as written, `extraction.instructions` = the body (when
     it is not empty)."""
     if not path.is_file():
         raise ConfigError(f"memory file not found: {path.resolve()}")

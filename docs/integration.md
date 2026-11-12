@@ -418,13 +418,14 @@ class Machine(MemoryBase):
     location: str | None = None
 ```
 ```yaml
-entity_types: [machine]
 types:
   machine: {class: "myproj.memory_types:Machine", retrieval: search, type_prior: 0.7, max_active: 50}
 ```
 The class must be importable in every process that touches the ledger (ingest worker, agent, CLI). Change a type's shape by bumping `schema_version`; rows keep validating against the class of their own version. Types with `retrieval: index_then_load` need `name`/`description`/`body`, like `skill`.
 
 Mark a type `keyed: true` with `keys` when a person should have exactly one value per attribute; reconcile then updates by key instead of comparing text.
+
+When memories are **about** a subject (one machine, customer, patient or repo), declare the subject types under `entities:` in `memory.md`, bind the subject on write (`add(..., entities=[...])`) and filter on search (`search(..., filters={"entities": [...]}, widen=True)`). Memories about different subjects then never merge, however alike their text. See [subjects.md](subjects.md).
 
 ### 7.3 Choosing types for a new domain
 

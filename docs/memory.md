@@ -17,7 +17,7 @@ memory: ./memory.md        # relative to this yaml
 
 A `memory.md` has two parts:
 
-- **Frontmatter** between two `---` lines (YAML). It may hold only `types`, `areas` and `strict`, because database,
+- **Frontmatter** between two `---` lines (YAML). It may hold only `types`, `areas`, `strict` and `entities`, because database,
   models and sources stay in `memhub.yaml`.
 - **Body**: Markdown that tells the extractor what to keep and what never to keep. It becomes
   `extraction.instructions`. When the body is empty, memhub's default instructions apply.
@@ -119,6 +119,20 @@ areas:
 
 A candidate that fits no area is dropped with the reason `no_area`. A type that sets `area: optional` keeps it.
 `strict` leaves the admission threshold unchanged.
+
+## entities: what a memory is about
+
+When memories are about a subject, such as one machine, customer, patient or repo, declare the subject types:
+
+```yaml
+entities:
+  machine: isolate                               # memories about different machines never merge
+  patient: {isolate: true, require_filter: true} # only in a search that names the patient type
+  topic: tag                                     # a label: it never keeps memories apart
+```
+
+Your app binds the subject when it writes (`add(..., entities=[{"type": "machine", "id": "P-101"}])`) and filters
+when it searches (`search(..., filters={"entities": [...]}, widen=True)`). See [subjects.md](subjects.md).
 
 ## Starter types
 

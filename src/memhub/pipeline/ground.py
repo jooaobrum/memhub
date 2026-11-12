@@ -10,7 +10,7 @@ from memhub import injection
 from memhub.config import Settings
 from memhub.pipeline.extract import Candidate
 from memhub.pipeline.segment import Segment
-from memhub.types import MemoryBase, Term, TypeRegistry, render_template
+from memhub.types import EntityRef, MemoryBase, Term, TypeRegistry, render_template
 
 
 # Relative time that means something different when read later. A claim's `content` must carry absolute dates
@@ -75,9 +75,13 @@ def _check(c: Candidate, segment: Segment, settings: Settings, registry: TypeReg
         memory = registry.latest(c.type).model_validate(_fields(c))
     except ValidationError:
         return None, "invalid_fields"
-    if not settings.entity_types and memory.entities:
+    if segment.subjects:  # the caller said what this is about: its types are the caller's, not the model's (AD-032)
+        bound = {e["type"] for e in segment.subjects}
+        kept = [e for e in memory.entities if e.type not in bound]
+        memory = memory.model_copy(update={"entities": [*kept, *(EntityRef(**e) for e in segment.subjects)]})
+    if not settings.declared_entity_types() and memory.entities:
         memory = memory.model_copy(update={"entities": []})  # none are configured: an invented one is noise, not a reason to lose the memory
-    if any(e.type not in settings.entity_types for e in memory.entities):
+    if any(e.type not in settings.declared_entity_types() for e in memory.entities):
         return None, "invalid_fields"
     by_id = {m.message_id: m for m in segment.messages}
     if not c.evidence:

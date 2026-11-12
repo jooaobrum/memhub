@@ -269,6 +269,7 @@ Approving and rejecting need a role from `roles.approve_workspace` (default `wor
 - [Guides](docs/guides/README.md): quickstart, Claude Code, your own agent, chat logs, field service, your own domain
 - [Architecture](docs/architecture.md): diagrams and system overview
 - [Integration](docs/integration.md): adoption steps
+- [Subjects](docs/subjects.md): memories about one machine, customer or patient never merge; filter and widen search by subject
 - [Claude Code](docs/claude-code.md): `memhub ingest --source claude_code` and `claude mcp add memhub -- memhub mcp`
 - [SQLite](docs/sqlite.md): one local file, no Docker; `memhub[sqlite]` for vector search in SQL
 - [TDD](docs/tdd.md): rules and field-level detail
