@@ -1,0 +1,2 @@
+-- Schema version 2: the run and agent ids. A SQLite ledger was born with them (sqlite_schema.sql):
+-- nothing to change, the version is written by `migrate`.

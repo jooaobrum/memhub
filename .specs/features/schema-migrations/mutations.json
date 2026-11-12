@@ -1,0 +1,23 @@
+[
+  {
+    "file": "src/memhub/storage/migrations/__init__.py",
+    "old": "    if version < SCHEMA_VERSION:",
+    "new": "    if version < SCHEMA_VERSION - 1:",
+    "proof": ".venv/bin/python -m pytest tests/test_migrations.py::test_memory_refuses_an_old_ledger",
+    "label": "check lets a version-1 ledger through (older bound shifted by one)"
+  },
+  {
+    "file": "src/memhub/storage/sqlite.py",
+    "old": "            if not dry_run:",
+    "new": "            if True:",
+    "proof": ".venv/bin/python -m pytest tests/test_migrations.py::test_dry_run_changes_nothing",
+    "label": "SQLite migrate(dry_run=True) applies and records version 2"
+  },
+  {
+    "file": "src/memhub/storage/postgres.py",
+    "old": "            cur.execute(\"SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))\", (f\"memhub-migrate:{self.schema}.{self.prefix}\",))",
+    "new": "            cur.execute(\"SELECT 1\")",
+    "proof": ".venv/bin/python -m pytest tests/test_migrations.py::test_two_migrations_at_once_apply_once",
+    "label": "Postgres migrate takes no advisory lock before re-reading the version"
+  }
+]

@@ -18,6 +18,7 @@ from memhub.settings import (
     set_key, write_context, write_yaml,
 )
 from memhub.storage import open_backend
+from memhub.storage.migrations import check as check_schema
 from memhub.storage.postgres import MemoryStore
 from memhub.storage.rules import StoreError
 
@@ -203,12 +204,12 @@ def doctor(config: Optional[Path] = ConfigOpt) -> None:
         resolved: Resolved = resolve(config)
     except ConfigError as exc:
         say("fail", "config", str(exc))
-        for check in ("db", "chat", "embedder", "dims", "schema"):
+        for check in ("db", "chat", "embedder", "dims", "schema", "version"):
             say("skip", check, "no usable config")
         return done()
     if config is None and resolved.path is None:
         say("fail", "config", f"no memhub.yaml found (looked in {SEARCH_PLACES}): run `memhub init`")
-        for check in ("db", "chat", "embedder", "dims", "schema"):
+        for check in ("db", "chat", "embedder", "dims", "schema", "version"):
             say("skip", check, "no usable config")
         return done()
     settings, parts = resolved.config, cli._parts(resolved)
@@ -257,6 +258,7 @@ def doctor(config: Optional[Path] = ConfigOpt) -> None:
     if store is None:
         say("skip", "dims", "needs the database")
         say("skip", "schema", "needs the database")
+        say("skip", "version", "needs the database")
     else:
         try:
             missing, saved = _ledger_state(store, settings.project_prefix)
@@ -272,8 +274,15 @@ def doctor(config: Optional[Path] = ConfigOpt) -> None:
             say("ok", "dims", f"{dims}, as the ledger")
         if missing or saved is None:
             say("fail", "schema", f"missing {', '.join(missing) if missing else 'the embedding meta'}: run `memhub init`")
+            say("skip", "version", "no ledger yet")
         else:
             say("ok", "schema", f"{settings.project_prefix}_memory, {settings.project_prefix}_memory_runs, embedding {saved.get('model')}")
+            try:
+                version = store.schema_version()
+                check_schema(version)
+                say("ok", "version", f"schema version {version}")
+            except Exception as exc:  # noqa: BLE001 - an old ledger is the finding
+                say("fail", "version", str(exc))
 
     db = parts._connected["db"] if parts._connected is not None else None  # a pool the app's `connect:` built
     if db is not None and _is_pool(db):

@@ -148,13 +148,18 @@ Connect your agent in steps: **A** offline extraction only, **B** your agent cal
 
 | Group | Commands |
 |---|---|
-| Setup | `init`, `config show`, `config set`, `doctor`, `use`, `reembed` |
+| Setup | `init`, `config show`, `config set`, `doctor`, `use`, `reembed`, `migrate` |
 | Ingest | `ingest`, `add`, `runs` |
 | Browse | `list`, `search`, `history`, `page` |
 | Review | `queue`, `approve`, `reject`, `edit`, `promote` |
 | Lifecycle | `archive`, `delete` |
 
 Run `memhub <command> --help` for options.
+
+**Upgrading memhub.** A ledger records its schema version. When a new memhub needs a newer one, every call refuses
+the old ledger with `SchemaOutdated: the ledger is at schema version 1 and this memhub needs 2: run \`memhub migrate\``
+instead of failing halfway through a request. `memhub migrate --dry-run` lists what would run; `memhub migrate`
+applies it in one transaction; `memhub doctor` shows the version. From code: `Memory(...).migrate()`.
 
 ## Configuration
 

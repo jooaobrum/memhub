@@ -44,6 +44,10 @@ class EmbeddingMismatch(StoreError):
     """The configured embedding model/dims no longer match what `init` saved."""
 
 
+class SchemaOutdated(StoreError):
+    """The ledger's schema version is not this memhub's: older (run `memhub migrate`) or newer (upgrade memhub)."""
+
+
 NO_TABLES = "the ledger has no tables yet: run `memhub init` (or `Memory.init()`) first"
 
 

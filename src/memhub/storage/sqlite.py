@@ -28,6 +28,7 @@ from typing import Any, Callable, Iterator
 
 from memhub.connection import SqliteSource
 from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not_available
+from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.memory import _contains, _cosine
 from memhub.storage.rules import (
     MEMORY_COLUMNS,
@@ -788,6 +789,39 @@ class SqliteBackend:
             for key, value in (("embedding", {"model": embedding_model, "dims": dims}), ("vector_dims", dims)):
                 conn.execute(f"INSERT OR IGNORE INTO {tx.meta} (key, value) VALUES (?, ?)", (key, json.dumps(value)))
             tx.check_embedding_config(model=embedding_model, dims=dims)
+        self.migrate()  # a new ledger, or one an older memhub made, ends at this memhub's schema version
+
+    def _version(self, conn: sqlite3.Connection) -> int | None:
+        meta = f"{self.prefix}_memhub_meta"
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (meta,)).fetchone() is None:
+            return None
+        row = conn.execute(f"SELECT value FROM {meta} WHERE key = ?", (SCHEMA_KEY,)).fetchone()
+        return 1 if row is None else int(json.loads(row[0]))
+
+    def schema_version(self) -> int | None:
+        """The ledger's schema version: None when there is no ledger, 1 when it has none recorded."""
+        with self.source.connection() as conn:
+            return self._version(conn)
+
+    def migrate(self, *, dry_run: bool = False) -> list[str]:
+        """Apply the pending migrations in one `BEGIN IMMEDIATE` transaction (a second writer waits, then finds
+        nothing pending). Returns their names (pending ones with `dry_run`, nothing applied)."""
+        with self._transaction() as conn:
+            version = self._version(conn)
+            if version is None:
+                raise EmbeddingMismatch(NO_TABLES)
+            if version > SCHEMA_VERSION:
+                check(version)
+            todo = pending(self.name, version)
+            if not dry_run:
+                for migration in todo:
+                    for statement in migration.statements(self.prefix):
+                        conn.execute(statement)
+                if version != SCHEMA_VERSION:
+                    conn.execute(
+                        f"INSERT INTO {self.prefix}_memhub_meta (key, value) VALUES (?, ?) "
+                        f"ON CONFLICT (key) DO UPDATE SET value = excluded.value", (SCHEMA_KEY, json.dumps(SCHEMA_VERSION)))
+            return [m.name for m in todo]
 
     @contextmanager
     def unit_of_work(self) -> Iterator[BoundUnitOfWork]:

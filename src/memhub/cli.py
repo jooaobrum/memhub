@@ -20,6 +20,7 @@ from memhub.service import MemoryService, ServiceError
 from memhub.settings import SEARCH_PLACES, Parts, Resolved, embedding_model_id, read_context, resolve
 from memhub.sources import build_source
 from memhub.storage import open_backend
+from memhub.storage.migrations import SCHEMA_VERSION, check as check_schema
 from memhub.storage.rules import Actor, StoreError
 
 load_dotenv(find_dotenv(usecwd=True))  # API keys live in a git-ignored .env
@@ -71,6 +72,12 @@ def _service(config: Optional[Path], *, check_embedding: bool = True) -> MemoryS
         if settings.embeddings is None:  # `models:` / `connect:`: the dims are what the model answers
             settings.embeddings = EmbeddingConfig(model=embedding_model_id(embeddings, settings), dims=len(embeddings.embed_query("memhub")))
     except ConfigError as exc:
+        _fail(exc)
+    try:  # an older (or newer) ledger is refused before any command reads or writes it
+        version = store.schema_version()
+        if version is not None:
+            check_schema(version)
+    except StoreError as exc:
         _fail(exc)
     if check_embedding:
         try:
@@ -129,6 +136,32 @@ def init(
         config=config, project=project, db=db, chat=chat, embeddings=embeddings, preset=preset, connect=connect,
         force=force, check_model=check_model,
     )
+
+@app.command()
+def migrate(
+    config: Optional[Path] = ConfigOpt,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the pending migrations and change nothing"),
+) -> None:
+    """Bring the ledger to this memhub's schema version, in one transaction: an older one is refused by every other
+    command until this has run."""
+    resolved = _resolve(config)
+    settings = resolved.config
+    if not (settings.connect or settings.database_url):
+        _fail_missing(resolved.path or "the configuration", "database_url", "set `db`, `database_url` or `connect`")
+    try:
+        store = open_backend(_parts(resolved).db, settings.project_prefix, settings.database_schema)
+        before = store.schema_version()
+        names = store.migrate(dry_run=dry_run)
+    except Exception as exc:  # noqa: BLE001 - no ledger, a newer one, or a failed statement: nothing was applied
+        _fail(exc)
+    if not names:
+        typer.echo(f"already at schema version {SCHEMA_VERSION}")
+        return
+    for name in names:
+        typer.echo(f"{'pending' if dry_run else 'applied'} {name}")
+    if not dry_run:
+        typer.echo(f"schema version {before} -> {SCHEMA_VERSION}")
+
 
 @app.command()
 def reembed(config: Optional[Path] = ConfigOpt, batch_size: int = 100) -> None:

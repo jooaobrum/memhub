@@ -9,7 +9,7 @@ from memhub.service import (
     ServiceError,
     ValidationError,
 )
-from memhub.store import EmbeddingMismatch
+from memhub.storage.rules import EmbeddingMismatch, SchemaOutdated
 
 __version__ = "0.1.0"
 
@@ -25,6 +25,7 @@ __all__ = [
     "MemoryService",
     "NotFound",
     "PermissionDenied",
+    "SchemaOutdated",
     "ScopedMemory",
     "ServiceError",
     "ValidationError",
