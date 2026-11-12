@@ -82,9 +82,9 @@ for e in out.results:
 Stored (one run; the wording is the model's):
 
 ```
-sighting      Saw Eurasian Hoopoe at Camargue salt flats on 2026-11-12 (count 2)     -> Other birds
-species_note  Eurasian Hoopoe: raises its crest when it lands; call a soft 'oop-oop-oop'  -> Other birds
-sighting      Saw Grey Heron at the canal on 2026-11-12                               -> Waterbirds
+sighting      Saw Eurasian Hoopoe at Camargue salt flats on 2026-11-12 (count 2)        -> Other birds
+species_note  Eurasian Hoopoe: Raises its crest when it lands; call is a soft 'oop-oop-oop'.  -> Other birds
+sighting      Saw Grey Heron at canal on 2026-11-12 (count 1)                           -> Waterbirds
 ```
 
 Not stored: the job, the coffee, the move to Lyon, the phone, the binocular question, and the falcon fact that only
