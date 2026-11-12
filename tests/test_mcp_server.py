@@ -131,11 +131,9 @@ def test_identity(tmp_path, monkeypatch):
     runner.invoke(cli.app, ["mcp", "--ws", "from-flag"])
     assert seen["ws"] == "from-flag"
     runner.invoke(cli.app, ["mcp"])
-    assert seen == {"ws": "from-env", "user": "use-user"}
+    assert seen == {"ws": "from-env", "user": getpass.getuser()}
+    # `memhub use` is the CLI's context: it never moves a Claude Code session out of its own folder's workspace
     monkeypatch.delenv("MEMHUB_WORKSPACE")
-    runner.invoke(cli.app, ["mcp"])
-    assert seen["ws"] == "from-use"
-    monkeypatch.setattr(cli, "read_context", lambda: {"workspace": None, "user": None})
     monkeypatch.chdir(tmp_path)
     runner.invoke(cli.app, ["mcp"])
     assert seen == {"ws": folder_workspace(Path.cwd()), "user": getpass.getuser()}
@@ -171,7 +169,7 @@ def test_mcp_is_an_extra():
 
 def test_mcp_docs():
     text = (ROOT / "docs" / "claude-code.md").read_text()
-    for needle in ("claude mcp add memhub -- memhub mcp", "memhub ingest --source claude_code", "memhub queue",
+    for needle in ("claude mcp add --scope user memhub -- memhub mcp", "## Without ingest", "memhub ingest --source claude_code", "memhub queue",
                    "MEMHUB_WORKSPACE", "pip install memhub[mcp]"):
         assert needle in text, needle
     assert "docs/claude-code.md" in (ROOT / "README.md").read_text()

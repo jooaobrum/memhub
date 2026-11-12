@@ -113,7 +113,7 @@ out.dropped                                             # [Dropped(content=..., 
 same messages sent again are not extracted twice; only the ones after the thread's last push are (`thread_id`
 defaults to `run_id`).
 
-`memhub.yaml` is only memhub's own behaviour, a few lines. It is looked up in `./memhub.yaml`, `$MEMHUB_CONFIG`, then `~/.config/memhub/memhub.yaml`; `MEMHUB_*` environment variables (`MEMHUB_PRESET`, `MEMHUB_DB`, nested keys with `__`) and `Memory(config=, overrides=)` override it. `memhub config show` prints every setting with where it came from, `memhub config set KEY VALUE` edits it, and `memhub use acme --user anna` sets the workspace and user for the next commands. Presets: `maintenance`, `support`, `assistant`; a `types:` block replaces or adds to a preset's types. To reuse your app's own pool and models, point `connect: "your_app.memory:build"` at a function returning `{"db": ..., "embedder": ..., "llm": ...}`.
+`memhub.yaml` is only memhub's own behaviour, a few lines. It is looked up in `./memhub.yaml`, `$MEMHUB_CONFIG`, then `~/.config/memhub/memhub.yaml`; `MEMHUB_*` environment variables (`MEMHUB_PRESET`, `MEMHUB_DB`, nested keys with `__`) and `Memory(config=, overrides=)` override it. `memhub config show` prints every setting with where it came from, `memhub config set KEY VALUE` edits it, and `memhub use acme --user anna` sets the workspace and user for the next commands. Presets: `maintenance`, `support`, `assistant` (the default: a general personal or coding assistant); a `types:` block replaces or adds to a preset's types, and `<type>: null` removes one (e.g. `fact: null` for a project that keeps only its own types). To reuse your app's own pool and models, point `connect: "your_app.memory:build"` at a function returning `{"db": ..., "embedder": ..., "llm": ...}`.
 
 Run the tests with `pip install -e ".[dev]"` and `pytest` (needs Docker; the pgvector container is started by the fixtures).
 
@@ -124,6 +124,8 @@ Install memhub as a dependency instead of copying files:
 ```bash
 uv pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"    # or pip install, same spec
 ```
+
+Always install from git: `pip install memhub` (no git URL) installs an unrelated PyPI project with the same name.
 
 To pin it in `pyproject.toml`, use `memhub[openai] @ git+https://github.com/jooaobrum/memhub.git@main`. If you use the LangChain middleware, also pin `langchain>=1.0` (memhub declares `>=0.3`, the middleware needs 1.x).
 
@@ -139,7 +141,7 @@ Then add to your repo:
 ```bash
 docker compose up -d                                        # or point database_url at your own Postgres with pgvector
 memhub init -c memhub.yaml
-memhub ingest --source jsonl --dry-run -c memhub.yaml       # check the extraction before writing anything
+memhub ingest --source jsonl --dry-run -c memhub.yaml       # `preview` lists what would be written and what dropped
 ```
 
 Connect your agent in steps: **A** offline extraction only, **B** your agent calls `service.search(...)`, **C** `MemoryMiddleware` on a LangChain agent (see [chatbot.py](examples/habitantes/chatbot.py)). Start at A. Details, including a separate schema in an existing Postgres and multi-agent setups, are in [docs/integration.md](docs/integration.md).
@@ -235,6 +237,7 @@ Approving and rejecting need a role from `roles.approve_workspace` (default `wor
 
 ## Documentation
 
+- [Guides](docs/guides/README.md): quickstart, Claude Code, your own agent, chat logs, field service, your own domain
 - [Architecture](docs/architecture.md): diagrams and system overview
 - [Integration](docs/integration.md): adoption steps
 - [Claude Code](docs/claude-code.md): `memhub ingest --source claude_code` and `claude mcp add memhub -- memhub mcp`

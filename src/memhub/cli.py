@@ -101,13 +101,25 @@ def _ids(workspace: Optional[str], user: Optional[str]) -> tuple[Optional[str], 
         context = read_context()
     except ConfigError as exc:
         _fail(exc)
-    return (
-        workspace or os.environ.get("MEMHUB_WORKSPACE") or context["workspace"],
-        user or os.environ.get("MEMHUB_USER") or context["user"],
-    )
+    ws = workspace or os.environ.get("MEMHUB_WORKSPACE")
+    who = user or os.environ.get("MEMHUB_USER")
+    from_use = [f"{n}={v}" for n, mine, v in (("workspace", ws, context["workspace"]), ("user", who, context["user"]))
+                if mine is None and v]
+    if from_use:  # one file for every project on this machine: say when it narrows a command, or an empty result puzzles
+        typer.secho(f"using {' '.join(from_use)} from `memhub use` (pass --ws/--user to override)", fg=typer.colors.BRIGHT_BLACK, err=True)
+    return ws or context["workspace"], who or context["user"]
+
+def _readable(obj: Any) -> Any:
+    """A row as a person reads it: the embedding vector (hundreds of floats) is left out."""
+    if isinstance(obj, dict):
+        return {k: _readable(v) for k, v in obj.items() if k != "embedding"}
+    if isinstance(obj, list):
+        return [_readable(v) for v in obj]
+    return obj
+
 
 def _print(obj: Any) -> None:
-    typer.echo(json.dumps(obj, default=str, indent=2))
+    typer.echo(json.dumps(_readable(obj), default=str, indent=2))
 
 
 def _fail(exc: Exception) -> None:
@@ -224,6 +236,16 @@ def ingest(
         thread_id=thread,
     )
     _print(asdict(summary))
+    if summary.threads_waiting:
+        idle = settings.ingestion.segment_idle
+        typer.secho(
+            f"{summary.threads_waiting} thread(s) had a message less than {idle} ago and were left for a later run "
+            f"(a conversation is read once it has been idle for `ingestion.segment_idle`; "
+            f"`memhub config set ingestion.segment_idle 0s` reads it now)", fg=typer.colors.YELLOW, err=True)
+    if summary.failed_segments:
+        typer.secho(f"{summary.failed_segments} segment(s) failed and will be retried by the next run: "
+                    + "; ".join(summary.errors), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -292,6 +314,12 @@ def search(
     else:
         if expansion.terms:  # stderr, so the JSON on stdout stays parseable
             typer.echo(f"query expanded by {', '.join(expansion.terms)}: {expansion.text}", err=True)
+        if not rows and (workspace is None or user is None):  # the commonest "why is it empty?": who was searched
+            typer.secho(
+                f"nothing found for workspace={workspace or getattr(getattr(service, 'settings', None), 'workspace_default', None)!r} "
+                f"user={user!r}: memories belong to a workspace and a user; pass --ws/--user, or set them once with "
+                "`memhub use <workspace> --user <user>` (`memhub list` shows the workspace_id and user_id of every memory)",
+                fg=typer.colors.YELLOW, err=True)
         _print(rows)
 
 
@@ -470,8 +498,8 @@ def runs(last: int = 10, config: Optional[Path] = ConfigOpt) -> None:
 
 @app.command()
 def mcp(
-    workspace: Optional[str] = typer.Option(None, "--ws", help="Workspace (default: MEMHUB_WORKSPACE, `memhub use`, else this folder as Claude Code names it)"),
-    user: Optional[str] = typer.Option(None, "--user", help="User (default: MEMHUB_USER, `memhub use`, else the OS user)"),
+    workspace: Optional[str] = typer.Option(None, "--ws", help="Workspace (default: MEMHUB_WORKSPACE, else this folder as Claude Code names it; `memhub use` is not read)"),
+    user: Optional[str] = typer.Option(None, "--user", help="User (default: MEMHUB_USER, else the OS user)"),
     config: Optional[Path] = ConfigOpt,
 ) -> None:
     """Serve search_memory and propose_memory over MCP (stdio). In Claude Code: `claude mcp add memhub -- memhub mcp`."""
@@ -484,7 +512,10 @@ def mcp(
         _fail(exc)
     resolved = _resolve(config)
     _require_db_and_embedder(resolved)
-    workspace_id, user_id = mcp_server.identity(*_ids(workspace, user))
+    # not `memhub use`: that is the CLI's own context, and one shared file would move every Claude Code session in
+    # every project to the workspace last picked at the terminal
+    workspace_id, user_id = mcp_server.identity(workspace or os.environ.get("MEMHUB_WORKSPACE"),
+                                                user or os.environ.get("MEMHUB_USER"))
     try:  # an unusable ledger (no tables, an old schema, another embedder) stops here, before serving
         parts = _parts(resolved)  # the CLI's own model builders, as every other command uses
         memory = Memory(db=parts.db, embedder=parts.embedder, config=resolved)

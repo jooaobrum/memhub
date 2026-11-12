@@ -230,6 +230,8 @@ CALLS: dict[str, tuple[tuple, dict]] = {
 @pytest.mark.parametrize("field", ["workspace_id", "user_id", "run_id"])
 @pytest.mark.parametrize("method", list(CALLS))
 def test_missing_ids_raise_before_any_work(method, field, form, pg_dsn):
+    if method == "middleware" and field == "run_id":
+        pytest.skip("a middleware serves every run of the app: it needs no run_id (see test_middleware_from_resolvers)")
     db, emb, llm = Counting(pg_dsn), FakeEmbeddings(16), FakeChatModel()
     m = Memory(db=db, llm=llm, embedder=emb, config={"project_prefix": _prefix()})
     ids = dict(IDS)
@@ -241,6 +243,14 @@ def test_missing_ids_raise_before_any_work(method, field, form, pg_dsn):
     with pytest.raises(ValidationError, match=field):
         getattr(m, method)(*args, **kwargs, **ids)
     assert (db.calls, emb.calls, llm.calls) == (0, 0, 0)
+
+
+def test_middleware_from_resolvers_needs_no_fixed_user_or_run(pg_dsn):
+    """One middleware for the whole app: the user comes from each invocation's context (S3, B10)."""
+    m = Memory(db=pg_dsn, llm=FakeChatModel(), embedder=FakeEmbeddings(16), config={"project_prefix": _prefix()})
+    m.init()
+    mw = m.middleware(workspace_id="acme", user_from=lambda ctx: ctx["user"])
+    assert mw.workspace_from == "acme" and mw.user_from({"user": "anna"}) == "anna"
 
 
 def test_agent_id_is_optional(mem):

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Annotated, Any, Literal, Union
+from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field, create_model, field_validator
 
@@ -35,6 +35,11 @@ class ClosedAreaRef(BaseModel):
     """`AreaRef` when the project does not let the model propose areas (`areas.open: false`)."""
 
     existing: str
+
+    @property
+    def new(self) -> None:
+        """Never a proposed area: the same reading as `AreaRef` (grounding and area planning read `.new`)."""
+        return None
 
 
 class Candidate(BaseModel):
@@ -102,7 +107,10 @@ def make_schema(
         )
         for name in type_names
     ]
-    cand = variants[0] if len(variants) == 1 else Annotated[Union[tuple(variants)], Field(discriminator="type")]  # type: ignore[valid-type]
+    # A plain union, not `Field(discriminator="type")`: a discriminated union is JSON Schema `oneOf`, which OpenAI's
+    # structured output refuses (400 "'oneOf' is not permitted"); a plain one is `anyOf`, which every provider takes.
+    # Each variant pins `type` to a Literal, so validation still picks the one variant that matches.
+    cand = variants[0] if len(variants) == 1 else Union[tuple(variants)]  # type: ignore[valid-type]
     return create_model("Extraction", __base__=Extraction, candidates=(list[cand], ...))  # type: ignore[valid-type]
 
 

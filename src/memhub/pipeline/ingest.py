@@ -52,6 +52,9 @@ class RunSummary:
     extract_errors: int = 0
     failed_segments: int = 0
     threads_locked: int = 0  # threads skipped because another worker was ingesting them
+    threads_waiting: int = 0  # threads with new messages newer than `segment_idle`: a later run reads them
+    errors: list = field(default_factory=list)  # distinct failure messages of failed segments
+    preview: list = field(default_factory=list)  # --dry-run only: each memory that would be written, and each drop
     tokens_in: int = 0
     tokens_out: int = 0
     cost_usd: float | None = None  # no pricing table in v1
@@ -77,6 +80,21 @@ class _SegmentResult:
     extract_error: bool = False
     tokens_in: int = 0
     tokens_out: int = 0
+
+
+def _preview(uow: UnitOfWork, segment: Segment, res: _SegmentResult) -> list[dict]:
+    out = []
+    for r in res.routed:
+        row = uow.memories.get_by_id(r.id) or {}
+        out.append({"outcome": r.outcome, "type": row.get("type"), "scope": row.get("scope"), "status": row.get("status"),
+                    "content": row.get("content"), "workspace_id": row.get("workspace_id"), "user_id": row.get("user_id"),
+                    "thread_id": segment.thread_id})
+    for d in res.dropped:
+        cand = d.get("candidate") or {}
+        fields = cand.get("fields") or {}
+        out.append({"outcome": "dropped", "reason": d.get("reason"), "type": cand.get("type"),
+                    "content": fields.get("content") if isinstance(fields, dict) else None, "thread_id": segment.thread_id})
+    return out
 
 
 def _segment_signals(segment: Segment, feedback: list[dict], llm_check=None) -> list[dict]:
@@ -263,6 +281,9 @@ def _ingest_thread(tid, msgs, summary, touched, *, store, settings, registry, so
     segments = build_segments(
         msgs, watermark_at=watermark, final_done=final_done, now=now, ingestion=settings.ingestion
     )
+    new = [m for m in msgs if watermark is None or m.timestamp > watermark]
+    if new and not any(not s.is_final_pass for s in segments):  # new messages, but the thread is not idle long enough
+        summary.threads_waiting += 1
     done = 0
     for segment in segments:
         signals = _segment_signals(segment, feedback, llm_check)
@@ -273,13 +294,18 @@ def _ingest_thread(tid, msgs, summary, touched, *, store, settings, registry, so
                     source_name=source_name, extractor=extractor, judge=judge, embeddings=embeddings,
                     run_id=summary.run_id, now=now, history=msgs,
                 )
-                if dry_run:
+                if dry_run:  # what would be written, read before the rollback, so a person can check it
+                    summary.preview += _preview(uow, segment, res)
                     raise _DryRun
         except _DryRun:
             pass
-        except Exception:
-            log.warning("segment failed, will be retried: thread=%s", tid, exc_info=True)
+        except Exception as exc:  # one line by default; the traceback with logging at DEBUG
+            log.warning("segment failed, will be retried: thread=%s: %s: %s", tid, type(exc).__name__, exc)
+            log.debug("segment failure traceback: thread=%s", tid, exc_info=True)
             summary.failed_segments += 1
+            message = f"{type(exc).__name__}: {exc}"[:500]
+            if message not in summary.errors:
+                summary.errors.append(message)
             break  # a later segment of this thread must not advance past the failed one
         done += 1
         summary.segments_processed += 1

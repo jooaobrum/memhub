@@ -3,16 +3,44 @@
 Two pieces: a source that turns past Claude Code sessions into memories, and an MCP server that gives every new
 session `search_memory` and `propose_memory` over them.
 
+memhub is not on PyPI under that name (`pip install memhub` installs an unrelated project): install it from git.
+`uv tool install` puts `memhub` on your PATH for every project, which is what Claude Code needs to start the server.
+
 ```bash
-pip install "memhub[mcp,sqlite]"
+uv tool install "memhub[openai,mcp,sqlite] @ git+https://github.com/jooaobrum/memhub.git"   # or pipx install "..."
+mkdir -p ~/.config/memhub && cd ~/.config/memhub              # one config for every project
+echo "OPENAI_API_KEY=sk-..." > .env                          # read from next to memhub.yaml, from any folder
 memhub init --db sqlite:///$HOME/.memhub/claude.db --embeddings openai:text-embedding-3-small \
-  --chat openai:gpt-4.1-mini --preset assistant      # or your Postgres URL
-memhub ingest --source claude_code                   # reads ~/.claude/projects/*/*.jsonl
-memhub queue                                         # review what should be shared
-claude mcp add memhub -- memhub mcp                  # from now on, every session has the tools
+  --chat openai:gpt-4.1-mini                                 # or your Postgres URL; the preset defaults to assistant
+claude mcp add --scope user memhub -- memhub mcp             # every session, in every project, has the tools
 ```
 
-Without the `mcp` extra, `memhub mcp` stops with `pip install memhub[mcp]`.
+That is enough: sessions search memory and propose new memories with the tools (see [Without ingest](#without-ingest)).
+To also learn from past sessions, add the source:
+
+```bash
+memhub config set sources.claude_code '{kind: claude_code, projects: ["*my-repo*"]}'   # optional: default is every project
+memhub ingest --source claude_code --dry-run                 # what would be stored, written nowhere (costs tokens)
+memhub ingest --source claude_code                           # reads ~/.claude/projects/*/*.jsonl
+memhub queue                                                 # review what should be shared
+```
+
+Without the `mcp` extra, `memhub mcp` stops with `pip install memhub[mcp]`. With no `--chat` model, everything but
+`ingest` works.
+
+A session is read once it has been idle for `ingestion.segment_idle` (1 hour): `ingest` reports the others as
+`threads_waiting`, and a later run reads them. `memhub config set ingestion.segment_idle 0s` reads them at once.
+
+## Without ingest
+
+Nothing has to be ingested. A new session calls `propose_memory` when you tell it something worth keeping ("remember
+that we lint with ruff"); the memory waits as a candidate until you approve it, then every later session in that
+project finds it with `search_memory`:
+
+```bash
+memhub queue                    # what sessions proposed, with the quote they took it from
+memhub approve <id>             # active from now on; or: memhub reject <id> --note "..."
+```
 
 ## The source: `claude_code`
 
@@ -51,8 +79,11 @@ Who the calls are for:
 
 | | First of |
 | --- | --- |
-| workspace | `--ws`, `MEMHUB_WORKSPACE`, `memhub use`, else the folder Claude Code started the server in, named the way Claude Code names project folders (every character outside `A-Za-z0-9` becomes `-`) - the same `workspace_id` the source writes, so a session searches its own project's memories with no setup |
-| user | `--user`, `MEMHUB_USER`, `memhub use`, else your OS user |
+| workspace | `--ws`, `MEMHUB_WORKSPACE`, else the folder Claude Code started the server in, named the way Claude Code names project folders (every character outside `A-Za-z0-9` becomes `-`) - the same `workspace_id` the source writes, so a session searches its own project's memories with no setup |
+| user | `--user`, `MEMHUB_USER`, else your OS user |
+
+`memhub use` is the CLI's own context and is not read here: picking a workspace at the terminal never moves your
+Claude Code sessions to it. To browse a project's memories from the CLI, `memhub list` shows each `workspace_id`.
 
 Each server process is one session: its proposals carry `run_id = mcp-<hex>` and `agent_id = mcp`. The server
 refuses to start (exit 1, the reason on stderr) when the config has no database or embedder, or the ledger needs

@@ -414,7 +414,10 @@ class Memory:
                    k: int = 5) -> MemoryMiddleware:
         """A LangChain `MemoryMiddleware` on this memory. The ids are the defaults; `workspace_from` / `user_from`
         (callables over `runtime.context`) override them per invocation."""
-        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        # One middleware serves every user of the app: a `*_from` resolver stands in for its fixed id, and the run is
+        # the agent's own (a middleware writes no run rows), so neither a fixed user nor a run_id is asked for here.
+        ctx = self._call(workspace_id if workspace_from is None else (workspace_id or "-"),
+                         user_id if user_from is None else (user_id or "-"), run_id or "middleware", agent_id, roles)
         return MemoryMiddleware(self.service, workspace_from=workspace_from or ctx.workspace_id,
                                 user_from=user_from or ctx.user_id, k=k, actor=Actor(id=ctx.agent_id or "agent"))
 

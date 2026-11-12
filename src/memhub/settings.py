@@ -342,6 +342,19 @@ def _resolve(
     return Resolved(config=config, sources=sources, path=path, values=values)
 
 
+def _env_beside(path: Path, environ: Mapping[str, str]) -> None:
+    """A `.env` next to the yaml in use is read too (never over a variable already set): a config in
+    `~/.config/memhub` keeps its API key there, and works from any folder, e.g. when Claude Code starts `memhub mcp`
+    in a project."""
+    if environ is not os.environ:
+        return
+    beside = path.resolve().parent / ".env"
+    if beside.is_file():
+        from dotenv import load_dotenv
+
+        load_dotenv(beside, override=False)
+
+
 def resolve(
     config: str | Path | dict | Config | Resolved | None = None,
     overrides: dict[str, Any] | None = None,
@@ -361,10 +374,12 @@ def resolve(
         path = Path(config)
         if not path.is_file():
             raise ConfigError(f"config file not found: {path}")
+        _env_beside(path, environ)
         yaml_layer = load_raw(path)
     elif config is None:
         path = discover(environ)
         if path is not None:
+            _env_beside(path, environ)
             yaml_layer = load_raw(path)
     elif isinstance(config, Config):
         code_layer = canonical_keys(_set_fields(config))

@@ -141,12 +141,16 @@ def test_init_prompts_for_missing_values(pg_dsn, tmp_path, monkeypatch):
     result = runner.invoke(cli.app, ["init"], input=f"\n\n{pg_dsn}\nfake:emb\n\n\n")
     assert result.exit_code == 0, result.output
     assert _loaded() == {"project": "my_app_2", "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "preset": "assistant", "scopes": ["user"]}
-    # a value given by flag is not asked again: the one input line answers `preset`; `chat` is optional and only
-    # asked of someone who gave no flag at all
+    # flags mean a script or a coding agent: nothing is asked, what was not given takes its default
+    # (the folder's project, the `assistant` preset, no chat model)
     _cwd(tmp_path, monkeypatch, "second")
-    result = runner.invoke(cli.app, ["init", "--project", _prefix(), "--db", pg_dsn, "--embeddings", "fake:emb"], input="support\n")
+    result = runner.invoke(cli.app, ["init", "--db", pg_dsn, "--embeddings", "fake:emb"], input="")
     assert result.exit_code == 0, result.output
-    assert "chat" not in _loaded()["models"] and _loaded()["preset"] == "support"
+    assert "chat" not in _loaded()["models"] and _loaded()["preset"] == "assistant" and _loaded()["project"] == "second"
+    # flags without a database or an embedding model stop with the flags to add, instead of asking
+    _cwd(tmp_path, monkeypatch, "fourth")
+    result = runner.invoke(cli.app, ["init", "--preset", "support"], input="")
+    assert result.exit_code == 1 and "--db and --embeddings" in result.output
     # with --connect the models are not asked either: no input is needed at all
     _cwd(tmp_path, monkeypatch, "third")
     connect_apps.reset(db=pg_dsn, embedder=FakeEmbeddings(16))

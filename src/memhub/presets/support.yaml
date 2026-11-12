@@ -60,6 +60,8 @@ extraction:
     '
   instructions: 'Customer-support agent. Keep durable facts the customer states about their company, account, setup and integrations
     (account, fact) and how they want answers (preference). Never keep questions, one-off requests or what the agent says.
+    Write `content` as your own third-person sentence ("Wants every answer in Spanish"), never the
+    customer''s words copied as they are; the verbatim words go in the evidence quote.
 
     '
   retries: 4

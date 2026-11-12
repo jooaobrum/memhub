@@ -111,6 +111,15 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, pr
     if connect is not None and not re.fullmatch(r"[\w.]+:\w+", connect):
         _die(f"--connect must be 'package.module:function', not {connect!r}")
 
+    # Flags mean a script, a CI job or a coding agent: what was not given takes its default, nothing is asked.
+    # Questions are only for a person running a bare `memhub init` in a terminal.
+    if given:
+        missing = [] if connect is not None else [f for f, v in (("--db", db), ("--embeddings", embeddings)) if v is None]
+        if missing:
+            _die(f"memhub init needs {' and '.join(missing)} (or --connect), e.g. "
+                 "memhub init --db sqlite:///memhub.db --embeddings openai:text-embedding-3-small --chat openai:gpt-4.1-mini")
+        project = project or _folder_project()
+        preset = preset or "assistant"
     if project is None:
         project = typer.prompt("Project (table prefix)", default=_folder_project())
     if connect is None and db is None:
