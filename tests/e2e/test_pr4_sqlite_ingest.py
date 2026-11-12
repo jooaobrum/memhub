@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -15,6 +16,8 @@ from memhub.pipeline.extract import Candidate, Evidence
 from tests.fakes import FakeChatModel, FakeEmbeddings, extraction
 
 runner = CliRunner()
+
+SUPPORT_MEMORY = Path(__file__).resolve().parents[2] / "examples" / "support" / "memory.md"  # the support project's types
 
 
 @pytest.fixture
@@ -37,15 +40,16 @@ def test_init_ingest_approve_search_on_sqlite_without_postgres(no_postgres, tmp_
     monkeypatch.chdir(app)
     model = FakeChatModel([extraction(
         _cand("Pump P4 cavitates below half-open suction", "Pump P4 cavitates when the suction valve is under half open", "m1", "workspace"),
-    )], unrelated_by_default=True)  # one segment, one extraction call (the support preset has no glossary type)
+    )], unrelated_by_default=True)  # one segment, one extraction call (the support types have no glossary type)
     import langchain.chat_models
     import langchain.embeddings
 
     monkeypatch.setattr(langchain.embeddings, "init_embeddings", lambda spec, **kw: FakeEmbeddings(16))  # `models:` strings
     monkeypatch.setattr(langchain.chat_models, "init_chat_model", lambda spec, **kw: model)
 
+    (app / "memory.md").write_text(SUPPORT_MEMORY.read_text())
     init = runner.invoke(cli.app, ["init", "--db", "sqlite:///m.db", "--embeddings", "openai:text-embedding-3-small",
-                                   "--chat", "openai:gpt-4.1-mini", "--preset", "support", "--project", "plant"])
+                                   "--chat", "openai:gpt-4.1-mini", "--memory", "./memory.md", "--project", "plant"])
     assert init.exit_code == 0, init.output
     assert (app / "m.db").exists() and yaml.safe_load((app / "memhub.yaml").read_text())["db"] == "sqlite:///m.db"
 

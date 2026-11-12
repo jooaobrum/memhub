@@ -14,7 +14,7 @@ docker run -d --name memhub-pg -e POSTGRES_USER=memhub -e POSTGRES_PASSWORD=memh
 uv pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"
 printf 'OPENAI_API_KEY=sk-...\nPGPASSWORD=memhub\n' > .env
 
-memhub init --preset support --project support \
+memhub init --project support \
   --db 'postgresql://memhub:${PGPASSWORD}@localhost:5433/memhub' \
   --embeddings openai:text-embedding-3-small --chat openai:gpt-4.1-mini
 memhub doctor
@@ -23,8 +23,40 @@ memhub doctor
 Write `${PGPASSWORD}` exactly like that, in single quotes. The yaml then keeps the reference instead of the
 password, and the value is read from the environment or `.env`.
 
-The `support` preset brings four types: `account` (a company's plan and contact, shared), `preference` (how a customer
-wants answers, per user), `fact`, and `ticket` (a solved problem, saved with `/remember`).
+`init` writes a starter `memory.md`. Replace it with what a support bot should remember:
+
+```markdown
+---
+types:
+  account:                                  # a company's plan and contact, shared by every agent after review
+    fields:
+      company: {type: str, description: "the customer's company"}
+      plan: {type: "str?", description: "subscription plan, if said"}
+      contact: {type: "str?", description: "admin or main contact person"}
+    content_template: "{company}[ - plan {plan}][, contact {contact}]"
+    scopes: [workspace]
+  preference: {class: "memhub.types:Preference", retrieval: always, keyed: true, strict_keys: false, scopes: [user],
+               keys: {language: "language of the answers", detail: "length of the answers"}}
+  fact: builtin
+  ticket: {fields: {symptom: str, root_cause: str, resolution: str, outcome: str}, extract: false, on_remember: true,
+           scopes: [workspace], content_template: "Symptom: {symptom} Root cause: {root_cause} Resolution: {resolution}"}
+---
+# What to remember
+
+Customer-support agent. Keep durable facts the customer states about their company, account, setup and integrations
+(`account`, `fact`), and how they want answers (`preference`). Write each memory in the third person.
+Never keep questions, one-off requests, or what the agent says.
+```
+
+That gives four types:
+
+- `account`, a company's plan and contact, shared;
+- `preference`, how a customer wants answers, per user;
+- `fact`;
+- `ticket`, a solved problem saved with `/remember`.
+
+`account` and `ticket` use the long form, so their fields carry a description and a scope; see
+[docs/memory.md](../memory.md).
 
 ## 2. Map your log format
 

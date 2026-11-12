@@ -31,16 +31,50 @@ memhub init --db sqlite:///$HOME/.memhub/my-agent.db \
 ```
 initialized my_agent_memory / my_agent_memory_runs
 wrote /…/my-agent/memhub.yaml
+wrote /…/my-agent/memory.md
 ```
 
-`init` checks that the embedding model answers, creates the tables, and only then writes a small `memhub.yaml`. It
-asks nothing when you pass flags, so it runs the same way in CI or from a coding agent. The defaults are this folder's
-name as the project and the general-purpose `assistant` preset. Run `memhub doctor` at any time to check the database,
-the models and the tables.
+`init` checks that the embedding model answers and creates the tables. Only then does it write two files:
+
+- `memhub.yaml`: the database and the models;
+- `memory.md`: what the memory keeps.
+
+It asks nothing when you pass flags, so it runs the same way in CI or from a coding agent, and the project takes this
+folder's name. Run `init` with no flags to have it ask instead; it then also asks what the memory should keep. Run
+`memhub doctor` at any time to check the database, the models and the tables.
 
 > Keep SQLite files out of Google Drive, Dropbox or iCloud folders: the sync client can lock the file mid-write.
 
-## 3. Add and search from the CLI
+## 3. Say what to remember
+
+Open `memory.md`. The starter keeps three kinds of memory: facts, preferences and who the user is. Its body says what to
+keep in plain words:
+
+```markdown
+---
+types:
+  fact: builtin
+  preference: builtin
+  profile: builtin
+---
+# What to remember
+
+Durable facts about the user and their work, what they prefer, and who they are.
+Never store secrets, one-off questions, or something only the assistant said.
+```
+
+Rewrite the body for your agent. Write it the way you would brief a new colleague: what is worth remembering about a
+user, and what must never be kept. To add your own kinds of memory, add a line under `types:`, where the placeholders
+are the fields:
+
+```yaml
+  trip: "Travels to {city}[ every {frequency?}]"
+```
+
+[docs/memory.md](../memory.md) describes every form, and [docs/memory-setup.md](../memory-setup.md) is a prompt you
+can give any assistant to write this file with you.
+
+## 4. Add and search from the CLI
 
 Every memory belongs to a **workspace** (a tenant, a project, a team) and optionally a **user**.
 
@@ -57,7 +91,7 @@ memhub use acme --user anna
 memhub list            # every memory, with its status, evidence and version
 ```
 
-## 4. The same memory from Python
+## 5. The same memory from Python
 
 ```python
 from dotenv import load_dotenv; load_dotenv()
@@ -85,7 +119,7 @@ for r in me.search("what does Anna eat?", top_k=3):
 candidate it dropped, with the reason in `out.dropped`. If the same messages are sent again they are not extracted a
 second time.
 
-## 5. What happens to a memory
+## 6. What happens to a memory
 
 | A memory that is… | Is |
 |---|---|

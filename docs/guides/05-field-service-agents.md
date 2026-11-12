@@ -9,8 +9,23 @@ it, and from then on every technician's assistant finds it.
 
 ## The setup
 
-The `maintenance` preset stores workspace-scoped knowledge about machines, with an `incident` type (equipment, fault
-code, fix). A workspace is a company or a region, and each technician is a user.
+The memory keeps workspace-scoped knowledge about machines, in one `incident` type (equipment, fault code, fix). A
+workspace is a company or a region, and each technician is a user. Put this `memory.md` next to your app:
+
+```markdown
+---
+types:
+  incident:
+    fields: {equipment: str, fault_code: str, fix: str}
+    content_template: "{equipment} fault {fault_code}: {fix}"
+    scopes: [workspace]      # shared by the team, after a supervisor approves it
+    on_remember: true        # a `/remember` order may record one
+---
+# What to remember
+
+Maintenance assistant. Keep durable knowledge about machines: model, location, known quirks, and fixes that worked
+(an `incident`). Never keep questions, greetings or measurements that only describe the moment.
+```
 
 ```python
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -19,7 +34,7 @@ from memhub import Memory
 m = Memory(db="postgresql://…",                    # SQLite works too for a pilot
            llm=ChatOpenAI(model="gpt-4.1-mini"),
            embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
-           config={"project": "field", "preset": "maintenance"})
+           config={"project": "field", "scopes": ["workspace"], "entity_types": ["machine"], "memory": "./memory.md"})
 m.init()
 ```
 

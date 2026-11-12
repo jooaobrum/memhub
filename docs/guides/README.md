@@ -10,4 +10,4 @@ Practical, tested walkthroughs. Every command and output here comes from end-to-
 | [Add memory to your own agent](03-add-memory-to-your-agent.md) | configure memhub in code; search/add, framework-neutral tools, LangChain middleware |
 | [Learn from your chat logs](04-learn-from-chat-logs.md) | map your JSONL logs, preview, ingest on a schedule, review and correct |
 | [Field-service agents that share fixes](05-field-service-agents.md) | turn one technician's fix into reviewed team knowledge |
-| [Tune memhub to your own domain](06-your-own-domain.md) | your own types, a closed list of areas, your own instructions; read the drops to adjust |
+| [Tune memhub to your own domain](06-your-own-domain.md) | one `memory.md`: your own types, a closed list of areas, your own rules; read the drops to adjust |

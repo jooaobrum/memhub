@@ -11,7 +11,7 @@ uv tool install "memhub[openai,mcp,sqlite] @ git+https://github.com/jooaobrum/me
 mkdir -p ~/.config/memhub && cd ~/.config/memhub              # one config for every project
 echo "OPENAI_API_KEY=sk-..." > .env                          # read from next to memhub.yaml, from any folder
 memhub init --db sqlite:///$HOME/.memhub/claude.db --embeddings openai:text-embedding-3-small \
-  --chat openai:gpt-4.1-mini                                 # or your Postgres URL; the preset defaults to assistant
+  --chat openai:gpt-4.1-mini                                 # or your Postgres URL; also writes a starter memory.md
 claude mcp add --scope user memhub -- memhub mcp             # every session, in every project, has the tools
 ```
 

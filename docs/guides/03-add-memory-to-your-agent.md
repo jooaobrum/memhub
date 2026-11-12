@@ -21,9 +21,19 @@ m = Memory(
     db="sqlite:///travel.db",                      # or a postgresql:// URL, or your own pool / sqlite3 connection
     llm=ChatOpenAI(model="gpt-4.1-mini"),          # any LangChain chat model
     embedder=OpenAIEmbeddings(model="text-embedding-3-small"),
-    config={"project": "travel", "preset": "assistant"},
+    config={"project": "travel"},                  # no types given: fact, preference and profile
 )
 m.init()                                           # creates the tables; safe to call on every start
+```
+
+With no memory types given, memhub keeps facts, preferences and who the user is. To decide what this assistant
+remembers, name a memory file, `config={"project": "travel", "memory": "./memory.md"}` (see
+[docs/memory.md](../memory.md)). You can also pass the same keys inline:
+
+```python
+config={"project": "travel",
+        "types": {"profile": "builtin", "fact": "builtin", "trip": "Travels to {city}[ every {frequency?}]"},
+        "extraction": {"instructions": "Keep where the user lives, what they eat, and their regular trips."}}
 ```
 
 Every call needs a workspace, a user and a run. Bind them once per request:

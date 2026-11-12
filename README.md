@@ -79,14 +79,42 @@ Extras pick your LLM provider and sources; combine them as needed (`".[openai,ml
 ```bash
 docker compose up -d                                           # Postgres + pgvector on port 5433
 export PGPASSWORD=memhub OPENAI_API_KEY=...                    # or put them in a git-ignored .env
-memhub init --preset support --project support \
+memhub init --project acme \
   --db 'postgresql://memhub:${PGPASSWORD}@localhost:5433/memhub' \
-  --embeddings openai:text-embedding-3-small                   # writes memhub.yaml, checks the model, creates the tables
+  --embeddings openai:text-embedding-3-small                   # writes memhub.yaml and memory.md, checks the model, creates the tables
+$EDITOR memory.md                                              # what this memory keeps: its types, areas and rules
 echo '{"content": "Compressor C3 trips when the inlet filter is clogged"}' > fact.json
 memhub add --type fact --scope workspace --ws acme -f fact.json
 memhub search "inlet filter" --ws acme                         # no -c: memhub.yaml is found by itself
 memhub doctor                                                  # db, models, embedding dims, tables
 ```
+
+`memory.md` is the one file that says what your project remembers. `memhub init` writes a starter that keeps facts,
+preferences and profile details; make it yours. The frontmatter lists the memory types (a template's placeholders are
+its fields) and, optionally, the areas memories are filed under; the body says in plain words what to keep and what
+never to keep. A birdwatching club that stores only bird knowledge:
+
+```markdown
+---
+strict: true                 # only these types and areas: anything else is dropped
+types:
+  sighting:     "Saw {species} at {location}[ on {seen_on?}][ (count {count:int?})]"
+  species_note: "{common_name}: {note}"
+areas:
+  raptors:     hawks, eagles, falcons, kites, vultures, ospreys
+  waterbirds:  ducks, geese, swans, herons, egrets, grebes, rails
+  other_birds: pigeons, woodpeckers, hoopoes, kingfishers, cuckoos
+---
+# What to remember
+
+Only bird species knowledge and the user's sightings.
+
+- A sighting has the place and an absolute date.
+- Never store anything about the person: job, family, travel, devices, opinions.
+```
+
+[docs/memory.md](docs/memory.md) describes every form; [docs/memory-setup.md](docs/memory-setup.md) is a prompt you
+(or any agent) can follow to write a `memory.md` for your project and test it on one conversation.
 
 The same `memhub.yaml` configures your code:
 
@@ -113,7 +141,7 @@ out.dropped                                             # [Dropped(content=..., 
 same messages sent again are not extracted twice; only the ones after the thread's last push are (`thread_id`
 defaults to `run_id`).
 
-`memhub.yaml` is only memhub's own behaviour, a few lines. It is looked up in `./memhub.yaml`, `$MEMHUB_CONFIG`, then `~/.config/memhub/memhub.yaml`; `MEMHUB_*` environment variables (`MEMHUB_PRESET`, `MEMHUB_DB`, nested keys with `__`) and `Memory(config=, overrides=)` override it. `memhub config show` prints every setting with where it came from, `memhub config set KEY VALUE` edits it, and `memhub use acme --user anna` sets the workspace and user for the next commands. Presets: `maintenance`, `support`, `assistant` (the default: a general personal or coding assistant); a `types:` block replaces or adds to a preset's types, and `<type>: null` removes one (e.g. `fact: null` for a project that keeps only its own types). To reuse your app's own pool and models, point `connect: "your_app.memory:build"` at a function returning `{"db": ..., "embedder": ..., "llm": ...}`.
+`memhub.yaml` is only memhub's own behaviour, a few lines. It is looked up in `./memhub.yaml`, `$MEMHUB_CONFIG`, then `~/.config/memhub/memhub.yaml`; `MEMHUB_*` environment variables (`MEMHUB_DB`, `MEMHUB_MEMORY`, nested keys with `__`) and `Memory(config=, overrides=)` override it. Its `memory: ./memory.md` line names the memory file, relative to the yaml. `memhub config show` prints every setting with where it came from (`memory.md` for what the memory file sets), `memhub config set KEY VALUE` edits it, and `memhub use acme --user anna` sets the workspace and user for the next commands. With no memory file and no `types:` at all, memhub keeps `fact`, `preference` and `profile`. To reuse your app's own pool and models, point `connect: "your_app.memory:build"` at a function returning `{"db": ..., "embedder": ..., "llm": ...}`.
 
 Run the tests with `pip install -e ".[dev]"` and `pytest` (needs Docker; the pgvector container is started by the fixtures).
 
@@ -133,7 +161,8 @@ Then add to your repo:
 
 ```
 <your repo>/
-  memhub.yaml                 # models, types, source mapping (start from memhub.example.yaml)
+  memhub.yaml                 # database, models, source mapping (start from memhub.example.yaml)
+  memory.md                   # what the memory keeps: types, areas, and the rules in plain words
   <app>/memory/service.py     # builds MemoryService once; the only file that imports memhub
   scripts/ingest_memory.py    # optional: entrypoint for a scheduled ingest job
 ```
@@ -165,11 +194,11 @@ applies it in one transaction; `memhub doctor` shows the version. From code: `Me
 
 ## Configuration
 
-Everything lives in `memhub.yaml`: `memhub init` writes a small one, or start from [memhub.example.yaml](memhub.example.yaml). Every key of the full examples stays valid.
+Connections and behaviour live in `memhub.yaml`, what is remembered in `memory.md`: `memhub init` writes both, or start from [memhub.example.yaml](memhub.example.yaml) and an example's `memory.md`. Every key of the full examples stays valid.
 
 - **Your database:** `database_schema`, `sources.<x>.kind: sql`
 - **Your tenants:** `fields.workspace_id`
-- **Your schemas:** declare types in the yaml, or a class next to it
+- **Your schemas:** declare types in `memory.md` (a template, `builtin`, fields with descriptions), or a class next to it
 - **Any model:** `base_url`, Azure `params`, `factory`
 - **Any agent stack:** `memhub.toolkit.MemoryToolkit`
 
@@ -187,8 +216,8 @@ Ingest quality knobs:
 | Example | Shows |
 |---|---|
 | [examples/habitantes](examples/habitantes) | A chatbot with memhub memory: config, synthetic sample data, LangChain agent, functional check |
-| [examples/support](examples/support) | Adapting memhub to a support project: config only |
-| [examples/maintenance](examples/maintenance) | Adapting memhub to maintenance work, with a project memory type in Python ([maint_types.py](examples/maintenance/maint_types.py)) |
+| [examples/support](examples/support) | Adapting memhub to a support project: a `memory.md` with types declared as fields |
+| [examples/maintenance](examples/maintenance) | Adapting memhub to maintenance work: a `memory.md` with a project memory type in Python ([maint_types.py](examples/maintenance/maint_types.py)) |
 
 ### Review workflows
 

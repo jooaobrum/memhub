@@ -40,7 +40,8 @@ Everything except the adapter stays inside memhub. Your project owns only:
 
 ```
 <repo>/
-  memhub.yaml                  # models, types, areas, source mapping, extraction instructions
+  memhub.yaml                  # database, models, source mapping
+  memory.md                    # what is remembered: types, areas, and the extraction instructions as its body
   <app package>/memory/
     service.py                 # builds MemoryService once (the only place that imports memhub)
     logging.py                 # writes turn logs, only if you have none
@@ -163,10 +164,9 @@ Copy `memhub.example.yaml` and change these, in order:
      judge:     {provider: anthropic, model: claude-haiku-4-5-20251001, api_key_env: ANTHROPIC_API_KEY}
    embeddings: {provider: openai, model: text-embedding-3-small, api_key_env: OPENAI_API_KEY, dims: 1536}
    ```
-3. **Scopes and types:** turn on only what you need. `scopes: [user]` if nothing is shared; add `workspace` only if you use `term` or admin-approved shared memories.
+3. **Scopes:** `scopes: [user]` if nothing is shared; add `workspace` only if you use `term` or admin-approved shared memories.
 4. **Source mapping** (§3.2).
-5. **Policy:** `extraction.instructions` states what is worth remembering in *your* domain. This is the highest-leverage setting. `ingestion.skip_when` skips trivial turns using message metadata.
-6. **Areas** (only if you keep `fact`): `areas.seeds` lists your topic buckets (`key, title, description`; the description is what the model and search match against). `fact` with `area: required` drops any fact that fits no area.
+5. **What to remember:** add `memory: ./memory.md` and write that file ([memory.md](memory.md)). Its frontmatter lists your types and, optionally, your areas (the topic buckets; the description is what the model and search match against); `strict: true` drops anything that fits no area. Its body states what is worth remembering in *your* domain: the highest-leverage setting. `ingestion.skip_when` (in `memhub.yaml`) skips trivial turns using message metadata.
 
 Secrets stay in environment variables (`api_key_env`, `${ENV}` in YAML). The CLI loads a `.env` from the working directory.
 

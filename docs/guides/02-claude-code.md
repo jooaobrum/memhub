@@ -24,7 +24,10 @@ memhub init --db sqlite:///$HOME/.memhub/claude.db \
 claude mcp add --scope user memhub -- memhub mcp
 ```
 
-`--chat` is only needed for `ingest`. Without it, everything else works.
+`--chat` is only needed for `ingest`. Without it, everything else works. `init` also writes `memory.md` next to
+`memhub.yaml`: the kinds of memory to keep (facts, preferences, profile) and, in its body, what to keep in plain words.
+Edit the body to say what your coding sessions should remember, such as conventions, decisions and gotchas (see
+[docs/memory.md](../memory.md)).
 
 ## Way 1: sessions propose, you approve
 
