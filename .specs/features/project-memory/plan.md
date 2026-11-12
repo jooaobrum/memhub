@@ -147,7 +147,7 @@ Types are written as templates and areas as `key: description`; both turn into t
 28. WHEN `examples/habitantes`, `examples/maintenance` and `examples/support` are loaded THEN each SHALL have a `memory.md` beside a `memhub.yaml` that names it, and SHALL resolve to the same type names, fields, areas and instructions as its config at the base commit (AD-026)
 29. The system SHALL ship `docs/memory.md` (the file, short forms, long forms, `strict`, starter types, one worked example) and `docs/memory-setup.md` (a prompt any agent or person can follow to interview the project owner, write `memory.md` and test it with one pushed conversation)
 30. WHEN any `memory.md` block (a fenced block that opens with `---`) in `README.md`, `docs/` or `examples/` is written to a file THEN `resolve` SHALL load it with no error
-31. The files `README.md`, `memhub.example.yaml`, `src/`, `docs/` and `examples/` SHALL contain no `preset` (case-insensitive) and no `--preset`
+31. The files `README.md`, `memhub.example.yaml`, `src/`, `docs/` and `examples/` SHALL contain no `preset` (case-insensitive) and no `--preset`, except the refusal lines criterion 19 requires in `src/memhub/settings.py`
 32. `docs/memory.md` and `docs/memory-setup.md` SHALL not contain the word `Claude`
 33. The README quickstart and guides 01-06 SHALL take a new user from install through `memhub init`, editing `memory.md`, `add` and `search`, with every command and flag they show accepted by the CLI. `docs/guides/06-your-own-domain.md` SHALL use the short-form birds `memory.md`, with 20 frontmatter lines or fewer and no `admission.threshold`
 
