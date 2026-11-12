@@ -98,6 +98,24 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: tests/test_push.py test_message_ids; C9 (tests)
 - last seen: 2026-11-11T20:25:43Z
 
+### L-015 - When removing a default config (preset), rerun the real-model scenarios before deleting: its prompt text carried extraction quality the starter must keep.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `config` · harmful: 0
+- features: project-memory
+- evidence: AD-034 (config)
+- last seen: 2026-11-12T19:05:09Z
+
+### L-016 - A 'no X anywhere in src' check contradicts any check requiring an error message that names X; scope it to exclude the refusal lines when writing checks.
+- signal: `spec_deviation` · recurrence: 1 feature(s) · scope: `checks` · harmful: 0
+- features: project-memory
+- evidence: C31 vs C19 (checks)
+- last seen: 2026-11-12T19:05:09Z
+
+### L-017 - Never run two sessions in one worktree: the other's uncommitted files block the clean-tree gate; give each session its own git worktree.
+- signal: `gate_fail` · recurrence: 1 feature(s) · scope: `workflow` · harmful: 0
+- features: project-memory
+- evidence: validate_verification (workflow)
+- last seen: 2026-11-12T19:05:09Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.

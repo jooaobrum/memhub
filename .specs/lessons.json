@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 15,
+  "next_id": 18,
   "lessons": [
     {
       "id": "L-001",
@@ -256,6 +256,60 @@
       ],
       "created": "2026-11-11T20:25:43Z",
       "last_seen": "2026-11-11T20:25:43Z"
+    },
+    {
+      "id": "L-015",
+      "key": "spec_precision_gap::when removing a default config preset rerun the real model scenarios before deleting its prompt text carried extraction quality the starter must keep",
+      "text": "When removing a default config (preset), rerun the real-model scenarios before deleting: its prompt text carried extraction quality the starter must keep.",
+      "signal": "spec_precision_gap",
+      "scope": "config",
+      "status": "candidate",
+      "features": [
+        "project-memory"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "AD-034 (config)"
+      ],
+      "created": "2026-11-12T19:05:09Z",
+      "last_seen": "2026-11-12T19:05:09Z"
+    },
+    {
+      "id": "L-016",
+      "key": "spec_deviation::a no x anywhere in src check contradicts any check requiring an error message that names x scope it to exclude the refusal lines when writing checks",
+      "text": "A 'no X anywhere in src' check contradicts any check requiring an error message that names X; scope it to exclude the refusal lines when writing checks.",
+      "signal": "spec_deviation",
+      "scope": "checks",
+      "status": "candidate",
+      "features": [
+        "project-memory"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "C31 vs C19 (checks)"
+      ],
+      "created": "2026-11-12T19:05:09Z",
+      "last_seen": "2026-11-12T19:05:09Z"
+    },
+    {
+      "id": "L-017",
+      "key": "gate_fail::never run two sessions in one worktree the other s uncommitted files block the clean tree gate give each session its own git worktree",
+      "text": "Never run two sessions in one worktree: the other's uncommitted files block the clean-tree gate; give each session its own git worktree.",
+      "signal": "gate_fail",
+      "scope": "workflow",
+      "status": "candidate",
+      "features": [
+        "project-memory"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "validate_verification (workflow)"
+      ],
+      "created": "2026-11-12T19:05:09Z",
+      "last_seen": "2026-11-12T19:05:09Z"
     }
   ]
 }
