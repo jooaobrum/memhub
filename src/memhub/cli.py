@@ -15,7 +15,7 @@ import typer
 from dotenv import find_dotenv, load_dotenv
 
 from memhub import cli_setup
-from memhub.config import Config, ConfigError, EmbeddingConfig, build_chat_model, build_embeddings
+from memhub.config import Config, ConfigError, EmbeddingConfig, SourceConfig, build_chat_model, build_embeddings
 from memhub.service import MemoryService, ServiceError
 from memhub.settings import SEARCH_PLACES, Parts, Resolved, embedding_model_id, read_context, resolve
 from memhub.sources import build_source
@@ -177,11 +177,14 @@ def reembed(config: Optional[Path] = ConfigOpt, batch_size: int = 100) -> None:
 
 def _build_source(settings: Config, name: str, config: Optional[Path]):
     """`config` is the yaml that was read: a source's relative paths are relative to its folder."""
-    if name not in settings.sources:
+    cfg = settings.sources.get(name)
+    if cfg is None and name == "claude_code":  # Claude Code's transcripts need no yaml entry
+        cfg = SourceConfig(kind="claude_code")
+    if cfg is None:
         typer.secho(f"unknown source {name!r}; configured: {list(settings.sources)}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     try:
-        return build_source(settings.sources[name], workspace_id=settings.workspace_default,
+        return build_source(cfg, workspace_id=settings.workspace_default,
                             base_dir=config.resolve().parent if config else Path.cwd())
     except ValueError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
@@ -463,6 +466,32 @@ def _render_page(pg: dict) -> str:
 def runs(last: int = 10, config: Optional[Path] = ConfigOpt) -> None:
     service = _service(config)
     _print(service.runs(_actor(), last=last))
+
+
+@app.command()
+def mcp(
+    workspace: Optional[str] = typer.Option(None, "--ws", help="Workspace (default: MEMHUB_WORKSPACE, `memhub use`, else this folder as Claude Code names it)"),
+    user: Optional[str] = typer.Option(None, "--user", help="User (default: MEMHUB_USER, `memhub use`, else the OS user)"),
+    config: Optional[Path] = ConfigOpt,
+) -> None:
+    """Serve search_memory and propose_memory over MCP (stdio). In Claude Code: `claude mcp add memhub -- memhub mcp`."""
+    from memhub import mcp_server
+    from memhub.memory import Memory
+
+    try:
+        mcp_server.require_sdk()
+    except ImportError as exc:
+        _fail(exc)
+    resolved = _resolve(config)
+    _require_db_and_embedder(resolved)
+    workspace_id, user_id = mcp_server.identity(*_ids(workspace, user))
+    try:  # an unusable ledger (no tables, an old schema, another embedder) stops here, before serving
+        parts = _parts(resolved)  # the CLI's own model builders, as every other command uses
+        memory = Memory(db=parts.db, embedder=parts.embedder, config=resolved)
+        server = mcp_server.build_server(memory, workspace_id=workspace_id, user_id=user_id, run_id=mcp_server.new_run_id())
+    except Exception as exc:  # noqa: BLE001 - the reason goes to stderr: stdout is the MCP channel
+        _fail(exc)
+    server.run("stdio")
 
 
 cli_setup.register(app)

@@ -423,7 +423,7 @@ class Memory:
         """Framework-neutral `search_memory` / `propose_memory` tools for this workspace and user."""
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
         return MemoryToolkit(self.service, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=k,
-                             actor=Actor(id=ctx.agent_id or "agent"))
+                             actor=Actor(id=ctx.agent_id or "agent"), run_id=ctx.run_id, agent_id=ctx.agent_id)
 
     def ingest(self, source: str | None = None, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
                agent_id: Any = None, roles: list[str] | None = None, base_dir: str | Path = ".", **kwargs: Any):

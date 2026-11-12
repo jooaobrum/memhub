@@ -496,7 +496,7 @@ def _all_commands(uid: str) -> dict[str, list[str]]:
         "edit": ["edit", uid, "-f", "m.json"], "history": ["history", uid], "archive": ["archive", uid],
         "delete": ["delete", uid], "promote": ["promote", uid], "page": ["page"], "runs": ["runs"], "areas": ["areas"],
         "areas merge": ["areas", "merge", uid, uid], "config show": ["config", "show"],
-        "config set": ["config", "set", "project", "x1"], "doctor": ["doctor"], "migrate": ["migrate"],
+        "config set": ["config", "set", "project", "x1"], "doctor": ["doctor"], "migrate": ["migrate"], "mcp": ["mcp"],
     }
 
 
@@ -522,7 +522,7 @@ def test_c_optional_discovery_and_no_yaml_message(pg_dsn, tmp_path, monkeypatch)
     _yaml_file(Path("memhub.yaml"), shared)
     assert runner.invoke(cli.app, ["init"]).exit_code == 0
     for name, cmd in commands.items():  # now every command finds the discovered yaml
-        if name in ("config set", "doctor"):
+        if name in ("config set", "doctor", "mcp"):  # mcp would serve on stdin
             continue
         result = runner.invoke(cli.app, cmd)
         assert "no memhub.yaml found" not in result.output and "config file not found" not in result.output, (name, result.output)

@@ -237,6 +237,7 @@ Approving and rejecting need a role from `roles.approve_workspace` (default `wor
 
 - [Architecture](docs/architecture.md): diagrams and system overview
 - [Integration](docs/integration.md): adoption steps
+- [Claude Code](docs/claude-code.md): `memhub ingest --source claude_code` and `claude mcp add memhub -- memhub mcp`
 - [SQLite](docs/sqlite.md): one local file, no Docker; `memhub[sqlite]` for vector search in SQL
 - [TDD](docs/tdd.md): rules and field-level detail
 - [.specs/features/memhub/](.specs/features/memhub/): spec, design and research; [tickets/](.specs/features/memhub/tickets): work items
