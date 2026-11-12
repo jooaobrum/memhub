@@ -240,6 +240,8 @@ def _init_write(cli: Any, *, given: list[str], project, db, chat, embeddings, me
         if models:
             data["models"] = models
     data["memory"] = memory if memory is not None else f"./{MEMORY_FILE}"
+    if memory is None:
+        data["scopes"] = ["user"]  # the starter is one person's memory (AD-035); a project sharing memory says so
 
     try:  # validate, build the embedder and embed one text, create the tables - and only then write the files
         # the yaml's `memory:` is relative to the yaml, which sits in this folder; the starter file needs no reading

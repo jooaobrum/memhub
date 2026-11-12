@@ -8,22 +8,7 @@ from the CLI, on Postgres:
 
 ## 1. A database and a config
 
-```bash
-docker run -d --name memhub-pg -e POSTGRES_USER=memhub -e POSTGRES_PASSWORD=memhub -e POSTGRES_DB=memhub \
-  -p 127.0.0.1:5433:5432 pgvector/pgvector:pg16          # or any Postgres with the pgvector extension
-uv pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"
-printf 'OPENAI_API_KEY=sk-...\nPGPASSWORD=memhub\n' > .env
-
-memhub init --project support \
-  --db 'postgresql://memhub:${PGPASSWORD}@localhost:5433/memhub' \
-  --embeddings openai:text-embedding-3-small --chat openai:gpt-4.1-mini
-memhub doctor
-```
-
-Write `${PGPASSWORD}` exactly like that, in single quotes. The yaml then keeps the reference instead of the
-password, and the value is read from the environment or `.env`.
-
-`init` writes a starter `memory.md`. Replace it with what a support bot should remember:
+Write `memory.md` first: what a support bot should remember.
 
 ```markdown
 ---
@@ -50,6 +35,23 @@ Customer-support agent. Keep durable facts the customer states about their compa
 - Write `content` as your own third-person sentence ("Wants every answer in Spanish"), never the customer's words
   copied as they are; the verbatim words go in the evidence quote.
 ```
+
+Then create the config and the tables:
+
+```bash
+docker run -d --name memhub-pg -e POSTGRES_USER=memhub -e POSTGRES_PASSWORD=memhub -e POSTGRES_DB=memhub \
+  -p 127.0.0.1:5433:5432 pgvector/pgvector:pg16          # or any Postgres with the pgvector extension
+uv pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"
+printf 'OPENAI_API_KEY=sk-...\nPGPASSWORD=memhub\n' > .env
+
+memhub init --project support --memory ./memory.md \
+  --db 'postgresql://memhub:${PGPASSWORD}@localhost:5433/memhub' \
+  --embeddings openai:text-embedding-3-small --chat openai:gpt-4.1-mini
+memhub doctor
+```
+
+Write `${PGPASSWORD}` exactly like that, in single quotes. The yaml then keeps the reference instead of the
+password, and the value is read from the environment or `.env`.
 
 That gives four types:
 

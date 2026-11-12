@@ -171,7 +171,7 @@ Proof: `.venv/bin/python -m pytest tests/test_e2e_record.py::test_s4_birds_recor
 
 ## Handoff
 
-- **Settled mid-build:** 2026-11-12, after the S3/S2 reruns showed weaker extraction than the presets' tuned prompts - asked "What should `memhub init` write as the starter body?" - user chose "Tuned rules in the body (Recommended)" (AD-034)
+- **Settled mid-build:** 2026-11-12, after the S3/S2 reruns showed weaker extraction than the presets' tuned prompts - asked "What should `memhub init` write as the starter body?" - user chose "Tuned rules in the body (Recommended)" (AD-034); then, after the S1 rerun filed coding facts as workspace candidates - asked "What should init write?" - user chose "scopes: [user] (Recommended)" (AD-035)
 - **Dispatched:** none
 - **Boundary:** none yet
 - **Abandoned:** none

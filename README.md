@@ -84,8 +84,8 @@ memhub init --project acme \
   --embeddings openai:text-embedding-3-small                   # writes memhub.yaml and memory.md, checks the model, creates the tables
 $EDITOR memory.md                                              # what this memory keeps: its types, areas and rules
 echo '{"content": "Compressor C3 trips when the inlet filter is clogged"}' > fact.json
-memhub add --type fact --scope workspace --ws acme -f fact.json
-memhub search "inlet filter" --ws acme                         # no -c: memhub.yaml is found by itself
+memhub add --type fact --ws acme --user anna -f fact.json
+memhub search "inlet filter" --ws acme --user anna             # no -c: memhub.yaml is found by itself
 memhub doctor                                                  # db, models, embedding dims, tables
 ```
 

@@ -81,7 +81,7 @@ def test_init_with_flags_writes_yaml_and_tables(pg_dsn, monkeypatch):
     assert result.exit_code == 0, result.output
     assert f"initialized {p}_memory / {p}_memory_runs" in result.output
     data = _loaded()
-    assert data == {"project": p, "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "memory": "./memory.md"}
+    assert data == {"project": p, "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "memory": "./memory.md", "scopes": ["user"]}
     assert resolve(Path.cwd() / "memhub.yaml").config.project_prefix == p
     assert _tables(pg_dsn, p) == [f"{p}_memory", f"{p}_memory_runs"]
 
@@ -140,7 +140,7 @@ def test_init_prompts_for_missing_values(pg_dsn, tmp_path, monkeypatch):
     # project (default), connect (empty: a db URL instead), db, embeddings, chat (empty), what to keep (empty)
     result = runner.invoke(cli.app, ["init"], input=f"\n\n{pg_dsn}\nfake:emb\n\n\n")
     assert result.exit_code == 0, result.output
-    assert _loaded() == {"project": "my_app_2", "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "memory": "./memory.md"}
+    assert _loaded() == {"project": "my_app_2", "db": pg_dsn, "models": {"embeddings": "fake:emb"}, "memory": "./memory.md", "scopes": ["user"]}
     # flags mean a script or a coding agent: nothing is asked, what was not given takes its default
     # (the folder's project, the starter memory.md, no chat model)
     _cwd(tmp_path, monkeypatch, "second")
@@ -242,7 +242,7 @@ def test_init_flags_writes_memory_file(tmp_path, monkeypatch):
     result = runner.invoke(cli.app, ["init", *_lite(tmp_path)], input="")
     assert result.exit_code == 0, result.output
     assert cli_setup.KEEP_QUESTION not in result.output
-    assert _loaded()["memory"] == "./memory.md"
+    assert _loaded()["memory"] == "./memory.md" and _loaded()["scopes"] == ["user"]  # AD-035
     text = Path("memory.md").read_text()
     front = yaml.safe_load(text.split("---")[1])
     assert front == {"types": {"fact": "builtin", "preference": "builtin", "profile": "builtin"}}
@@ -276,7 +276,7 @@ def test_init_with_memory_path(tmp_path, monkeypatch):
     Path("mine.md").write_text("---\ntypes:\n  note: \"{text}\"\n---\nKeep notes.\n")
     result = runner.invoke(cli.app, ["init", *_lite(tmp_path), "--memory", "./mine.md"])
     assert result.exit_code == 0, result.output
-    assert _loaded()["memory"] == "./mine.md" and not Path("memory.md").exists()
+    assert _loaded()["memory"] == "./mine.md" and "scopes" not in _loaded() and not Path("memory.md").exists()
     assert set(resolve(Path.cwd() / "memhub.yaml").config.types) == {"note"}
     _cwd(tmp_path, monkeypatch, "missing")
     result = runner.invoke(cli.app, ["init", *_lite(tmp_path), "--memory", "./nope.md"])
