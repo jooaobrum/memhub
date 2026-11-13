@@ -329,10 +329,13 @@ class _Tx:
             raise Conflict("the active version changed concurrently; retry the edit")
         return self.add_memory(status="active", verified=verified, **common)
 
-    def amend_row(self, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
+    def amend_row(self, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None,
+                  entities: list[dict] | None = None) -> None:
         self._q(
-            f"UPDATE {self.mem} SET content = ?, payload = ?, embedding = ? WHERE id = ? AND status = 'candidate'",
-            (content, json.dumps(payload), self._vector(embedding), _id(id)),
+            f"UPDATE {self.mem} SET content = ?, payload = ?, embedding = ?, entities = COALESCE(?, entities) "
+            f"WHERE id = ? AND status = 'candidate'",
+            (content, json.dumps(payload), self._vector(embedding),
+             None if entities is None else json.dumps(entities), _id(id)),
         )
 
     def _supersede(self, row_id: uuid.UUID) -> int:

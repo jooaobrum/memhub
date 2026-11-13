@@ -256,10 +256,12 @@ class _Tx:
             raise Conflict("the active version changed concurrently; retry the edit")
         return self.add_memory(status="active", verified=verified, **common)
 
-    def amend_row(self, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
+    def amend_row(self, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None,
+                  entities: list[dict] | None = None) -> None:
         row = self._mem().get(id)
         if row is not None and row["status"] == "candidate":
-            self._set(id, content=content, payload=copy.deepcopy(payload), embedding=self._vector(embedding))
+            cols = {"entities": copy.deepcopy(entities)} if entities is not None else {}
+            self._set(id, content=content, payload=copy.deepcopy(payload), embedding=self._vector(embedding), **cols)
 
     def _supersede(self, row_id: uuid.UUID) -> int:
         row = self._mem().get(row_id)

@@ -21,7 +21,8 @@ from langchain.tools import ToolRuntime
 from langchain_core.tools import tool
 
 from memhub.service import Actor, MemoryService, ServiceError
-from memhub.toolkit import proposal_result
+from memhub.service import NotFound
+from memhub.toolkit import proposal_id, proposal_result
 
 log = logging.getLogger(__name__)
 
@@ -196,9 +197,12 @@ class MemoryMiddleware(AgentMiddleware):
     def _propose_memory_tool(self):
         @tool
         def propose_memory(
-            type: str, fields: dict, evidence: list[dict], runtime: ToolRuntime, scope: str = "user"
+            type: str, fields: dict, evidence: list[dict], runtime: ToolRuntime, scope: str = "user",
+            memory_id: str | None = None, user_requested: bool = False,
         ) -> str:
-            """Propose a new memory. It is saved as a candidate and needs review before it is used."""
+            """Propose a new memory. It is saved as a candidate and needs review before it is used. To correct a
+            draft you proposed, pass its id as memory_id. Set user_requested only when the user explicitly asks to
+            save something a reviewer rejected before."""
             workspace_id, user_id = self._ids(runtime.context)
             try:
                 row = self.service.propose(
@@ -209,9 +213,11 @@ class MemoryMiddleware(AgentMiddleware):
                     evidence=evidence,
                     workspace_id=workspace_id,
                     user_id=user_id,
+                    memory_id=proposal_id(memory_id),
+                    user_requested=user_requested,
                 )
-            except ServiceError as exc:
-                return f"rejected: {exc}"
+            except (ServiceError, NotFound) as exc:
+                return json.dumps({"rejected": str(exc)})
             return json.dumps(proposal_result(row))
 
         return propose_memory

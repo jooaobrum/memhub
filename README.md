@@ -248,6 +248,8 @@ memhub approve <id> --set content="Lives in Lyon since 2025" -c $C
 memhub history <memory_id> -c $C                     # the proposal, then the approved text
 ```
 
+In an agent app the same review happens in the chat: [examples/review_inline](examples/review_inline) lets the user approve, edit or reject each memory the agent proposes, on `Memory.check_fields` and `Memory.propose(approve=True)`.
+
 **Correct what the AI extracted.** Only the fields you pass change. The new version is marked verified, and later ingests never overwrite it:
 
 ```bash
