@@ -9,12 +9,11 @@ from typing import Any, Optional
 
 import psycopg
 import typer
-import yaml
 
 from memhub.config import ConfigError
 from memhub.connection import _is_pool
 from memhub.settings import (
-    CONFIG_FILE, SEARCH_PLACES, Parts, Resolved, discover, embedding_model_id, resolve,
+    CONFIG_FILE, SEARCH_PLACES, Resolved, discover, embedding_model_id, resolve,
     set_key, write_context, write_yaml,
 )
 from memhub.storage import open_backend

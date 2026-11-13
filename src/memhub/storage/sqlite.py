@@ -32,9 +32,7 @@ from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.memory import _contains, _cosine
 from memhub.storage.rules import (
     EntityFilter,
-    MEMORY_COLUMNS,
     NO_TABLES,
-    RUN_COLUMNS,
     UNSET,
     Conflict,
     EmbeddingMismatch,

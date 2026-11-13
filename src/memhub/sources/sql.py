@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Iterator
+from typing import Iterator
 
 import psycopg
 from psycopg.rows import dict_row

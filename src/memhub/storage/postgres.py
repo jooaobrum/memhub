@@ -25,7 +25,6 @@ from typing import Any, Iterator
 
 import psycopg
 from psycopg.cursor import Cursor
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from memhub.connection import ConnectionSource, advisory_lock, advisory_unlock, connection_source
@@ -33,9 +32,7 @@ from memhub.storage.base import FIXES, BoundUnitOfWork, Capability, require
 from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.rules import (
     EntityFilter,
-    ACTIVE_STATUSES,
     NO_TABLES,
-    Actor,
     Conflict,
     EmbeddingMismatch,
     NotFound,
@@ -43,7 +40,6 @@ from memhub.storage.rules import (
     StoreError,
     UNSET as _UNSET,
     apply_boosts,
-    area_ids,
     area_link,
     as_vector_list,
     fresh_evidence,
