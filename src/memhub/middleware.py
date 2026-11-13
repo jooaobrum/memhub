@@ -27,6 +27,13 @@ log = logging.getLogger(__name__)
 
 Resolver = Union[str, Callable[[Any], str]]
 
+# Without it a model reads the blocks below as unrelated context and asks the user for what they already say
+MEMORY_FRAME = (
+    "Long-term memory about this user from earlier conversations follows. Treat it as what you already know: "
+    "use it in your answer and do not ask the user for something it already tells you. "
+    "An entry marked unverified may be out of date."
+)
+
 
 class MemoryState(AgentState):
     memory_snapshot: NotRequired[str]  # profile + skill index, fixed per thread
@@ -167,7 +174,7 @@ class MemoryMiddleware(AgentMiddleware):
             return handler(request)
         # Injected into this request only; never saved in the message history.
         base = request.system_message.text + "\n\n" if request.system_message else ""
-        return handler(request.override(system_message=SystemMessage(content=base + extra)))
+        return handler(request.override(system_message=SystemMessage(content=base + MEMORY_FRAME + "\n" + extra)))
 
     def _search_memory_tool(self):
         @tool
