@@ -9,31 +9,17 @@ from __future__ import annotations
 
 import os
 import re
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from memhub.types import BUILTIN_OPTIONS, INTERNAL_TYPES, TypeRegistry, builtin_spec, parse_template
 
-_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-
 
 class ConfigError(Exception):
     """Raised for a malformed or inconsistent ``memhub.yaml``."""
-
-
-def _interpolate_env(text: str) -> str:
-    def repl(match: re.Match[str]) -> str:
-        name = match.group(1)
-        if name not in os.environ:
-            raise ConfigError(f"environment variable {name!r} referenced in config is not set")
-        return os.environ[name]
-
-    return _ENV_PATTERN.sub(repl, text)
 
 
 _DURATION_PATTERN = re.compile(r"^(\d+)\s*([smhdw])$")
@@ -528,15 +514,6 @@ class Config(BaseModel):
 
 
 Settings = Config  # the old name
-
-
-def read_config(path: str | Path) -> dict[str, Any]:
-    """The yaml as a dict, `${VAR}` interpolated; its folder goes on `sys.path` for the project's own classes."""
-    raw = Path(path).read_text()
-    for folder in (Path(path).resolve().parent, Path.cwd()):  # a project's own type classes and source adapters sit next to its yaml
-        if str(folder) not in sys.path:
-            sys.path.append(str(folder))
-    return yaml.safe_load(_interpolate_env(raw)) or {}
 
 
 def load_config(path: str | Path) -> Config:

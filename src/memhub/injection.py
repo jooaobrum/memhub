@@ -30,10 +30,6 @@ def scan(text: str) -> str | None:
     return None
 
 
-def is_injection(text: str) -> bool:
-    return scan(text) is not None
-
-
 def strings_in(value) -> list[str]:
     """Every string nested anywhere in `value` (dicts, lists, scalars)."""
     if isinstance(value, str):
