@@ -42,6 +42,8 @@ from memhub.storage.rules import (
     apply_boosts,
     area_link,
     as_vector_list,
+    edited_note,
+    edited_version,
     fresh_evidence,
     newest_observed_at,
 )
@@ -500,6 +502,7 @@ class MemoryStore:
         resolve: str | None = None,
         note: str | None = None,
         merged: dict | None = None,
+        edit: dict | None = None,
     ) -> Row:
         """`merged` ({content, payload, embedding}) is the single statement `keep_both` writes for a keyed slot:
         a slot holds one value, so both values become one new version of the existing row."""
@@ -550,6 +553,20 @@ class MemoryStore:
             if sibling_active is not None and sibling_active["id"] != row["id"]:
                 if self._supersede(cur, sibling_active["id"]) == 0:
                     raise Conflict("the active version changed concurrently; retry the approval")
+
+        if edit is not None:  # the proposal stays in history as it was; the approved text is the next version
+            cur.execute(
+                f"UPDATE {self._t('memory')} SET status='archived', reviewed_by=%s, reviewed_at=now(), review_note=%s "
+                f"WHERE id=%s",
+                (reviewed_by, edited_note(note), id),
+            )
+            cur.execute(f"SELECT max(version) AS v FROM {self._t('memory')} WHERE memory_id=%s", (row["memory_id"],))
+            new = self.add_memory(cur, **edited_version(row, edit, cur.fetchone()["v"] + 1))
+            cur.execute(
+                f"UPDATE {self._t('memory')} SET reviewed_by=%s, reviewed_at=now(), review_note=%s WHERE id=%s RETURNING *",
+                (reviewed_by, note, new["id"]),
+            )
+            return cur.fetchone()
 
         cur.execute(
             f"UPDATE {self._t('memory')} SET status='active', verified=true, reviewed_by=%s, "

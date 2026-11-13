@@ -42,6 +42,8 @@ from memhub.storage.rules import (
     apply_boosts,
     area_link,
     as_vector_list,
+    edited_note,
+    edited_version,
     fresh_evidence,
     newest_observed_at,
 )
@@ -363,6 +365,7 @@ class _Tx:
         resolve: str | None = None,
         note: str | None = None,
         merged: dict | None = None,
+        edit: dict | None = None,
     ) -> Row:
         row = self.get_by_id(id)
         if row is None:
@@ -394,6 +397,11 @@ class _Tx:
             if sibling_active is not None and sibling_active["id"] != row["id"]:
                 if self._supersede(sibling_active["id"]) == 0:
                     raise Conflict("the active version changed concurrently; retry the approval")
+        if edit is not None:  # the proposal stays in history as it was; the approved text is the next version
+            self._reviewed(id, reviewed_by, edited_note(note), status="archived")
+            version = max(r["version"] for r in self.history(row["memory_id"])) + 1
+            new = self.add_memory(**edited_version(row, edit, version))
+            return self._reviewed(new["id"], reviewed_by, note)
         return self._reviewed(id, reviewed_by, note, status="active", verified=1)
 
     def _merge(self, row: Row, new_evidence: list[dict], increment: int, valid_until: Any) -> Row:

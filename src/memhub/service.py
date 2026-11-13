@@ -9,6 +9,7 @@ needs several writes in one transaction), not through this class.
 """
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -63,6 +64,13 @@ def _occurs(name: str, text: str) -> bool:
     return bool(name.strip()) and re.search(rf"(?<!\w){re.escape(name.strip())}(?!\w)", text, re.I) is not None
 
 
+def _slot_text(key: Any) -> str | None:
+    """A key as the slot index reads it (`payload->>'key'`): a string as it is, any other value as its JSON text."""
+    if key is None:
+        return None
+    return key if isinstance(key, str) else json.dumps(key)
+
+
 class Embedder:
     """Structural type: anything with `.embed_query(str) -> list[float]`."""
 
@@ -86,10 +94,12 @@ class MemoryService:
         if scope not in self.settings.scopes:
             raise ValidationError(f"scope {scope!r} is not enabled (config.scopes = {self.settings.scopes})")
 
-    def _validate(self, type_name: str, fields: dict[str, Any]):
+    def _validate(self, type_name: str, fields: dict[str, Any], schema_version: int | None = None):
+        """The one field check of every write (add, edit, propose, approve with fields, `check_fields`): the type's
+        model (at `schema_version`, else the latest), the injection scan, declared entity types and allowed keys."""
         if type_name not in self.registry:
             raise ValidationError(f"unknown memory type {type_name!r}")
-        cls = self.registry.latest(type_name)
+        cls = self.registry.latest(type_name) if schema_version is None else self.registry.get(type_name, schema_version)
         try:
             instance = cls.model_validate(fields)
         except PydanticValidationError as exc:
@@ -191,13 +201,7 @@ class MemoryService:
             if active is None:
                 raise NotFound(f"no active version for memory {memory_id}")
             self._authorize_owner_or_admin(actor, active)
-            cls = self.registry.get(active["type"], active["schema_version"])
-            merged = {**active["payload"], **fields}
-            try:
-                instance = cls.model_validate(merged)
-            except PydanticValidationError as exc:
-                raise ValidationError(str(exc)) from exc
-            self._check_instance(instance)
+            instance = self._validate(active["type"], {**active["payload"], **fields}, active["schema_version"])
             self._guard_embedding_config(uow)
             embedding = self._embed(instance.content)
             return uow.memories.edit_memory(
@@ -251,25 +255,68 @@ class MemoryService:
         with self.store.unit_of_work() as uow:
             return uow.memories.delete_user(user_id)
 
-    def approve(self, actor: Actor, id: uuid.UUID, *, resolve: str | None = None, note: str | None = None) -> Row:
-        if not any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
-            raise PermissionDenied("actor lacks an approving role")
+    def check_fields(self, type_name: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Validate `fields` as a `type_name` memory without saving anything: `{"content", "payload"}`."""
+        instance = self._validate(type_name, fields)
+        return {"content": instance.content, "payload": instance.model_dump(mode="json")}
+
+    def _authorize_review(self, actor: Actor, row: Row) -> None:
+        """Approve and reject: an approving role, or for a user-scope candidate its owner (AD-037, AD-041)."""
+        if any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
+            return
+        if row["scope"] == "user" and row["user_id"] == actor.id:
+            return
+        raise PermissionDenied(
+            "only the owner or an approving role may review this candidate" if row["scope"] == "user"
+            else "actor lacks an approving role"
+        )
+
+    def _review_edit(self, uow: UnitOfWork, row: Row, fields: dict[str, Any], resolve: str | None) -> dict | None:
+        """What a reviewer's `fields` make of the candidate: `{content, payload, entities, embedding}` to approve as the
+        next version, or None when they change nothing. Checked like any write, before anything is saved."""
+        if row["conflicts_with"] is not None and resolve == "keep_old":
+            raise ValidationError("keep_old rejects the candidate: there is nothing to edit")
+        if row["conflicts_with"] is not None and resolve == "keep_both" and row["payload"].get("key") is not None:
+            raise ValidationError("keep_both on a keyed slot writes one merged statement: approve without fields, "
+                                  "then edit the merged memory")
+        instance = self._validate(row["type"], {**row["payload"], **fields}, row["schema_version"])
+        payload = instance.model_dump(mode="json")
+        if payload == row["payload"]:
+            return None
+        cfg = self.settings.types.get(row["type"])
+        if cfg is not None and cfg.keyed and _slot_text(payload.get("key")) != _slot_text(row["payload"].get("key")):
+            raise ValidationError("the key cannot change on review: reject and propose again")
+        self._guard_embedding_config(uow)
+        return {"content": instance.content, "payload": payload,
+                "entities": [e.model_dump() for e in instance.entities], "embedding": self._embed(instance.content)}
+
+    def approve(self, actor: Actor, id: uuid.UUID, *, fields: dict[str, Any] | None = None,
+                resolve: str | None = None, note: str | None = None) -> Row:
+        """Make a candidate active. With `fields` that change it, the reviewer's corrections are checked like any
+        write; the candidate is kept as `archived` (`edited on review`) and the corrected text becomes the next
+        version, in the same transaction."""
         with self.store.unit_of_work() as uow:
             merged = None
             row = uow.memories.get_by_id(id)
-            if resolve == "keep_both" and row is not None and row["conflicts_with"] is not None \
+            if row is None:
+                raise NotFound(f"no row {id}")
+            self._authorize_review(actor, row)
+            edit = self._review_edit(uow, row, fields, resolve) if fields else None
+            if resolve == "keep_both" and row["conflicts_with"] is not None \
                     and row["payload"].get("key") is not None:
                 old = uow.memories.get_active(row["conflicts_with"])
                 if old is not None:  # one slot, one row: keeping both values means one statement holding both
                     content = f"{old['content']}; {row['content']}"
                     merged = {"content": content, "payload": {**old["payload"], "content": content},
                               "embedding": self._embed(content)}
-            return uow.memories.approve(id, reviewed_by=actor.id, resolve=resolve, note=note, merged=merged)
+            return uow.memories.approve(id, reviewed_by=actor.id, resolve=resolve, note=note, merged=merged, edit=edit)
 
     def reject(self, actor: Actor, id: uuid.UUID, *, note: str | None = None) -> Row:
-        if not any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
-            raise PermissionDenied("actor lacks an approving role")
         with self.store.unit_of_work() as uow:
+            row = uow.memories.get_by_id(id)
+            if row is None:
+                raise NotFound(f"no row {id}")
+            self._authorize_review(actor, row)
             return uow.memories.reject(id, reviewed_by=actor.id, note=note)
 
     def promote(

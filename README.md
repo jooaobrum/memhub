@@ -47,7 +47,7 @@ memhub ships no UI; building one is out of scope for this repo. It is designed t
 
 | In the UI | CLI | `MemoryService` |
 |---|---|---|
-| Review waiting proposals and conflicts | `memhub queue`, `memhub approve <id> [--resolve keep_old\|replace\|keep_both]`, `memhub reject <id>` | `queue()`, `approve()`, `reject()` |
+| Review waiting proposals and conflicts | `memhub queue`, `memhub approve <id> [--set KEY=VALUE] [--resolve keep_old\|replace\|keep_both]`, `memhub reject <id>` | `queue()`, `approve(fields=)`, `reject()` |
 | A user's memories | `memhub list --user <user>` | `list()` |
 | Confirm | `memhub edit <memory_id> -f empty.json` (a file containing `{}`) | `edit(fields={})` |
 | Edit | `memhub edit <memory_id> -f fields.json` | `edit()` |
@@ -241,6 +241,13 @@ memhub approve <id> --note "checked with the official website" -c $C
 memhub reject <id> --note "personal detail, not general" -c $C
 ```
 
+**Fix a proposal while approving it.** A candidate that is almost right is corrected and approved in one step. The proposal stays in history (`archived`, "edited on review") and the corrected text becomes the next version, with the same evidence. A value that parses as JSON is used as JSON (`count=3`), anything else as text:
+
+```bash
+memhub approve <id> --set content="Lives in Lyon since 2025" -c $C
+memhub history <memory_id> -c $C                     # the proposal, then the approved text
+```
+
 **Correct what the AI extracted.** Only the fields you pass change. The new version is marked verified, and later ingests never overwrite it:
 
 ```bash
@@ -265,7 +272,7 @@ memhub delete --user demo-ana -c $C                  # permanent erasure of ever
 memhub runs -c $C                                    # proposed / created / merged / conflicts, and dropped_by_reason
 ```
 
-Approving and rejecting need a role from `roles.approve_workspace` (default `workspace_admin`). The CLI acts as `cli:<your OS user>` with the roles in `MEMHUB_CLI_ROLES`.
+Approving and rejecting need a role from `roles.approve_workspace` (default `workspace_admin`); the owner of a user-scope candidate may also approve or reject it. The CLI acts as `cli:<your OS user>` with the roles in `MEMHUB_CLI_ROLES`.
 
 ## Documentation
 

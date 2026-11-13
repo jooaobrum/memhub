@@ -236,12 +236,16 @@ Notes:
 | Item | Behaviour | Action |
 |---|---|---|
 | User-scope memory | Active immediately, `verified=false` | `edit` (marks verified), `archive`, `delete` |
-| Workspace-scope memory, or any conflict | `candidate`, invisible to search | `queue` → `approve [--resolve keep_old\|replace\|keep_both]` / `reject` |
+| Workspace-scope memory, or any conflict | `candidate`, invisible to search | `queue` → `approve [--set KEY=VALUE] [--resolve keep_old\|replace\|keep_both]` / `reject` |
 | Wrong area layout | – | `areas`, `areas merge <from> <to>` |
 | Something needs adding by hand | – | `add --type fact --scope user --user <id> --file x.json` (fields validated against the type) |
 | Erasure request | – | `delete --user <id>` |
 
 Once a person edits or approves a row it is `verified`, and the extractor will never overwrite it: contradictions arrive as conflict candidates.
+
+`approve --set KEY=VALUE` (`approve(id, fields={...})` in code) corrects a candidate and approves it in one transaction. The fields are checked like any write; the proposal stays in history as `archived` with `review_note` "edited on review", and the corrected text is the next version, active and verified, with the proposal's evidence, `run_id` and `agent_id`. The key of a keyed type cannot change on review (reject and propose again). With a conflict, `--set` goes with `--resolve replace` or with `keep_both` on a type without keys; `keep_old` and a keyed `keep_both` take no `--set`.
+
+Who may review: a role in `roles.approve_workspace` for any candidate, and the owner for a user-scope candidate.
 
 CLI identity: `cli:<os user>`; roles from `MEMHUB_CLI_ROLES` (default `workspace_admin`).
 
