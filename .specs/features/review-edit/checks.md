@@ -155,7 +155,8 @@ Proof: `.venv/bin/python -m pytest tests/test_review_propose.py -k "langchain_pi
 ## Handoff
 
 - **Settled mid-build:** none
-- **Dispatched:** none
-- **Boundary:** none yet
-- **Abandoned:** none
+- **Dispatched:** Verifier (independent sub-agent) at `15b12ca`, proofs.md green there
+- **Boundary:** C1-C17 closed at `ba4b8f7` (S1, branch `feat/review-edit-approve`); C18-C33 closed at `15b12ca` (S2, branch `feat/review-edit-propose`, stacked on S1); both rebased on `origin/main` `7888456`
+- **Abandoned:** a review option on `MemoryMiddleware` (`review="inline"`, `hitl()`): the user moved the flow to `examples/` (AD-045, AD-046) before the build. In the example, subclassing `HumanInTheLoopMiddleware` to ask again was dropped for a public `langgraph.types.interrupt` inside the tool, so nothing depends on HITL's private methods
+- **Pre-existing:** `test_config.py::test_habitantes_config_has_profile_and_preference_slots_episode_capped_and_no_plan` and `test_terms.py::test_habitantes_config_enables_terms_and_only_terms_are_workspace_scope` fail on `838cb42` too (`ConfigError` loading the Habitantes example), untouched here
 - **Worktree:** built in a separate git worktree on branch `feat/review-edit-approve` (S1) then `feat/review-edit-propose` (S2), because another session (memhub-89) has uncommitted edits in the main checkout; proofs run with `PYTHONPATH=src`
