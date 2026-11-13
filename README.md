@@ -4,7 +4,7 @@
 
 Agents forget between conversations, and memory tools that write on their own can store things that are not true. memhub keeps a small, trustworthy memory: every item is backed by a real quote, dated, versioned, and approved by a person when it is shared.
 
-It is a library plus CLI (no daemon, no HTTP API) on top of a single Postgres + pgvector database. An ingest pipeline turns conversation traces (JSONL or MLflow) into evidence-backed memories.
+It is a library plus CLI (no daemon, no HTTP API) on top of one database: Postgres + pgvector, or a single SQLite file. An ingest pipeline turns conversation traces (JSONL or MLflow) into evidence-backed memories.
 
 ## Why
 
@@ -58,7 +58,7 @@ memhub ships no UI; building one is out of scope for this repo. It is designed t
 
 ## Install
 
-Requires Python 3.11+ and Docker (for Postgres with pgvector).
+Requires Python 3.11+. The quickstart below runs Postgres with pgvector in Docker; for one local file and no Docker, pass `--db sqlite:///...` instead ([docs/sqlite.md](docs/sqlite.md), [guide](docs/guides/01-quickstart.md)).
 
 ```bash
 git clone https://github.com/jooaobrum/memhub.git
@@ -72,6 +72,8 @@ Extras pick your LLM provider and sources; combine them as needed (`".[openai,ml
 |---|---|
 | `openai`, `anthropic`, `google`, `bedrock`, `ollama`, `mistral` | the LangChain integration for that provider |
 | `mlflow` | MLflow traces as an ingest source |
+| `sqlite` | `sqlite-vec`: vector search in SQL on the SQLite backend (SQLite itself needs no extra) |
+| `mcp` | the MCP server behind `memhub mcp` (Claude Code) |
 | `dev` | pytest, for running the tests |
 
 ## Quickstart
@@ -84,7 +86,7 @@ memhub init --project acme \
   --embeddings openai:text-embedding-3-small                   # writes memhub.yaml and memory.md, checks the model, creates the tables
 $EDITOR memory.md                                              # what this memory keeps: its types, areas and rules
 echo '{"content": "Compressor C3 trips when the inlet filter is clogged"}' > fact.json
-memhub add --type fact --ws acme --user anna -f fact.json
+memhub add --type fact --scope user --ws acme --user anna -f fact.json
 memhub search "inlet filter" --ws acme --user anna             # no -c: memhub.yaml is found by itself
 memhub doctor                                                  # db, models, embedding dims, tables
 ```
@@ -143,7 +145,7 @@ defaults to `run_id`).
 
 `memhub.yaml` is only memhub's own behaviour, a few lines. It is looked up in `./memhub.yaml`, `$MEMHUB_CONFIG`, then `~/.config/memhub/memhub.yaml`; `MEMHUB_*` environment variables (`MEMHUB_DB`, `MEMHUB_MEMORY`, nested keys with `__`) and `Memory(config=, overrides=)` override it. Its `memory: ./memory.md` line names the memory file, relative to the yaml. `memhub config show` prints every setting with where it came from (`memory.md` for what the memory file sets), `memhub config set KEY VALUE` edits it, and `memhub use acme --user anna` sets the workspace and user for the next commands. With no memory file and no `types:` at all, memhub keeps `fact`, `preference` and `profile`. To reuse your app's own pool and models, point `connect: "your_app.memory:build"` at a function returning `{"db": ..., "embedder": ..., "llm": ...}`.
 
-Run the tests with `pip install -e ".[dev]"` and `pytest` (needs Docker; the pgvector container is started by the fixtures).
+Run the tests with `pip install -e ".[dev]"` and `pytest`. The Postgres tests start a pgvector container through the fixtures and are skipped without Docker; the SQLite tests run anywhere.
 
 ## Use it in an existing project
 
@@ -155,7 +157,7 @@ uv pip install "memhub[openai] @ git+https://github.com/jooaobrum/memhub.git"   
 
 Always install from git: `pip install memhub` (no git URL) installs an unrelated PyPI project with the same name.
 
-To pin it in `pyproject.toml`, use `memhub[openai] @ git+https://github.com/jooaobrum/memhub.git@main`. If you use the LangChain middleware, also pin `langchain>=1.0` (memhub declares `>=0.3`, the middleware needs 1.x).
+To pin it in `pyproject.toml`, use `memhub[openai] @ git+https://github.com/jooaobrum/memhub.git@main`. memhub requires `langchain>=1.0`, which the middleware needs.
 
 Then add to your repo:
 
@@ -163,17 +165,17 @@ Then add to your repo:
 <your repo>/
   memhub.yaml                 # database, models, source mapping (start from memhub.example.yaml)
   memory.md                   # what the memory keeps: types, areas, and the rules in plain words
-  <app>/memory/service.py     # builds MemoryService once; the only file that imports memhub
+  <app>/memory/service.py     # builds Memory once; the only file that imports memhub
   scripts/ingest_memory.py    # optional: entrypoint for a scheduled ingest job
 ```
 
 ```bash
-docker compose up -d                                        # or point database_url at your own Postgres with pgvector
+docker compose up -d                                        # or point database_url at your own Postgres with pgvector, or at sqlite:///file.db
 memhub init -c memhub.yaml
 memhub ingest --source jsonl --dry-run -c memhub.yaml       # `preview` lists what would be written and what dropped
 ```
 
-Connect your agent in steps: **A** offline extraction only, **B** your agent calls `service.search(...)`, **C** `MemoryMiddleware` on a LangChain agent (see [chatbot.py](examples/habitantes/chatbot.py)). Start at A. Details, including a separate schema in an existing Postgres and multi-agent setups, are in [docs/integration.md](docs/integration.md).
+Connect your agent in steps: **A** offline extraction only, **B** your agent calls `Memory.search(...)`, **C** `MemoryMiddleware` on a LangChain agent (see [chatbot.py](examples/habitantes/chatbot.py)). Start at A. Details, including a separate schema in an existing Postgres and multi-agent setups, are in [docs/integration.md](docs/integration.md).
 
 ## CLI
 
@@ -181,9 +183,10 @@ Connect your agent in steps: **A** offline extraction only, **B** your agent cal
 |---|---|
 | Setup | `init`, `config show`, `config set`, `doctor`, `use`, `reembed`, `migrate` |
 | Ingest | `ingest`, `add`, `runs` |
-| Browse | `list`, `search`, `history`, `page` |
+| Browse | `list`, `search`, `history`, `page`, `areas` |
 | Review | `queue`, `approve`, `reject`, `edit`, `promote` |
 | Lifecycle | `archive`, `delete` |
+| Agents | `mcp` |
 
 Run `memhub <command> --help` for options.
 
@@ -268,7 +271,9 @@ Approving and rejecting need a role from `roles.approve_workspace` (default `wor
 
 - [Guides](docs/guides/README.md): quickstart, Claude Code, your own agent, chat logs, field service, your own domain
 - [Architecture](docs/architecture.md): diagrams and system overview
+- [memory.md](docs/memory.md): the file that says what is remembered; [memory-setup.md](docs/memory-setup.md): a prompt that writes it with you
 - [Integration](docs/integration.md): adoption steps
+- [Azure](docs/azure.md): Azure OpenAI with an API key, a token or Entra ID
 - [Subjects](docs/subjects.md): memories about one machine, customer or patient never merge; filter and widen search by subject
 - [Claude Code](docs/claude-code.md): `memhub ingest --source claude_code` and `claude mcp add memhub -- memhub mcp`
 - [SQLite](docs/sqlite.md): one local file, no Docker; `memhub[sqlite]` for vector search in SQL

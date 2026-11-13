@@ -19,11 +19,13 @@ For a non-technical audience (management, slides, posts). Agents forget between 
 | 👤 | **Human in the loop** | Shared knowledge and contradictions wait for approval; a person's edit is never overwritten by the AI |
 | 🎯 | **Small on purpose** | Caps, one value per attribute and strict filters keep memory short and useful, not a dump of everything said |
 
-Works with any agent framework, any LLM provider, and a single Postgres database.
+Works with any agent framework, any LLM provider, and a single database (Postgres, or a SQLite file).
 
 ## 1. Context
 
-memhub sits between an agent's conversation logs and the agent's prompt. It is a library plus CLI, not a service: there is no daemon and no HTTP API. Postgres is the only stateful component.
+memhub sits between an agent's conversation logs and the agent's prompt. It is a library plus CLI, not a service: there is no daemon and no HTTP API. The ledger database is the only stateful component: Postgres + pgvector, or one SQLite file ([sqlite.md](sqlite.md)); the diagrams below show Postgres.
+
+Since these diagrams were drawn, memhub gained more ways in, all on top of the same `MemoryService` and pipeline: the `Memory` facade (`memory.py`: `add`, `search`, `scope`, push ingestion with `add(messages, infer=True)`), `MemoryToolkit` for any framework, the MCP server (`memhub mcp`, [claude-code.md](claude-code.md)), the `claude_code` and `sql` sources, `memory.md` for what is remembered ([memory.md](memory.md)), and subjects ([subjects.md](subjects.md)).
 
 ```mermaid
 flowchart LR
@@ -110,7 +112,7 @@ flowchart TB
 
 Layering rules:
 
-- `store.py` is the only module that writes SQL. Every method takes an open cursor, so callers group writes into one transaction.
+- `storage/` is the only package that writes SQL: `postgres.py` and `sqlite.py` implement the same ports (`base.py`) and pass the same contract tests; `store.py` re-exports the Postgres `MemoryStore` for older imports. Every method takes an open cursor, so callers group writes into one transaction.
 - The ingest pipeline talks to `MemoryStore` directly (it needs several writes per segment in one transaction). Everything else goes through `MemoryService`, which adds authorization, validation, injection scan and embedding.
 - `config.py` builds LangChain chat and embedding objects; no provider SDK is imported anywhere else.
 
@@ -343,7 +345,7 @@ flowchart LR
 
 | Decision | Alternative | Why |
 |---|---|---|
-| Postgres + pgvector, two data tables + meta | Vector DB + graph DB | One dependency; transactions across memory and watermark; SQL filters on time, scope, status |
+| One SQL ledger (Postgres + pgvector, or SQLite), two data tables + meta | Vector DB + graph DB | One dependency; transactions across memory and watermark; SQL filters on time, scope, status |
 | Version rows, not in-place update | Mutable rows + event log | History and `observed_at` semantics for free; only the newest active row is queried |
 | Stale computed, not stored | Expiry job | No background process; time-travel tests just pass `now` |
 | Relations as a `links` column | Edge table | Only one hop (`in_area`) is needed; GIN answers "what is in this area" |

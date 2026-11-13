@@ -30,10 +30,10 @@ Design principle (v1.2): **less is more**. A small ledger where every row has a 
 
 ## 3. System overview
 
-Two loops share one Postgres ledger:
+Two loops share one ledger (Postgres + pgvector, or a SQLite file: [sqlite.md](sqlite.md)):
 
 - **Write path (batch):** `source → segment → prefilter → extract → ground → score → reconcile → route`, then one area-summary pass per run. Driven by `memhub ingest` or `ingest_source()`.
-- **Read path (online):** `MemoryService.search / page / list` and `MemoryMiddleware` for LangChain agents.
+- **Read path (online):** `MemoryService.search / page / list`, reached through the `Memory` facade, `MemoryToolkit`, the MCP server (`memhub mcp`) or `MemoryMiddleware` for LangChain agents.
 - **Review path (human):** CLI (`queue`, `approve`, `reject`, `edit`, `archive`, `delete`, `add`, `areas`).
 
 See [architecture.md](architecture.md) for the diagrams.
@@ -255,10 +255,10 @@ A reference file is `memhub.example.yaml`. Provider switch is config-only; the p
 ## 9. Interfaces
 
 ### 9.1 CLI
-`init · reembed · ingest --source <n> [--reprocess] [--dry-run] [--thread <id>] · add · list · search · queue · approve · reject · edit · history · archive · delete [<id> | --user] · promote · areas [merge <from> <to>] · page · runs`. Global option `--config/-c` (default `./memhub.yaml`). Output is JSON on stdout (`page` prints text); diagnostics go to stderr.
+`init · config show|set · doctor · use · migrate · mcp · reembed · ingest --source <n> [--reprocess] [--dry-run] [--thread <id>] · add · list · search · queue · approve · reject · edit · history · archive · delete [<id> | --user] · promote · areas [merge <from> <to>] · page · runs`. Global option `--config/-c` (default `./memhub.yaml`). Output is JSON on stdout (`page` prints text); diagnostics go to stderr.
 
 ### 9.2 Python API
-`MemoryService` (see [integration.md](integration.md)): `add, edit, archive, delete, delete_user, approve, reject, promote, list, search, expansion, areas, merge_areas, page, page_for_query, pages, queue, runs, history, propose, reembed, purge_dropped`. Errors: `ServiceError` → `PermissionDenied | ValidationError | InjectionDetected`, plus `NotFound`/`StoreError`.
+`Memory` (`from memhub import Memory`) is the entry point: `init, migrate, scope, add, update, delete, delete_all, approve, reject, promote, queue, search, get, get_all, history, middleware, tools, ingest`. It wraps `MemoryService` (see [integration.md](integration.md)): `add, edit, archive, delete, delete_user, approve, reject, promote, list, search, expansion, areas, merge_areas, page, page_for_query, pages, queue, runs, history, propose, reembed, purge_dropped`. Errors: `ServiceError` → `PermissionDenied | ValidationError | InjectionDetected`, plus `NotFound`/`StoreError`.
 
 ### 9.3 Source adapters
 Protocol in `sources/base.py`: `read() -> Iterator[Interaction]`, optional `signals() -> list[dict]`, optional `skipped: int`. `Interaction(thread_id, user_id, workspace_id, message_id, role, content, timestamp, trace_id, metadata)`. Built in: field-mapped JSONL (+ feedback file joined on `message_id`/`thread_id`) and MLflow traces (one trace = one user + one assistant message; `message_id = trace_id`, assistant `trace_id:a`).
@@ -273,7 +273,7 @@ Protocol in `sources/base.py`: `read() -> Iterator[Interaction]`, optional `sign
 
 ## 11. Testing
 
-`tests/` (pytest). Ledger tests start a `pgvector/pgvector:pg16` container through fixtures (Docker required; skipped otherwise). LLM and embeddings are fakes (`tests/fakes.py`), so tests are deterministic. Coverage areas: config, types, store lifecycle, JSONL/MLflow sources, pipeline units, end-to-end ingest, upsert scenarios over time (18→19, out-of-order, verified rows, stale rows, immutable keys, `extends`, re-ingest) with ledger invariants checked after every step, seeded randomised sequences, terms, areas, service, middleware, CLI. Time-dependent code takes `now` as a parameter.
+`tests/` (pytest). Postgres ledger tests start a `pgvector/pgvector:pg16` container through fixtures (Docker required; skipped otherwise); the SQLite backend runs the same contract suite with no Docker. LLM and embeddings are fakes (`tests/fakes.py`), so tests are deterministic. Coverage areas: config, types, store lifecycle, JSONL/MLflow sources, pipeline units, end-to-end ingest, upsert scenarios over time (18→19, out-of-order, verified rows, stale rows, immutable keys, `extends`, re-ingest) with ledger invariants checked after every step, seeded randomised sequences, terms, areas, service, middleware, CLI. Time-dependent code takes `now` as a parameter.
 
 `pilot/` holds manual real-LLM runs on the Habitantes logs and `functional_check.py` (PASS/FAIL of every command). Pilot quality targets: extraction precision ≥ 0.8 on a labelled sample, zero rows without a quote, ≤ 2–3 active memories per user on average.
 

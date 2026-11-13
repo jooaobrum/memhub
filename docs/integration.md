@@ -6,8 +6,8 @@ How to adopt memhub in a project. For behaviour see [tdd.md](tdd.md); for struct
 
 | Level | What you get | You provide | Effort |
 |---|---|---|---|
-| **A. Offline extraction + CLI** | Reviewed memories from your logs; inspect with `list/search/page` | Postgres, `memhub.yaml`, logs (JSONL or MLflow) | ~1 hour |
-| **B. Read API in your agent** | Memories in your prompts, any framework | A: plus `MemoryService` calls | ~½ day |
+| **A. Offline extraction + CLI** | Reviewed memories from your logs; inspect with `list/search/page` | Postgres or a SQLite file, `memhub.yaml`, logs (JSONL or MLflow) | ~1 hour |
+| **B. Read API in your agent** | Memories in your prompts, any framework | A: plus `Memory` calls | ~½ day |
 | **C. LangChain middleware** | Auto-injection per turn, tools, trace ids | B: plus `create_agent(middleware=[...])` | ~1 hour on top of B |
 | **D. Custom source or types** | Non-standard trace formats, domain memory types | Adapter class / type classes | Varies |
 
@@ -16,9 +16,9 @@ Start at A: it needs no change to the agent and shows what would be extracted be
 ## 2. Prerequisites
 
 - Python ≥ 3.11.
-- Postgres with the `pgvector` extension (tested on `pgvector/pgvector:pg16`). Local: `docker compose up -d` (image `pgvector/pgvector:pg16`, port 5433, user/password/db `memhub`).
+- A database: a SQLite file (`sqlite:///...`, no server; see [sqlite.md](sqlite.md)), or Postgres with the `pgvector` extension (tested on `pgvector/pgvector:pg16`). Local: `docker compose up -d` (image `pgvector/pgvector:pg16`, port 5433, user/password/db `memhub`).
 - A chat model **with structured output** for `extractor` and `judge` (they may be different models), and an embedding model. Anthropic has no embedding model; pair it with OpenAI, Voyage or a local model.
-- The role that runs `memhub init` must be allowed `CREATE EXTENSION vector` and create tables.
+- On Postgres, the role that runs `memhub init` must be allowed `CREATE EXTENSION vector` and create tables.
 
 ### 2.1 Install memhub as a package
 
@@ -30,9 +30,9 @@ Install memhub as a dependency; do not copy its source into your project (you wo
 | Private index or wheel | `uv build` in the memhub repo (hatchling is configured), publish the wheel to your index or artifact store, then `pip install memhub==0.1.0` | Several projects or CI consume it |
 | Editable path | `uv pip install -e ../memhub` | Local development on both projects at once |
 
-Extras: `memhub[openai]`, `memhub[anthropic]`, `memhub[mlflow]`; install the ones matching your models and sources. The install also provides the `memhub` CLI.
+Extras: a provider (`openai`, `anthropic`, `google`, `bedrock`, `ollama`, `mistral`), `mlflow` (trace source), `sqlite` (vector search in SQL on SQLite) and `mcp` (the `memhub mcp` server); install the ones matching your models and sources. The install also provides the `memhub` CLI.
 
-Tag releases and pin them. memhub has no migration tool, so you decide when to upgrade and re-run `memhub init` (idempotent).
+Tag releases and pin them, so you decide when to upgrade. When a new version needs a newer ledger schema, every call refuses the old one until you run `memhub migrate` (see [8. Operations](#8-operations)).
 
 ### 2.2 What lives in your project
 
@@ -43,7 +43,7 @@ Everything except the adapter stays inside memhub. Your project owns only:
   memhub.yaml                  # database, models, source mapping
   memory.md                    # what is remembered: types, areas, and the extraction instructions as its body
   <app package>/memory/
-    service.py                 # builds MemoryService once (the only place that imports memhub)
+    service.py                 # builds Memory once (the only place that imports memhub)
     logging.py                 # writes turn logs, only if you have none
     types.py                   # custom memory types, only if you add any
     sources.py                 # custom source adapter, only if you add one
@@ -58,13 +58,13 @@ Two rules keep the coupling low:
 Multi-agent projects (a main agent plus specialist agents):
 
 - Agents with their own model loop: give each the middleware. They share a user's memory automatically, since memories are keyed by `(workspace_id, user_id)`.
-- Sub-agents invoked as tools: don't attach the middleware. Pass the relevant memory text in their input, or call `service.search(...)` from the tool.
+- Sub-agents invoked as tools: don't attach the middleware. Pass the relevant memory text in their input, or call `memory.search(...)` from the tool.
 - Agents never write memories directly. `propose_memory` creates candidates only.
 - Separate memory per agent needs a distinct `workspace_id` per agent on the read side. Ingest tags all interactions with `workspace_default`, so separate workspaces also need separate sources and runs. Start with one shared workspace.
 
 Install and configure first (2.1, `memhub init`), then log turns and ingest with `--dry-run` (level A) before attaching anything to an agent.
 
-Middleware (level C) needs LangChain 1.x (`langchain.agents.middleware`, `ToolRuntime`). `pyproject.toml` still declares `langchain>=0.3`; pin `langchain>=1.0` in your project.
+Middleware (level C) needs LangChain 1.x (`langchain.agents.middleware`, `ToolRuntime`); memhub requires `langchain>=1.0`, so installing it is enough.
 
 ### 2.3 Azure OpenAI (API key, token, or Entra ID)
 
@@ -247,7 +247,18 @@ CLI identity: `cli:<os user>`; roles from `MEMHUB_CLI_ROLES` (default `workspace
 
 ## 4. Level B: read memories from any agent
 
-Build a `MemoryService` once. This is what `cli.py` does; there is no factory function to import, so copy it:
+Build a `Memory` once and call it per turn. It reads `memhub.yaml` and `MEMHUB_*`, and works on Postgres and SQLite:
+
+```python
+from memhub import Memory
+
+memory = Memory()                                # or Memory(db=..., llm=..., embedder=..., config={...})
+me = memory.scope(workspace_id="acme", user_id=user_id, run_id=trace_id)   # no roles: read + propose only
+rows = me.search(user_message, top_k=5)
+```
+
+`Memory` wraps `MemoryService`, the lower-level API that also has `page_for_query` and `list`. To use it directly on
+Postgres, build it as below (on SQLite, take it from `Memory`):
 
 ```python
 from memhub.config import load_config, build_embeddings
@@ -450,7 +461,7 @@ When memories are **about** a subject (one machine, customer, patient or repo), 
 
 ## 9. Integration checklist
 
-- [ ] Postgres with pgvector reachable; `memhub init` ran; embedding model and dims final.
+- [ ] Postgres with pgvector (or the SQLite file) reachable; `memhub init` ran; embedding model and dims final.
 - [ ] Logs have unique `message_id`, true event timestamps, one `thread_id` per conversation, and an authenticated `user_id`.
 - [ ] `extraction.instructions` written for the domain; types, keys, and area seeds chosen.
 - [ ] `--dry-run` reviewed: `memhub runs` drop reasons make sense; sample of 50 memories judged for precision and quote support.

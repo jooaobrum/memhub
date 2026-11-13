@@ -1,6 +1,6 @@
 # memhub on SQLite
 
-memhub runs on one local file, with nothing to install beyond `pip install memhub`: no Docker, no Postgres.
+memhub runs on one local file, with nothing to install beyond memhub itself: no Docker, no Postgres.
 The tables, the review flow and the search rules are the ones Postgres has; the same contract test suite runs
 on both.
 
