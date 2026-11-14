@@ -173,6 +173,6 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py tests/test_cont
 ## Handoff
 
 - **Settled mid-build:** guard rule under OR (Verifier finding 3) - user chose "Only the named subject (Recommended)" -> AD-052, C37
-- **Dispatched:** Verifier at `9e44ebf` (proofs green, 39/39) - pending; no screens sub-agent (no capture binds)
+- **Dispatched:** Verifier at `af1c687` (proofs green, 39/39) - returned, FAIL, 4 findings closed in `b249fce`, `49a9242`; no screens sub-agent (no capture binds)
 - **Boundary:** C1-C36 closed at `9e44ebf`
 - **Abandoned:** none
