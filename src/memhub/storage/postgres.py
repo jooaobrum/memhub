@@ -457,11 +457,13 @@ class MemoryStore:
             version=new_version, links=links, run_id=run_id, agent_id=agent_id, **times,
         )
 
-    def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
-        """Rewrite a pending candidate in place (its evidence is merged separately)."""
+    def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None,
+                  entities: list[dict] | None = None) -> None:
+        """Rewrite a pending candidate in place (its evidence is merged separately); `entities` too when given."""
         cur.execute(
-            f"UPDATE {self._t('memory')} SET content=%s, payload=%s, embedding=%s WHERE id=%s AND status='candidate'",
-            (content, Jsonb(payload), embedding, id),
+            f"UPDATE {self._t('memory')} SET content=%s, payload=%s, embedding=%s, entities=COALESCE(%s, entities) "
+            f"WHERE id=%s AND status='candidate'",
+            (content, Jsonb(payload), embedding, None if entities is None else Jsonb(entities), id),
         )
 
     def _supersede(self, cur: Cursor, row_id: uuid.UUID) -> int:

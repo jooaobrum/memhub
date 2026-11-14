@@ -247,6 +247,15 @@ Once a person edits or approves a row it is `verified`, and the extractor will n
 
 Who may review: a role in `roles.approve_workspace` for any candidate, and the owner for a user-scope candidate.
 
+**Review from the chat.** An app builds its own review flow on public calls:
+
+- `m.check_fields(type, fields)` checks fields as a write would, without saving (`{"content", "payload"}`, or the write's `ValidationError`).
+- `m.propose(type, fields, evidence=..., scope=...)` writes a candidate (`PENDING`). With `approve=True` the caller reviewed it: it is saved active and verified (`ADD`) when the caller may approve that scope, else it stays a candidate.
+- `m.propose(..., memory_id=<id>)` corrects a pending candidate of the caller in place instead of adding a second one.
+- A proposal close to one a reviewer rejected for the same owner (same type, similarity at or above `reconcile.duplicate`) is refused with `a reviewer already rejected this memory`, unless `user_requested=True`.
+
+The agent's `propose_memory` tool (`m.tools()`, `m.middleware()`, `memhub mcp`) takes the same `memory_id` and `user_requested`, never writes active, and returns `{"id", "event", "status", "content"}` or `{"rejected": reason}`. [examples/review_inline](../examples/review_inline) shows inline approve / edit / reject with LangChain's human-in-the-loop middleware on these calls.
+
 CLI identity: `cli:<os user>`; roles from `MEMHUB_CLI_ROLES` (default `workspace_admin`).
 
 ## 4. Level B: read memories from any agent

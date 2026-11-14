@@ -10,6 +10,7 @@ needs several writes in one transaction), not through this class.
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -62,6 +63,15 @@ class Expansion:
 
 def _occurs(name: str, text: str) -> bool:
     return bool(name.strip()) and re.search(rf"(?<!\w){re.escape(name.strip())}(?!\w)", text, re.I) is not None
+
+
+REJECTED_REPEAT = "a reviewer already rejected this memory"
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
 
 
 def _slot_text(key: Any) -> str | None:
@@ -613,24 +623,46 @@ class MemoryService:
         user_id: str | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        memory_id: uuid.UUID | None = None,
+        user_requested: bool = False,
+        approve: bool = False,
     ) -> Row:
-        """Like `add`, but always a `candidate` (never active), even for user scope."""
+        """Like `add`, but a `candidate` (never active), even for user scope.
+
+        - `memory_id`: correct that pending candidate in place (same owner and workspace) instead of adding one.
+        - A proposal close to a candidate a reviewer rejected (same type and owner, similarity at or above
+          `reconcile.duplicate`) is refused, unless `user_requested` (the user asked for it again).
+        - `approve=True`: the proposal was reviewed by `actor`; it is written active and verified when `actor` may
+          approve that scope (an approving role, or the owner of a user-scope memory), else as a candidate."""
         self._check_scope(scope)
         instance = self._validate(type, fields)
         if scope == "user" and not user_id:
             raise ValidationError("user_id is required for scope=user")
+        workspace_id = workspace_id or self.settings.workspace_default
+        owner = user_id if scope == "user" else None
         embedding = self._embed(instance.content)
+        payload = instance.model_dump(mode="json")
+        entities = [e.model_dump() for e in instance.entities]
         with self.store.unit_of_work() as uow:
             self._guard_embedding_config(uow)
-            return uow.memories.add_memory(
+            if not user_requested:  # a correction may not turn a draft into what a reviewer rejected either
+                self._refuse_rejected_repeat(uow, type=type, scope=scope, workspace_id=workspace_id, user_id=owner,
+                                             embedding=embedding)
+            if memory_id is not None:
+                pending = self._own_candidate(uow, memory_id, type=type, scope=scope, workspace_id=workspace_id,
+                                              user_id=owner)
+                uow.memories.amend_row(pending["id"], content=instance.content, payload=payload, embedding=embedding,
+                                       entities=entities)
+                return uow.memories.get_by_id(pending["id"])
+            row = uow.memories.add_memory(
                 type=type,
                 schema_version=self.registry.latest_version(type),
                 scope=scope,
-                workspace_id=workspace_id or self.settings.workspace_default,
-                user_id=user_id if scope == "user" else None,
+                workspace_id=workspace_id,
+                user_id=owner,
                 content=instance.content,
-                payload=instance.model_dump(mode="json"),
-                entities=[e.model_dump() for e in instance.entities],
+                payload=payload,
+                entities=entities,
                 embedding=embedding,
                 evidence=evidence,
                 status="candidate",
@@ -639,6 +671,52 @@ class MemoryService:
                 run_id=run_id,
                 agent_id=agent_id,
             )
+            if approve and self._may_review(actor, row) and not self._slot_taken(uow, row, instance):
+                return uow.memories.approve(row["id"], reviewed_by=actor.id)
+            return row
+
+    def _may_review(self, actor: Actor, row: Row) -> bool:
+        try:
+            self._authorize_review(actor, row)
+        except PermissionDenied:
+            return False
+        return True
+
+    def _slot_taken(self, uow: UnitOfWork, row: Row, instance: Any) -> bool:
+        """A keyed proposal whose slot already holds an active value waits in the queue: one slot, one value."""
+        if not self.settings.is_slot(row["type"], instance):
+            return False
+        key = _slot_text(instance.key)
+        return any(
+            _slot_text(r["payload"].get("key")) == key and r["scope"] == row["scope"] and r["user_id"] == row["user_id"]
+            for r in uow.memories.list_memories(status="active", type=row["type"], workspace_id=row["workspace_id"])
+        )
+
+    def _own_candidate(self, uow: UnitOfWork, memory_id: uuid.UUID, *, type: str, scope: str, workspace_id: str,
+                       user_id: str | None) -> Row:
+        """The pending candidate a correction targets: the same owner, workspace and type, still a candidate."""
+        rows = uow.memories.history(memory_id)
+        if not rows:
+            raise NotFound(f"no memory {memory_id}")
+        newest = rows[-1]
+        if newest["workspace_id"] != workspace_id or newest["scope"] != scope or newest["user_id"] != user_id:
+            raise PermissionDenied(f"memory {memory_id} belongs to another owner or workspace")
+        pending = [r for r in rows if r["status"] == "candidate"]
+        if not pending:
+            raise ValidationError(f"memory {memory_id} is not a pending candidate (it is {newest['status']})")
+        if pending[-1]["type"] != type:
+            raise ValidationError(f"memory {memory_id} is a {pending[-1]['type']}: a correction keeps the type")
+        return pending[-1]
+
+    def _refuse_rejected_repeat(self, uow: UnitOfWork, *, type: str, scope: str, workspace_id: str,
+                                user_id: str | None, embedding: list[float]) -> None:
+        """AD-043: what a reviewer rejected for this owner is not proposed again."""
+        for row in uow.memories.list_memories(status="rejected", type=type, workspace_id=workspace_id):
+            if row["scope"] != scope or row["user_id"] != user_id:
+                continue
+            # rounded so float noise (and pgvector's float4) cannot move a value that sits on the threshold
+            if round(_cosine(embedding, as_vector_list(row["embedding"]) or []), 6) >= self.settings.reconcile.duplicate:
+                raise ValidationError(REJECTED_REPEAT)
 
     # --- maintenance -------------------------------------------------------------
 

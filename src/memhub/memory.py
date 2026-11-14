@@ -407,6 +407,26 @@ class Memory:
         # every version after the first is made from an active one, so a first-version candidate was never active
         return _event(row, "ADD" if candidate["version"] == 1 else "UPDATE")
 
+    def propose(self, type: str, fields: dict[str, Any], *, evidence: list[dict[str, Any]] | None = None,
+                scope: str = "user", memory_id: Any = None, user_requested: bool = False, approve: bool = False,
+                workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
+                roles: list[str] | None = None) -> MemoryEvent:
+        """A proposed memory: a candidate waiting for review (`PENDING`), whatever the scope.
+
+        - `memory_id`: correct that pending candidate of the caller instead of adding a second one.
+        - A proposal close to one a reviewer rejected for the same owner is refused (`ValidationError`), unless
+          `user_requested=True`: the user asked for it again.
+        - `approve=True`: the caller reviewed it. It is saved active and verified (`ADD`) when the caller may approve
+          that scope (the owner for user scope, a role in `roles.approve_workspace` for workspace scope); otherwise
+          it is a candidate, as without `approve`."""
+        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        row = self.service.propose(
+            ctx.actor, type=type, scope=scope, fields=fields, evidence=list(evidence or []),
+            workspace_id=ctx.workspace_id, user_id=ctx.user_id, run_id=ctx.run_id, agent_id=ctx.agent_id,
+            memory_id=None if memory_id is None else _uuid(memory_id), user_requested=user_requested, approve=approve,
+        )
+        return _event(row, "ADD" if row["status"] == "active" else "PENDING")
+
     def check_fields(self, type: str, fields: dict[str, Any], *, workspace_id: Any = None, user_id: Any = None,
                      run_id: Any = None, agent_id: Any = None, roles: list[str] | None = None) -> dict[str, Any]:
         """Check `fields` as a `type` memory, as every write does, without saving: `{"content", "payload"}`.
@@ -536,7 +556,7 @@ class Memory:
 
 
 _SCOPED = ("add", "search", "get", "get_all", "update", "delete", "delete_all", "history", "queue", "approve",
-           "reject", "promote", "check_fields", "middleware", "tools", "ingest")
+           "reject", "promote", "propose", "check_fields", "middleware", "tools", "ingest")
 
 
 class ScopedMemory:

@@ -9,15 +9,35 @@ endpoint, an MCP wrapper) can use memhub without LangChain.
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any
 
-from memhub.service import Actor, MemoryService, ServiceError
+from memhub.service import Actor, MemoryService, NotFound, ServiceError
 
 
 def proposal_result(row: dict) -> dict[str, str]:
     """What a tool tells the model about a proposal: the stable memory id (not the version row id), the write
-    event and the status - the same vocabulary as `memhub.MemoryEvent`."""
-    return {"id": str(row["memory_id"]), "event": "PENDING", "status": row["status"]}
+    event, the status - the same vocabulary as `memhub.MemoryEvent` - and the content, so the model can tell its
+    drafts apart and correct one with `memory_id`."""
+    return {"id": str(row["memory_id"]), "event": "PENDING", "status": row["status"], "content": row["content"]}
+
+
+def proposal_id(memory_id: str | None) -> uuid.UUID | None:
+    """The `memory_id` a model passed to correct a draft; a malformed one is an unknown memory."""
+    if memory_id is None:
+        return None
+    try:
+        return uuid.UUID(str(memory_id))
+    except ValueError as exc:
+        raise NotFound(f"no memory {memory_id}") from exc
+
+
+PROPOSE_DESCRIPTION = ("Propose a new memory. It is saved as a candidate and needs review before it is used. "
+                       "To correct a draft you proposed, pass its id as memory_id.")
+PROPOSE_EXTRA_PARAMETERS = {
+    "memory_id": {"type": "string", "description": "the id of your own pending draft, to correct it instead of adding one"},
+    "user_requested": {"type": "boolean", "description": "true only when the user explicitly asks to save something a reviewer rejected before"},
+}
 
 
 def _view(row: dict) -> dict[str, Any]:
@@ -41,14 +61,16 @@ class MemoryToolkit:
         rows = self.service.search(self.actor, query, workspace_id=self.workspace_id, user_id=self.user_id, k=self.k, type=type)
         return [_view(r) for r in rows]
 
-    def propose_memory(self, type: str, fields: dict, evidence: list[dict] | None = None, scope: str = "user") -> dict[str, Any]:
+    def propose_memory(self, type: str, fields: dict, evidence: list[dict] | None = None, scope: str = "user",
+                       memory_id: str | None = None, user_requested: bool = False) -> dict[str, Any]:
         """Always a candidate: nothing an agent proposes is used until a person approves it."""
         try:
             row = self.service.propose(
                 self.actor, type=type, scope=scope, fields=fields, evidence=evidence or [],
                 workspace_id=self.workspace_id, user_id=self.user_id, run_id=self.run_id, agent_id=self.agent_id,
+                memory_id=proposal_id(memory_id), user_requested=user_requested,
             )
-        except ServiceError as exc:
+        except (ServiceError, NotFound) as exc:
             return {"rejected": str(exc)}
         return proposal_result(row)
 
@@ -61,10 +83,10 @@ class MemoryToolkit:
                     "query": {"type": "string"}, "type": {"type": "string", "enum": types, "description": "optional: only this kind"}},
                     "required": ["query"]}}},
             {"type": "function", "function": {
-                "name": "propose_memory", "description": "Propose a new memory. It is saved as a candidate and needs review before it is used.",
+                "name": "propose_memory", "description": PROPOSE_DESCRIPTION,
                 "parameters": {"type": "object", "properties": {
                     "type": {"type": "string", "enum": types}, "fields": {"type": "object", "description": "the type's fields"},
-                    "evidence": {"type": "array", "items": {"type": "object"}}, "scope": {"type": "string", "enum": self.service.settings.scopes}},
+                    "evidence": {"type": "array", "items": {"type": "object"}}, "scope": {"type": "string", "enum": self.service.settings.scopes}, **PROPOSE_EXTRA_PARAMETERS},
                     "required": ["type", "fields"]}}},
         ]
 
