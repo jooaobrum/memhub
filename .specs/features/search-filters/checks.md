@@ -167,6 +167,6 @@ Proof: `.venv/bin/python -m pytest -q`
 ## Handoff
 
 - **Settled mid-build:** none
-- **Dispatched:** none yet
-- **Boundary:** none yet
+- **Dispatched:** Verifier at `9e44ebf` (proofs green, 39/39) - pending; no screens sub-agent (no capture binds)
+- **Boundary:** C1-C36 closed at `9e44ebf`
 - **Abandoned:** none
