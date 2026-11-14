@@ -1,13 +1,13 @@
 # review-per-type proofs
 
-**HEAD**: 9da53e1
+**HEAD**: 461435e
 **Tree**: clean
-**Result**: 35 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 35 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
 | C1 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "default_rule_is_todays"` | 1 | 1 | pass |
-| C1 | `.venv/bin/python -m pytest tests -q -x` | 1035 | 1035 | pass |
+| C1 | `.venv/bin/python -m pytest tests -q -x` | 1036 | 1036 | pass |
 | C1 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "old_tests_unchanged"` | 1 | 1 | pass |
 | C2 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "needs_review_table"` | 18 | 18 | pass |
 | C3 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "type_true_user_scope_waits"` | 2 | 2 | pass |
@@ -36,8 +36,16 @@
 | C26 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "review_in_both_files"` | 1 | 1 | pass |
 | C27 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "builtin_mapping"` | 1 | 1 | pass |
 | C28 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "template_mapping"` | 1 | 1 | pass |
-| C29 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "mapping_schema_keys_clash"` | 5 | 5 | pass |
+| C29 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "mapping_schema_keys_clash"` | 6 | 6 | pass |
 | C30 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "config_show_prints_rule"` | 1 | 1 | pass |
 | C31 | `.venv/bin/python -m pytest tests/test_cli_setup.py -k "test_init_flags_writes_memory_file"` | 1 | 1 | pass |
 | C32 | `.venv/bin/python -m pytest tests/test_review_per_type.py -k "docs_state_the_rule"` | 1 | 1 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| C2: a type's review: false falls through to the project rule | `src/memhub/config.py:446` | yes |
+| C27: the built-in's own options win over those written beside builtin: true | `src/memhub/config.py:301` | yes |
+| C22: an active new version (supersede) is not marked reviewed_by auto | `src/memhub/pipeline/route.py:78` | yes |

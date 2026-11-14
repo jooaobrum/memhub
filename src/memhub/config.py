@@ -304,7 +304,7 @@ _SCHEMA_KEYS = ("builtin", "template", "fields", "class")
 
 def _mapped_type(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     """`{builtin: true, <options>}` is `builtin` with options, `{template: "...", <options>}` a template string with
-    options (AD-052); the options written beside it win. Any other mapping is the long form, unchanged."""
+    options (AD-056); the options written beside it win. Any other mapping is the long form, unchanged."""
     if "builtin" not in spec and "template" not in spec:
         return spec
     present = [k for k in _SCHEMA_KEYS if k in spec]
@@ -315,7 +315,7 @@ def _mapped_type(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     options = {k: v for k, v in spec.items() if k not in ("builtin", "template")}
     if "builtin" in spec:
         return {**_short_type(name, "builtin"), **options}
-    if not isinstance(spec["template"], str):
+    if not isinstance(spec["template"], str) or "{" not in spec["template"]:
         raise ValueError(f"{name}: `template` is a string with {{fields}}")
     return {**_short_type(name, spec["template"].strip()), **options}
 

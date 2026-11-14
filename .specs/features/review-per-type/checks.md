@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub`
 Plan: `.specs/features/review-per-type/plan.md`
 
-32 checks in 6 slices · 3 one-way doors · 0 open
+34 checks in 6 slices · 3 one-way doors · 0 open
 
 Run with `PYTHONPATH=src` exported, so the tests import this tree's `src`. `tests/test_review_per_type.py` runs on the in-memory backend (SQLite where a CLI needs a file) with fake models and no Docker; the Postgres contract leg needs Docker (the `pg_dsn` fixture).
 
@@ -69,8 +69,14 @@ Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "queue_filte
 **C17** - An actor with `workspace_admin` approving a user-scope candidate makes it `active` with `reviewed_by` = that actor, and the next `search` for its owner returns it; rejecting another makes it `rejected` with `reviewed_by` = that actor (AC 17)
 Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "approver_approves_user_candidate"`
 
-**C18** - The candidate's owner (role `user`) approving or rejecting their own user-scope candidate gets `PermissionDenied` from `Memory`, and exit 1 from `memhub approve`; the row stays `candidate` (AC 18)
+**C18** - The candidate's owner (role `user`) approving or rejecting their own user-scope candidate of a `review: true` type (`diagnosis`) gets `PermissionDenied` from `Memory`, and exit 1 from `memhub approve`; the row stays `candidate` (AC 18, AD-057)
 Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "owner_cannot_approve"`
+
+**C33** - The owner (no approving role) approves their own agent-proposed user-scope `fact` (default `review: workspace`) and it becomes `active` with `reviewed_by` = the owner; rejecting another gives `rejected`; under project `review: all` the same approve raises `PermissionDenied` (AC 34, AD-057)
+Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "owner_approves_when_type_needs_no_review"`
+
+**C34** - `propose(..., approve=True)` by the owner writes a `candidate` for a `diagnosis` (`review: true`) and an `active`, `verified` row for a `fact` under the default rule (AC 35, AD-057)
+Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "owner_propose_approve_follows_rule"`
 
 **C19** - Extracting the same statement again while its user-scope candidate is pending returns `MERGE`, adds the new evidence to that candidate, and leaves exactly one candidate (AC 19)
 Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "same_statement_merges_into_pending"`
@@ -144,11 +150,12 @@ Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "docs_state_
 | `review:` on a type statuses (2) | 200 C27 C28 · 422 C25 C29 | - |
 | `memhub queue` statuses (2) | 200 C15 C16 · 422 C25 | - |
 | `MemoryService.queue` statuses (2) | 200 C15 C16 · 404 C15 | - |
-| approve / reject statuses (2) | 200 C17 · 403 C18 | - |
+| approve / reject statuses (2) | 200 C17 C33 · 403 C18 C33 | - |
+| who may review a user-scope candidate (3) | approving role C17 · owner, type waits C18 C34 · owner, type does not wait C33 C34 | - |
 | `memhub config show` statuses (2) | 200 C30 · 422 C25 | - |
 | rows returned statuses (1) | 200 C22 | - |
 | Landing doors (3) | 1 `reviewed_by = "auto"` C21 C22 · 2 project rule C24 C25 C26 · 3 type override and short form C27 C28 C29 | - |
-| decisions (4) | AD-052 C27 C28 · AD-053 C17 C18 · AD-054 C11 · AD-055 C22 C23 | - |
+| decisions (5) | AD-056 C27 C28 · AD-053 C17 C18 · AD-054 C11 · AD-055 C22 C23 · AD-057 C18 C33 C34 | - |
 | docs readers (3) | `docs/memory.md` C32 · guide 01 C32 · `docs/memory-setup.md` C32 | - |
 
 ## Swept
@@ -165,7 +172,7 @@ Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "docs_state_
 
 ## Handoff
 
-- **Settled mid-build:** branch - user chose "Worktree off main (Recommended)": `feat/review-per-type` in its own worktree from `main`, search-filters untouched; baseline - asked "tests/fixtures/examples_resolved_base.json stores `\"review\": true` (the old default) on 11 types ... How should I handle it?", user chose "Update baseline + C1 (Recommended)": those 11 become `null`, and C1 allows that fixture to differ in the `review` key only
-- **Dispatched:** Verifier at `9da53e1` (diff `65233c5..9da53e1`); no screens sub-agent (no capture)
-- **Boundary:** C1-C32 closed at `9da53e1` (35 proof rows green)
+- **Settled mid-build:** branch - user chose "Worktree off main (Recommended)": `feat/review-per-type` in its own worktree from `main`, search-filters untouched; baseline - asked "tests/fixtures/examples_resolved_base.json stores `\"review\": true` (the old default) on 11 types ... How should I handle it?", user chose "Update baseline + C1 (Recommended)": those 11 become `null`, and C1 allows that fixture to differ in the `review` key only; owner review (after merging main) - asked "Main now lets a user approve their own user-scope candidates ... How should they combine?", user chose "Owner, unless review needed (Recommended)" (AD-057); main's broken middleware imports - user chose "Separate hotfix PR (Recommended)"
+- **Dispatched:** Verifier at `9da53e1` (diff `65233c5..9da53e1`), returned - FAIL, 3 findings; no screens sub-agent (no capture)
+- **Boundary:** C1-C32 closed at `9da53e1`; Verifier findings closed at `a97b7bd`; proofs and 3 mutations green at `f3ce5a8`
 - **Abandoned:** none

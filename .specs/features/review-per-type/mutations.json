@@ -1,0 +1,23 @@
+[
+  {
+    "file": "src/memhub/config.py",
+    "old": "        if own is not None:\n            return own\n        return self.review == \"all\"",
+    "new": "        if own:\n            return own\n        return self.review == \"all\"",
+    "proof": ".venv/bin/python -m pytest tests/test_review_per_type.py -k \"needs_review_table\"",
+    "label": "C2: a type's review: false falls through to the project rule"
+  },
+  {
+    "file": "src/memhub/config.py",
+    "old": "return {**_short_type(name, \"builtin\"), **options}",
+    "new": "return {**options, **_short_type(name, \"builtin\")}",
+    "proof": ".venv/bin/python -m pytest tests/test_review_per_type.py -k \"builtin_mapping\"",
+    "label": "C27: the built-in's own options win over those written beside builtin: true"
+  },
+  {
+    "file": "src/memhub/pipeline/route.py",
+    "old": "            reviewed_by=None if waits else AUTO,",
+    "new": "            reviewed_by=None,",
+    "proof": ".venv/bin/python -m pytest tests/test_review_per_type.py -k \"auto_mark_on_routed_active\"",
+    "label": "C22: an active new version (supersede) is not marked reviewed_by auto"
+  }
+]
