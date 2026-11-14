@@ -119,6 +119,6 @@ Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "bench_codes o
 ## Handoff
 
 - **Settled mid-build:** C19 reworded - asked "What should the middleware show?" - user chose "JSON tools only (Recommended)": toolkit and MCP results gain `matched_by`, the middleware's text stays as it is
-- **Dispatched:** none yet
+- **Dispatched:** Verifier at `2b99ba1` (proofs green, 23/23); no screens sub-agent (no capture binds)
 - **Boundary:** none yet
 - **Abandoned:** none
