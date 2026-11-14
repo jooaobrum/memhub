@@ -4,8 +4,13 @@ Nothing here imports psycopg, so the in-memory backend and the service layer loa
 """
 from __future__ import annotations
 
+import math
+import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
+from importlib.resources import files
 from typing import Any
 
 Row = dict[str, Any]
@@ -149,6 +154,87 @@ def apply_boosts(
                 row["similarity"] = min(1.0, row["similarity"] + boost)
         rows.sort(key=lambda r: r["similarity"], reverse=True)
     return rows[:k]
+
+
+
+# --- hybrid search (#26): the keyword leg and the fusion ---------------------------------------------------------
+
+STOPWORD_LANGUAGES = ("it", "fr", "en", "pt")
+RRF_K = 60  # reciprocal rank fusion's constant; the two weights tune the balance
+_TOKEN = re.compile(r"[^\W_]+(?:[-_/.][^\W_]+)*")  # letters and digits, joined inside a token by - _ / .
+
+
+def fold(text: str) -> str:
+    """Case and accents folded: `PRÉFÈRE` -> `prefere`. What both the query and the content are compared in."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+
+def tokens(text: str) -> list[str]:
+    """The folded tokens of `text`: split on whitespace, on an apostrophe and on punctuation, except `-`, `_`, `/`
+    and `.` between two letters or digits (`P-101`, `PRD_1`, `v2.3.1` stay whole; `(E47)` is `e47`)."""
+    return _TOKEN.findall(fold(text))
+
+
+@lru_cache(maxsize=1)
+def builtin_stopwords() -> frozenset[str]:
+    """The Snowball stopwords of Italian, French, English and Portuguese, folded (`memhub/stopwords/`)."""
+    words: set[str] = set()
+    for lang in STOPWORD_LANGUAGES:
+        text = files("memhub.stopwords").joinpath(f"{lang}.txt").read_text(encoding="utf-8")
+        words.update(fold(w.strip()) for w in text.splitlines() if w.strip())
+    return frozenset(words)
+
+
+def query_keywords(query: str, stopwords: list[str] | tuple[str, ...] = ()) -> list[str]:
+    """The query's keywords, in order and once each: its tokens minus those shorter than 2 characters, the built-in
+    stopwords and the project's own `stopwords` (folded like everything else)."""
+    drop = builtin_stopwords() | {fold(w.strip()) for w in stopwords}
+    return list(dict.fromkeys(t for t in tokens(query) if len(t) >= 2 and t not in drop))
+
+
+def keyword_rank(rows: list[Row], keywords: list[str], *, searchable: int, max_df: float,
+                 limit: int) -> tuple[list[Row], list[str]]:
+    """Keyword hits ranked, and the keywords kept. `rows` are the backend's substring candidates (`keyword_search`);
+    a hit holds a keyword as a whole token. A keyword held by more than `max_df` of the `searchable` rows is dropped.
+    A row scores the sum of `ln(1 + (N - df + 0.5) / (df + 0.5))` over the distinct kept keywords it holds; ties go
+    to the higher similarity. The first `limit` rows."""
+    if searchable <= 0:
+        return [], []
+    held = [(row, set(tokens(row["content"])) & set(keywords)) for row in rows]
+    df = {kw: sum(1 for _, found in held if kw in found) for kw in keywords}
+    kept = [kw for kw in keywords if df[kw] / searchable <= max_df]
+    idf = {kw: math.log(1 + (searchable - df[kw] + 0.5) / (df[kw] + 0.5)) for kw in kept}
+    scored = [(sum(idf[kw] for kw in found if kw in idf), row) for row, found in held]
+    scored = [(s, row) for s, row in scored if s > 0]
+    scored.sort(key=lambda sr: (-sr[0], -_sim(sr[1])))
+    return [row for _, row in scored[:limit]], kept
+
+
+def fuse(vector_rows: list[Row], keyword_rows: list[Row], *, vector_weight: float, keyword_weight: float,
+         k: int) -> list[Row]:
+    """Weighted reciprocal rank fusion: `vector_weight / (60 + rank_v) + keyword_weight / (60 + rank_k)`, a leg the
+    row is absent from adding 0; ties go to the higher similarity; a row scoring 0 is left out; the first `k`.
+    Each row says which leg found it in `matched_by` (`vector`, `keyword`, `both`) and carries its score in `_score`.
+    A row in both legs is the vector leg's (its similarity holds the boosts, as without fusion)."""
+    out: dict[Any, Row] = {}
+    for rank, row in enumerate(vector_rows, start=1):
+        out[row["memory_id"]] = {**row, "matched_by": "vector", "_score": vector_weight / (RRF_K + rank)}
+    for rank, row in enumerate(keyword_rows, start=1):
+        score = keyword_weight / (RRF_K + rank)
+        if row["memory_id"] in out:
+            hit = out[row["memory_id"]]
+            hit["matched_by"], hit["_score"] = "both", hit["_score"] + score
+        else:
+            out[row["memory_id"]] = {**row, "matched_by": "keyword", "_score": score}
+    fused = [r for r in out.values() if r["_score"] > 0]
+    fused.sort(key=lambda r: (-r["_score"], -_sim(r)))
+    return fused[:k]
+
+
+def _sim(row: Row) -> float:
+    s = row.get("similarity")
+    return -math.inf if s is None or s != s else s  # no embedding (None) or NaN sorts last
 
 
 @dataclass(frozen=True)

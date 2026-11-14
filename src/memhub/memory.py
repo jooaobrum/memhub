@@ -445,7 +445,7 @@ class Memory:
     def search(self, query: str, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
                agent_id: Any = None, roles: list[str] | None = None, top_k: int = 5,
                types: list[str] | None = None, filters: dict[str, Any] | None = None,
-               widen: bool = False) -> list[dict[str, Any]]:
+               widen: bool = False, hybrid: bool | None = None) -> list[dict[str, Any]]:
         """Your active user memories and the workspace's, nearest first, stale ones left out.
 
         `filters={"entities": [{"type", "id"}, ...]}` keeps the memories about one of those subjects, ranked in
@@ -453,11 +453,16 @@ class Memory:
         `filters={"entity_type": "machine"}` keeps the memories about any machine. `filters["types"]` is the
         `types` parameter. Ids take `in`, `prefix`, `contains`; `areas`, `observed_at`, `valid_until`, `content`,
         `AND`, `OR`, `NOT` narrow further (`docs/filters.md`). With an entity in the filter, each hit says what it
-        matched in `matched_on`."""
+        matched in `matched_on`.
+
+        `hybrid` overrides `search.hybrid` for this call (#26): a keyword leg next to the vector leg finds the
+        memories naming the query's codes, ids and rare words; each hit says which leg found it in `matched_by`."""
+        if hybrid is not None and not isinstance(hybrid, bool):
+            raise ValidationError(f"hybrid must be True, False or None, not {hybrid!r}")
         flt = self._filters(filters, types, widen)
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
         rows = self.service.search(ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k,
-                                   filter=flt, widen=widen)
+                                   filter=flt, widen=widen, hybrid=hybrid)
         return [_clean(r) for r in rows]
 
     def get(self, id: Any, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,

@@ -202,6 +202,7 @@ After the last segment (skipped on `--dry-run`): every area that gained or chang
 3. **Area boost:** the owner's area named by `area`, else the nearest area row by embedding. Rows linked to it get +0.05 similarity (capped at 1.0). Never a filter.
 4. SQL: `status='active'`, scope/owner visibility (`workspace` rows of the workspace + `user` rows of `user_id`), stale excluded unless `include_stale`, `type<>'area'` unless type given, order by cosine distance, `LIMIT max(4k, 20)`; re-rank with boosts (`related` words are a text boost); return top `k`.
 5. Each row carries `areas` (titles) and `expanded_by`.
+6. **Hybrid (#26, `search.hybrid`, default on):** per tier, `vectors.keyword_search` returns the rows the same WHERE allows whose folded `content` holds a query keyword (query words minus it/fr/en/pt stopwords, `search.stopwords` and words under 2 characters); `rules.keyword_rank` keeps whole-token hits, drops keywords above `search.keyword_max_df`, ranks by summed IDF; `rules.fuse` merges with the vector rows by `vector_weight / (60 + rank_v) + keyword_weight / (60 + rank_k)`. Each row gains `matched_by`. No index, no schema change. With hybrid off, steps 1-5 only, same SQL.
 
 Workspace-scope candidates are never returned: only `active` rows are searched.
 

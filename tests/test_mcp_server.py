@@ -71,7 +71,8 @@ def test_search_memory():
     [result] = _call(server, ("search_memory", {"query": "team deploys with pnpm yarn docker fridays"}))
     hits = _json(result)
     assert sorted(h["content"] for h in hits) == ["Anna deploys with pnpm", "The team deploys on Fridays"]
-    assert all(set(h) == {"id", "type", "content", "verified", "scope", "as_of", "inferred"} for h in hits)
+    assert all(set(h) == {"id", "type", "content", "verified", "scope", "as_of", "inferred", "matched_by"}
+               for h in hits)  # `matched_by`: hybrid search, on by default (#26)
 
 
 def test_propose_memory():

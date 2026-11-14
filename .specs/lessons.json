@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 25,
+  "next_id": 27,
   "lessons": [
     {
       "id": "L-001",
@@ -385,57 +385,93 @@
     },
     {
       "id": "L-022",
-      "key": "surviving_mutant::when a test proves that written options override defaults use an option the default itself sets otherwise either merge order passes",
-      "text": "When a test proves that written options override defaults, use an option the default itself sets; otherwise either merge order passes.",
-      "signal": "surviving_mutant",
-      "scope": "config",
+      "key": "ac_gap::a search rule that claims same as without the option needs a case per merge path one type and several types filters types merge differently in service search",
+      "text": "A search rule that claims 'same as without the option' needs a case per merge path: one type and several types (filters.types) merge differently in service.search.",
+      "signal": "ac_gap",
+      "scope": "search",
       "status": "candidate",
       "features": [
-        "review-per-type"
+        "hybrid-search"
       ],
       "recurrence": 1,
       "harmful": 0,
       "evidence": [
-        "C27 config.py:_mapped_type merge order (config)"
+        "AC 9 (search)"
       ],
-      "created": "2026-11-14T11:59:05Z",
-      "last_seen": "2026-11-14T11:59:05Z"
+      "created": "2026-11-14T15:30:39Z",
+      "last_seen": "2026-11-14T15:30:39Z"
     },
     {
       "id": "L-023",
-      "key": "spec_precision_gap::a criterion that names a source or origin column needs a test case where the value is actually set not only the default",
-      "text": "A criterion that names a source or origin column needs a test case where the value is actually set, not only the default.",
-      "signal": "spec_precision_gap",
-      "scope": "cli",
+      "key": "surviving_mutant::a subject filter with one exact id goes through entityfilter not filter a check that a new search leg honours filters needs a non subject filter case observed at areas",
+      "text": "A subject filter with one exact id goes through EntityFilter, not Filter: a check that a new search leg honours filters needs a non-subject Filter case (observed_at, areas).",
+      "signal": "surviving_mutant",
+      "scope": "search",
       "status": "candidate",
       "features": [
-        "review-per-type"
+        "hybrid-search"
       ],
       "recurrence": 1,
       "harmful": 0,
       "evidence": [
-        "C30 AC 29 source column (cli)"
+        "service.py keyword_search filter=flt (search)"
       ],
-      "created": "2026-11-14T11:59:05Z",
-      "last_seen": "2026-11-14T11:59:05Z"
+      "created": "2026-11-14T15:30:40Z",
+      "last_seen": "2026-11-14T15:30:40Z"
     },
     {
       "id": "L-024",
-      "key": "ac_gap::when a new form reuses an existing parser reject inputs the old parser reads as a different form a template string that is a keyword",
-      "text": "When a new form reuses an existing parser, reject inputs the old parser reads as a different form (a template string that is a keyword).",
-      "signal": "ac_gap",
-      "scope": "config",
+      "key": "spec_precision_gap::text folding done in python and in sql must be proven on decomposed nfd compatibility m² ss and precomposed input on every backend not only precomposed accents",
+      "text": "Text folding done in Python and in SQL must be proven on decomposed (NFD), compatibility (m², ß) and precomposed input on every backend, not only precomposed accents.",
+      "signal": "spec_precision_gap",
+      "scope": "storage",
       "status": "candidate",
       "features": [
-        "review-per-type"
+        "hybrid-search"
       ],
       "recurrence": 1,
       "harmful": 0,
       "evidence": [
-        "config.py:_mapped_type {template: builtin} (config)"
+        "postgres.py _FOLDED_CONTENT (storage)"
       ],
-      "created": "2026-11-14T11:59:05Z",
-      "last_seen": "2026-11-14T11:59:05Z"
+      "created": "2026-11-14T15:30:40Z",
+      "last_seen": "2026-11-14T15:30:40Z"
+    },
+    {
+      "id": "L-025",
+      "key": "spec_precision_gap::before stating a returned score s meaning check what apply boosts already adds to it restate the field as today s value rather than an ideal one",
+      "text": "Before stating a returned score's meaning, check what apply_boosts already adds to it; restate the field as 'today's value' rather than an ideal one.",
+      "signal": "spec_precision_gap",
+      "scope": "search",
+      "status": "candidate",
+      "features": [
+        "hybrid-search"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "AC 16 (search)"
+      ],
+      "created": "2026-11-14T15:30:40Z",
+      "last_seen": "2026-11-14T15:30:40Z"
+    },
+    {
+      "id": "L-026",
+      "key": "ac_gap::every path that assigns a rank score fused or fallback must apply the configured weights or the weights silently stop holding on the fallback path",
+      "text": "Every path that assigns a rank score (fused or fallback) must apply the configured weights, or the weights silently stop holding on the fallback path.",
+      "signal": "ac_gap",
+      "scope": "search",
+      "status": "candidate",
+      "features": [
+        "hybrid-search"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "AC 14 (search)"
+      ],
+      "created": "2026-11-14T15:30:40Z",
+      "last_seen": "2026-11-14T15:30:40Z"
     }
   ]
 }

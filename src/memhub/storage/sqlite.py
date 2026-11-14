@@ -54,6 +54,7 @@ from memhub.storage.rules import (
     as_vector_list,
     edited_note,
     edited_version,
+    fold,
     fresh_evidence,
     newest_observed_at,
 )
@@ -201,6 +202,11 @@ def _lower(value: Any) -> Any:
     return value.lower() if isinstance(value, str) else value
 
 
+def _fold(value: Any) -> Any:
+    """`rules.fold` as the SQL function `memhub_fold`: case and accents folded, as the keywords are."""
+    return fold(value) if isinstance(value, str) else value
+
+
 def _filter_sql(table: str, flt: Filter) -> tuple[str, list[Any]]:
     """A `Filter` tree as one boolean SQL expression over `table`; every leaf is true or false, never null (`NOT` of a
     comparison with a null field is true, as `Filter.matches`)."""
@@ -251,6 +257,7 @@ class _Tx:
         self.mem, self.runs, self.meta = f"{prefix}_memory", f"{prefix}_memory_runs", f"{prefix}_memhub_meta"
         self._dims: int | None = None
         conn.create_function("memhub_lower", 1, _lower, deterministic=True)  # the content filter (#25)
+        conn.create_function("memhub_fold", 1, _fold, deterministic=True)  # the keyword leg of hybrid search (#26)
 
     # --- plumbing -----------------------------------------------------------------------------------------------
 
@@ -681,6 +688,15 @@ class _Tx:
         entities: EntityFilter | None = None,
         filter: Filter | None = None,
     ) -> list[Row]:
+        where, params = self._search_where(workspace_id, user_id, type, include_stale, now, entities, filter)
+        return apply_boosts(
+            self._nearest(where, params, query_embedding, max(k * 4, 20)), k=k, boost=boost,
+            area_boost=area_boost, text_boost=text_boost, entity_boost=entity_boost,
+        )
+
+    def _search_where(self, workspace_id: str, user_id: str | None, type: str | None, include_stale: bool,
+                      now: datetime | None, entities: EntityFilter | None, filter: Filter | None) -> tuple[str, list[Any]]:
+        """The WHERE clause of the rows a search may return, and its parameters."""
         clauses = ["status = 'active'", "workspace_id = ?", "(scope = 'workspace' OR (scope = 'user' AND user_id = ?))"]
         params: list[Any] = [workspace_id, user_id]
         if not include_stale:  # stale = active + expired; it stays in the ledger, just out of search
@@ -698,10 +714,34 @@ class _Tx:
             sql, filter_params = _filter_sql(self.mem, filter)
             clauses.append(sql)
             params += filter_params
-        return apply_boosts(
-            self._nearest(" AND ".join(clauses), params, query_embedding, max(k * 4, 20)), k=k, boost=boost,
-            area_boost=area_boost, text_boost=text_boost, entity_boost=entity_boost,
-        )
+        return " AND ".join(clauses), params
+
+    def keyword_search(
+        self,
+        *,
+        keywords: list[str],
+        query_embedding: list[float],
+        workspace_id: str,
+        user_id: str | None = None,
+        type: str | None = None,
+        include_stale: bool = False,
+        now: datetime | None = None,
+        entities: EntityFilter | None = None,
+        filter: Filter | None = None,
+    ) -> tuple[list[Row], int]:
+        """The searchable rows whose folded content holds a keyword (a substring: whole tokens are the caller's rule),
+        each with `similarity` (cosine, in Python), and how many rows are searchable. Same WHERE as `search`."""
+        where, params = self._search_where(workspace_id, user_id, type, include_stale, now, entities, filter)
+        [count] = self._q(f"SELECT count(*) FROM {self.mem} WHERE {where}", params).fetchone()
+        if not keywords:
+            return [], count
+        holds = " OR ".join("instr(memhub_fold(content), ?) > 0" for _ in keywords)
+        query = [float(x) for x in query_embedding]
+        rows = self._memories(f"SELECT * FROM {self.mem} WHERE {where} AND ({holds}) ORDER BY rowid",
+                              [*params, *keywords])
+        for row in rows:
+            row["similarity"] = None if row["embedding"] is None else _cosine(row["embedding"], query)
+        return rows, count
 
     def top_similar(
         self,

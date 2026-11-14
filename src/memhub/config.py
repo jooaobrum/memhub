@@ -257,6 +257,22 @@ class ReconcileConfig(BaseModel):
     compare_across: list[list[str]] = Field(default_factory=list)  # types whose rows are compared with each other's
 
 
+class SearchConfig(BaseModel):
+    """Hybrid search (#26): a keyword leg next to the vector leg, fused by weighted reciprocal rank."""
+
+    hybrid: bool = True  # false: the vector search alone, as before #26
+    vector_weight: float = Field(1.0, ge=0)
+    keyword_weight: float = Field(1.0, ge=0)
+    keyword_max_df: float = Field(0.5, gt=0, le=1)  # a keyword held by more of the searchable rows is ignored
+    stopwords: list[str] = Field(default_factory=list)  # the project's generic words, never a keyword
+
+    @model_validator(mode="after")
+    def _one_leg_counts(self) -> "SearchConfig":
+        if self.vector_weight == 0 and self.keyword_weight == 0:
+            raise ValueError("vector_weight and keyword_weight cannot both be 0")
+        return self
+
+
 class RolesConfig(BaseModel):
     approve_workspace: list[str] = Field(default_factory=lambda: ["workspace_admin"])
 
@@ -401,6 +417,7 @@ class Config(BaseModel):
     guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig)
     areas: AreasConfig = Field(default_factory=AreasConfig)
     terms: TermsConfig = Field(default_factory=TermsConfig)
+    search: SearchConfig = Field(default_factory=SearchConfig)
 
     _raw: dict | None = PrivateAttr(default=None)  # the file layers before `${VAR}` interpolation: what `save` writes back
 

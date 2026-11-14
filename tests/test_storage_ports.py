@@ -42,7 +42,7 @@ def _params(fn) -> list[tuple]:
 
 
 def test_repository_methods_match_memorystore_signatures():
-    assert sum(len(v) for v in METHODS.values()) == 37
+    assert sum(len(v) for v in METHODS.values()) == 38  # + vectors.keyword_search (#26)
     memory = InMemoryBackend()
     memory.init(embedding_model="m", dims=4)
     pg_uow = MemoryStore("postgresql://nobody@nowhere/x", "p").bind(object())

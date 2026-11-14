@@ -38,6 +38,7 @@ from memhub.storage.rules import (
     as_vector_list,
     edited_note,
     edited_version,
+    fold,
     fresh_evidence,
     newest_observed_at,
 )
@@ -519,8 +520,17 @@ class _Tx:
         entities: EntityFilter | None = None,
         filter: Filter | None = None,
     ) -> list[Row]:
+        rows = self._searchable(workspace_id, user_id, type, include_stale, now, entities, filter)
+        return apply_boosts(
+            self._nearest(rows, query_embedding, max(k * 4, 20)), k=k, boost=boost, area_boost=area_boost,
+            text_boost=text_boost, entity_boost=entity_boost,
+        )
+
+    def _searchable(self, workspace_id: str, user_id: str | None, type: str | None, include_stale: bool,
+                    now: datetime | None, entities: EntityFilter | None, filter: Filter | None) -> list[Row]:
+        """The rows a search may return: active, the caller's or the workspace's, not stale, the type, the filters."""
         now = now or datetime.now(timezone.utc)
-        rows = [
+        return [
             r for r in self._mem().values()
             if r["status"] == "active" and r["workspace_id"] == workspace_id
             and (r["scope"] == "workspace" or (r["scope"] == "user" and user_id is not None and r["user_id"] == user_id))
@@ -529,10 +539,25 @@ class _Tx:
             and (entities is None or entities.matches(r["entities"]))
             and (filter is None or filter.matches(r))
         ]
-        return apply_boosts(
-            self._nearest(rows, query_embedding, max(k * 4, 20)), k=k, boost=boost, area_boost=area_boost,
-            text_boost=text_boost, entity_boost=entity_boost,
-        )
+
+    def keyword_search(
+        self,
+        *,
+        keywords: list[str],
+        query_embedding: list[float],
+        workspace_id: str,
+        user_id: str | None = None,
+        type: str | None = None,
+        include_stale: bool = False,
+        now: datetime | None = None,
+        entities: EntityFilter | None = None,
+        filter: Filter | None = None,
+    ) -> tuple[list[Row], int]:
+        """The searchable rows whose folded content holds a keyword (a substring: whole tokens are the caller's rule),
+        each with `similarity`, and how many rows are searchable. Same rules as `search`."""
+        rows = self._searchable(workspace_id, user_id, type, include_stale, now, entities, filter)
+        hits = [r for r in rows if any(kw in fold(r["content"]) for kw in keywords)]
+        return self._nearest(hits, query_embedding, len(hits)), len(rows)
 
     def top_similar(
         self,

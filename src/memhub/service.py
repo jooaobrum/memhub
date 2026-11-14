@@ -24,7 +24,7 @@ from memhub.config import Settings
 from memhub.storage import Backend, UnitOfWork
 from memhub.storage.rules import (
     Actor, AnyOf, AreaIn, EntityFilter, EntityIs, EntityTypeIn, Filter, NotFound, NotOf, Row, all_of, area_ids,
-    as_vector_list, map_areas, positive_entity_nodes,
+    RRF_K, as_vector_list, fuse, keyword_rank, map_areas, positive_entity_nodes, query_keywords,
 )
 from memhub.types import TypeRegistry
 
@@ -428,6 +428,7 @@ class MemoryService:
         entity_type: str | None = None,
         widen: bool = False,
         filter: SearchFilter | None = None,
+        hybrid: bool | None = None,
     ) -> list[Row]:
         """Nearest memories. Rows in the query's best area are boosted (never filtered); that area is `area`
         (a key, title or id) when given, else the owner's area whose description is nearest the query.
@@ -439,8 +440,15 @@ class MemoryService:
 
         `filter` (`memhub.filters.parse`, #25) replaces `subjects` / `entity_type`: its top-level `entities` are the
         tiers, the rest of it applies to every tier, and its `types` are searched one at a time and merged by tier,
-        then similarity."""
+        then similarity.
+
+        `hybrid` (None: `search.hybrid`, #26): a keyword leg runs next to the vector leg in each tier, on the query's
+        words minus stopwords (`rules.query_keywords`), and the two are fused by weighted reciprocal rank; each row
+        says which leg found it in `matched_by`. With no keyword left, the vector result, `matched_by: "vector"`."""
         workspace_id = workspace_id or self.settings.workspace_default
+        cfg = self.settings.search
+        keywords = query_keywords(query, cfg.stopwords) if (cfg.hybrid if hybrid is None else hybrid) else None
+        fused: list[bool] = []  # set when a keyword leg took part: types are then merged by fused score
         if filter is None and (subjects or entity_type or widen):
             filter = _legacy_filter(subjects or [], entity_type)
         with self.store.unit_of_work() as uow:
@@ -454,23 +462,45 @@ class MemoryService:
             )
 
             def nearest(entities: EntityFilter | None, flt: Filter | None = None, type: str | None = type) -> list[Row]:
-                return uow.vectors.search(
+                rows = uow.vectors.search(
                     query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=k, type=type,
                     include_stale=include_stale, now=now, area_boost=best["memory_id"] if best else None,
                     text_boost=expansion.related, **({"entities": entities} if entities is not None else {}),
                     **({"filter": flt} if flt is not None else {}),
                 )
+                if keywords is None:  # hybrid off: the vector search alone, as before #26
+                    return rows
+                hits: list[Row] = []
+                if keywords:
+                    found, searchable = uow.vectors.keyword_search(
+                        keywords=keywords, query_embedding=embedding, workspace_id=workspace_id, user_id=user_id,
+                        type=type, include_stale=include_stale, now=now,
+                        **({"entities": entities} if entities is not None else {}),
+                        **({"filter": flt} if flt is not None else {}),
+                    )
+                    hits, _ = keyword_rank(found, keywords, searchable=searchable, max_df=cfg.keyword_max_df,
+                                           limit=max(k * 4, 20))
+                if not hits:  # no keyword left, or none found: the vector result; `_score` ranks it beside another
+                    # type's fused rows
+                    return [{**r, "matched_by": "vector", "_score": cfg.vector_weight / (RRF_K + i)}
+                            for i, r in enumerate(rows, 1)]
+                fused.append(True)
+                return fuse(rows, hits, vector_weight=cfg.vector_weight, keyword_weight=cfg.keyword_weight, k=k)
 
             if filter is not None:
                 filter = _with_rest(filter, self._resolve_areas(uow, filter.rest, workspace_id, user_id))
             if filter is not None and filter.types:  # one search per type, merged by tier, then similarity
                 rows = [r for t in filter.types
                         for r in self._subject_tiers(lambda e, f=None, t=t: nearest(e, f, t), filter, widen, k)]
-                rows = sorted(rows, key=lambda r: (r["_tier"], -r["similarity"]))[:k]
+                if fused:  # by fused score; with no keyword in any type, by similarity as without hybrid (AC 9)
+                    rows = sorted(rows, key=lambda r: (r["_tier"], -r["_score"], -r["similarity"]))[:k]
+                else:
+                    rows = sorted(rows, key=lambda r: (r["_tier"], -r["similarity"]))[:k]
             else:
                 rows = self._subject_tiers(nearest, filter, widen, k)
             for r in rows:
                 r.pop("_tier", None)
+                r.pop("_score", None)
             titles = uow.memories.areas_by_memory_id([i for r in rows for i in area_ids(r["links"])])
             for r in rows:
                 r["areas"] = [titles[i]["payload"]["title"] for i in area_ids(r["links"]) if i in titles]
