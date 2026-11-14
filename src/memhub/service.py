@@ -663,10 +663,11 @@ class MemoryService:
             "last_updated": max((d["observed_at"] for d in details), default=None),
         }
 
-    def queue(self, actor: Actor, *, workspace_id: str | None = None) -> list[Row]:
-        """Candidates awaiting review (any scope), conflicts first."""
+    def queue(self, actor: Actor, *, workspace_id: str | None = None, user_id: str | None = None) -> list[Row]:
+        """Candidates awaiting review (any scope), conflicts first; with `user_id`, only that user's own candidates."""
         with self.store.unit_of_work() as uow:
-            return uow.memories.queue(workspace_id=workspace_id)
+            rows = uow.memories.queue(workspace_id=workspace_id)
+        return rows if user_id is None else [r for r in rows if r["scope"] == "user" and r["user_id"] == user_id]
 
     def runs(self, actor: Actor, *, last: int = 10) -> list[Row]:
         with self.store.unit_of_work() as uow:
