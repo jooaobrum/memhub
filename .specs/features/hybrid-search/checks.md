@@ -125,6 +125,6 @@ Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "bench_codes o
 ## Handoff
 
 - **Settled mid-build:** AC 16 / C19 restated after Verifier finding 4 - asked "Which should hold?" - user chose "Keep boosts (Recommended)" -> AD-058; C19 reworded - asked "What should the middleware show?" - user chose "JSON tools only (Recommended)": toolkit and MCP results gain `matched_by`, the middleware's text stays as it is
-- **Dispatched:** Verifier at `2b99ba1` (proofs green, 23/23) - returned, FAIL, 5 findings; no screens sub-agent (no capture binds)
-- **Boundary:** none yet
+- **Dispatched:** Verifier at `2b99ba1` (proofs green, 23/23) - returned, FAIL, 5 findings closed in `0e9276d`; no screens sub-agent (no capture binds)
+- **Boundary:** C1-C24 closed at `0e9276d`; proofs 25/25 and mutations 5/5 killed at that HEAD; full suite 1106 passed, 3 skipped
 - **Abandoned:** none
