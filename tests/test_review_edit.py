@@ -187,8 +187,15 @@ def test_key_change_on_review(m):
         m.service.approve(REVIEWER, named["id"], fields={"key": "tier"})
     assert _history(m, named["memory_id"]) == [(1, "candidate")]
 
-    numbered = _cand(m, "Slot one", type="slot", key=1)
-    same = m.service.approve(REVIEWER, numbered["id"], fields={"key": "1", "content": "Slot one, fixed"})
+    # stored as the text "1", validated to the int 1: the slot index reads both as "1", so the key did not change
+    with m.store.unit_of_work() as uow:
+        numbered = uow.memories.add_memory(
+            type="slot", schema_version=1, scope="user", workspace_id=WS, user_id="anna", content="Slot one",
+            payload={"content": "Slot one", "key": "1", "entities": [], "tags": []}, entities=[],
+            embedding=m.embedder.embed_query("Slot one"), evidence=EVIDENCE, status="candidate", verified=False,
+            created_by="agent",
+        )
+    same = m.service.approve(REVIEWER, numbered["id"], fields={"content": "Slot one, fixed"})
     assert (same["status"], same["content"], same["payload"]["key"]) == ("active", "Slot one, fixed", 1)
 
     kept = _cand(m, "Plan is silver", type="plan", key="plan")
