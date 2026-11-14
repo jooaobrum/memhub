@@ -127,6 +127,20 @@ def test_keyword_hits_keep_filter_and_guard(settings):
     assert names(machine) == ["PRD_1 shows E47"]
 
 
+def test_keyword_hits_keep_a_time_filter(settings):
+    """C23 (AC 5): a filter that is not about subjects (`observed_at`) narrows the keyword leg too."""
+    from datetime import datetime, timezone
+
+    m = make(settings, SearchConfig(vector_weight=0.0))
+    seed(m, "recent fault E47", 0.1, observed_at=datetime(2026, 10, 20, tzinfo=timezone.utc))
+    seed(m, "old fault E47", 0.1, observed_at=datetime(2026, 1, 5, tzinfo=timezone.utc))
+    for i in range(4):
+        seed(m, f"other note {i}", 0.9, observed_at=datetime(2026, 10, 21, tzinfo=timezone.utc))
+    assert set(names(m.search("E47", top_k=10, **ALICE))) == {"recent fault E47", "old fault E47"}
+    rows = m.search("E47", filters={"observed_at": {"gte": "2026-10-01"}}, top_k=10, **ALICE)
+    assert names(rows) == ["recent fault E47"]
+
+
 # --- S2 ------------------------------------------------------------------------------------------------------------
 
 def test_stopwords_four_languages():
@@ -170,6 +184,21 @@ def test_no_keyword_left(settings):
         assert [r["id"] for r in on] == [r["id"] for r in off], query
         assert {r["matched_by"] for r in on} == {"vector"}, query
         assert [{k: v for k, v in r.items() if k != "matched_by"} for r in on] == off, query
+    # several memory types: with no keyword left, merged by similarity, as with hybrid off (Verifier finding 1)
+    for text, sim in (("fact one", 0.95), ("fact two", 0.85)):
+        seed(m, text, sim)
+    with m.store.unit_of_work() as uow:
+        for text, sim in (("episode one", 0.75), ("episode two", 0.65)):
+            uow.memories.add_memory(
+                type="episode", schema_version=1, scope="user", workspace_id=WS, user_id="alice", content=text,
+                payload={"content": text}, entities=[], embedding=unit(sim), evidence=[], status="active",
+                verified=True, created_by="test")
+    for query in ("de la do the", "zzzz"):
+        on = m.search(query, types=["fact", "episode"], hybrid=True, top_k=4, **ALICE)
+        off = m.search(query, types=["fact", "episode"], hybrid=False, top_k=4, **ALICE)
+        assert names(on) == names(off), query
+        assert [r["similarity"] for r in on] == sorted((r["similarity"] for r in on), reverse=True), query
+        assert {r["type"] for r in on} == {"fact", "episode"} or len(on) == 4, query
 
 
 def test_idf_rank():
@@ -248,6 +277,27 @@ def test_fuse_weights():
     assert names(fuse(vector, keyword, vector_weight=1.0, keyword_weight=3.0, k=3)) == ["v5", "k only", "v1"]
 
 
+def test_vector_weight_on_a_type_without_keywords(settings):
+    """C24 (AC 14): merging types, a type whose keywords `keyword_max_df` dropped still weighs its rows by
+    `vector_weight` (Verifier finding 5): 0.2 / (60 + 1) for its first row, below a fused row of 1 / (60 + 1)."""
+    m = make(settings, SearchConfig(vector_weight=0.2))
+    seed(m, "fact E47 fault", 0.3)
+    for i in range(5):
+        seed(m, f"fact other {i}", 0.9 - i * 0.01)
+    with m.store.unit_of_work() as uow:
+        for i in range(2):  # every episode names E47: in the episode search the keyword is dropped (2/2 > 0.5)
+            text = f"episode E47 {i}"
+            uow.memories.add_memory(
+                type="episode", schema_version=1, scope="user", workspace_id=WS, user_id="alice", content=text,
+                payload={"content": text}, entities=[], embedding=unit(0.95 - i * 0.01), evidence=[],
+                status="active", verified=True, created_by="test")
+    rows = m.search("E47", types=["fact", "episode"], top_k=3, **ALICE)
+    # fact E47 fault (outside the fact vector leg's k): 1/61; episode E47 0: 0.2/61, similarity 0.95 (vector only);
+    # fact other 0: 0.2/61, similarity 0.9. With 1/61 for the vector-only rows, an episode would tie the fused row.
+    assert names(rows) == ["fact E47 fault", "episode E47 0", "fact other 0"]
+    assert [r["matched_by"] for r in rows] == ["keyword", "vector", "vector"]
+
+
 def test_tiers_keep_their_order(settings):
     """C18 (AC 15): a keyword-only row of tier 2 never ranks above tier 1; each tier's hits are its subject's."""
     m = make(settings)
@@ -278,6 +328,22 @@ def test_matched_by_and_similarity(settings):
     assert rows["fault E47 far"]["matched_by"] == "keyword"
     for content, sim in (("fault E47 near", 0.9), ("a vector neighbour", 0.8), ("fault E47 far", 0.02)):
         assert abs(rows[content]["similarity"] - sim) < 1e-6, content
+    # a boost stays in `similarity`, as with hybrid off (AC 16 as restated, AD-058)
+    boosted = make(settings)
+    from memhub.storage.rules import area_link
+    with boosted.store.unit_of_work() as uow:
+        area = uow.memories.add_memory(
+            type="area", schema_version=1, scope="user", workspace_id=WS, user_id="alice", content="Rooftop",
+            payload={"key": "rooftop", "title": "Rooftop"}, entities=[], embedding=unit(0.2), evidence=[],
+            status="active", verified=True, created_by="test")
+    seed(boosted, "fault E47 in the area", 0.5, links=[area_link(area["memory_id"])])
+    seed(boosted, "unrelated", 0.4)
+    from memhub.storage.rules import Actor
+    alice = Actor(id="alice", roles=[])
+    on = boosted.service.search(alice, "E47", workspace_id=WS, user_id="alice", area="rooftop")
+    off = boosted.service.search(alice, "E47", workspace_id=WS, user_id="alice", area="rooftop", hybrid=False)
+    assert on[0]["content"] == "fault E47 in the area" and on[0]["matched_by"] == "both"
+    assert abs(on[0]["similarity"] - 0.55) < 1e-6 and on[0]["similarity"] == off[0]["similarity"]
     kit = m.tools(workspace_id=WS, user_id="alice", run_id="r")
     view = {r["content"]: r for r in kit.search_memory("E47")}
     assert view["fault E47 far"]["matched_by"] == "keyword"

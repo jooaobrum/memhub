@@ -388,6 +388,7 @@ class MemoryService:
         workspace_id = workspace_id or self.settings.workspace_default
         cfg = self.settings.search
         keywords = query_keywords(query, cfg.stopwords) if (cfg.hybrid if hybrid is None else hybrid) else None
+        fused: list[bool] = []  # set when a keyword leg took part: types are then merged by fused score
         if filter is None and (subjects or entity_type or widen):
             filter = _legacy_filter(subjects or [], entity_type)
         with self.store.unit_of_work() as uow:
@@ -409,7 +410,7 @@ class MemoryService:
                 )
                 if keywords is None:  # hybrid off: the vector search alone, as before #26
                     return rows
-                hits, kept = [], []
+                hits: list[Row] = []
                 if keywords:
                     found, searchable = uow.vectors.keyword_search(
                         keywords=keywords, query_embedding=embedding, workspace_id=workspace_id, user_id=user_id,
@@ -417,10 +418,13 @@ class MemoryService:
                         **({"entities": entities} if entities is not None else {}),
                         **({"filter": flt} if flt is not None else {}),
                     )
-                    hits, kept = keyword_rank(found, keywords, searchable=searchable, max_df=cfg.keyword_max_df,
-                                              limit=max(k * 4, 20))
-                if not kept:  # no keyword left: the vector result (`_score` ranks it beside another type's fused rows)
-                    return [{**r, "matched_by": "vector", "_score": 1 / (RRF_K + i)} for i, r in enumerate(rows, 1)]
+                    hits, _ = keyword_rank(found, keywords, searchable=searchable, max_df=cfg.keyword_max_df,
+                                           limit=max(k * 4, 20))
+                if not hits:  # no keyword left, or none found: the vector result; `_score` ranks it beside another
+                    # type's fused rows
+                    return [{**r, "matched_by": "vector", "_score": cfg.vector_weight / (RRF_K + i)}
+                            for i, r in enumerate(rows, 1)]
+                fused.append(True)
                 return fuse(rows, hits, vector_weight=cfg.vector_weight, keyword_weight=cfg.keyword_weight, k=k)
 
             if filter is not None:
@@ -428,7 +432,10 @@ class MemoryService:
             if filter is not None and filter.types:  # one search per type, merged by tier, then similarity
                 rows = [r for t in filter.types
                         for r in self._subject_tiers(lambda e, f=None, t=t: nearest(e, f, t), filter, widen, k)]
-                rows = sorted(rows, key=lambda r: (r["_tier"], -r.get("_score", 0.0), -r["similarity"]))[:k]
+                if fused:  # by fused score; with no keyword in any type, by similarity as without hybrid (AC 9)
+                    rows = sorted(rows, key=lambda r: (r["_tier"], -r["_score"], -r["similarity"]))[:k]
+                else:
+                    rows = sorted(rows, key=lambda r: (r["_tier"], -r["similarity"]))[:k]
             else:
                 rows = self._subject_tiers(nearest, filter, widen, k)
             for r in rows:

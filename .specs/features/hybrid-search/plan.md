@@ -97,7 +97,7 @@ Words that carry no meaning in any of the four languages, and generic words of t
    - `stopwords: ["Máquina"]`, query `"maquina E47"` → keywords `[e47]`
 8. IF a keyword occurs in more than `search.keyword_max_df` of the rows that pass the search's WHERE clause THEN the system SHALL drop it from the keyword leg for that search
    - 10 searchable rows, `pump` in 6, `max_df 0.5` → dropped; in 5 → kept (boundary: at most, not more); `max_df 1.0` → never dropped
-9. WHEN no keyword is left after S2's rules THEN `search` SHALL return the same rows in the same order as with `hybrid=False`, each with `matched_by: "vector"`
+9. WHEN no keyword is left after S2's rules, or no searchable row holds one, THEN `search` SHALL return the same rows in the same order as with `hybrid=False`, each with `matched_by: "vector"`, also when the search spans several memory types
    - query `"le client préfère le café"` with no row naming `client`, `prefere` or `cafe` → vector result
 10. Among keyword hits, a row SHALL rank above another WHEN the sum of IDF of the distinct keywords it contains is higher, IDF being `ln(1 + (N - df + 0.5) / (df + 0.5))` over the `N` searchable rows; a keyword repeated in one row counts once
 
@@ -108,8 +108,9 @@ Words that carry no meaning in any of the four languages, and generic words of t
 13. The default of `search.hybrid` SHALL be `true`, and a config with no `search:` block SHALL search hybrid
 14. WHILE hybrid is on, the system SHALL order rows within a tier by `vector_weight / (60 + rank_v) + keyword_weight / (60 + rank_k)` (a leg the row is absent from adds 0), ties by `similarity` descending
    - weights 1.0 / 1.0: keyword rank 1 + vector rank 5 beats vector rank 1 only; `keyword_weight: 0` → order equals the vector order; `vector_weight: 0` → keyword hits first in keyword order, then nothing else
+   - merging several memory types, a type with no keyword hit ranks its rows by `vector_weight / (60 + rank_v)` beside the fused rows of the others
 15. WHILE hybrid is on, tiers SHALL keep their order (AD-030): a fused row of tier 2 never ranks above a row of tier 1, and each tier fuses its own two legs with the tier's filter
-16. Each returned row SHALL carry `matched_by` = `"both"` when it is in both legs' lists, `"keyword"` when only in the keyword leg's, `"vector"` otherwise, and its `similarity` SHALL be the cosine to the query embedding in every case
+16. Each returned row SHALL carry `matched_by` = `"both"` when it is in both legs' lists, `"keyword"` when only in the keyword leg's, `"vector"` otherwise, and its `similarity` SHALL be what the vector leg returns for it (the cosine plus today's area, glossary and subject boosts, the same value as with hybrid off), and the cosine for a keyword-only row (AD-058)
 17. IF `vector_weight` or `keyword_weight` is negative, `keyword_max_df` is not in `(0, 1]`, both weights are 0, or `stopwords` is not a list of strings THEN loading the config SHALL raise `ConfigError` naming the key
 18. WHEN `memhub config show` runs THEN it SHALL list `search.hybrid`, `search.vector_weight`, `search.keyword_weight`, `search.keyword_max_df` and `search.stopwords` with their values
 

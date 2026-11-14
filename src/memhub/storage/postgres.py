@@ -52,7 +52,6 @@ from memhub.storage.rules import (
     apply_boosts,
     area_link,
     as_vector_list,
-    fold,
     fresh_evidence,
     newest_observed_at,
 )
@@ -131,20 +130,11 @@ def _search_clauses(params: dict[str, Any], type: str | None, include_stale: boo
     return clauses
 
 
-def _fold_map() -> tuple[str, str]:
-    """`translate()` arguments that do to lowered text what `rules.fold` does to the Latin letters with accents
-    (Latin-1 and Latin Extended-A), upper case included for a database whose `lower()` folds ASCII only."""
-    src, dst = [], []
-    for code in range(0xC0, 0x180):
-        c = chr(code)
-        f = fold(c)
-        if len(f) == 1 and f != c:
-            src.append(c)
-            dst.append(f)
-    return "".join(src), "".join(dst)
-
-
-_FOLD_FROM, _FOLD_TO = _fold_map()
+# `rules.fold` in SQL: compatibility decomposition (NFKD: `m²` -> `m2`, a decomposed `é` too), combining marks
+# removed, then lowered (after, so a database whose `lower()` folds ASCII only still lowers the stripped letters);
+# `ß` -> `ss` as `str.casefold` does. Needs a UTF-8 database (Postgres 13+ `normalize`).
+_FOLDED_CONTENT = "replace(lower(regexp_replace(normalize(content, NFKD), %(marks)s, '', 'g')), 'ß', 'ss')"
+_COMBINING_MARKS = "[\u0300-\u036f]"
 
 
 def _filter_sql(flt: Filter, params: dict[str, Any]) -> str:
@@ -799,9 +789,9 @@ class MemoryStore:
     ) -> tuple[list[Row], int]:
         """The searchable rows whose folded content holds a keyword (a substring: whole tokens are the caller's rule),
         each with `similarity`, and how many rows are searchable. Same WHERE as `search`; no index, no schema change
-        (#26): `content` is lowered and its accents translated to match `rules.fold`."""
+        (#26): `content` is folded in SQL as `rules.fold` folds it."""
         params: dict[str, Any] = {"ws": workspace_id, "uid": user_id, "qe": query_embedding,
-                                  "fold_from": _FOLD_FROM, "fold_to": _FOLD_TO}
+                                  "marks": _COMBINING_MARKS}
         where = " AND ".join(_search_clauses(params, type, include_stale, now, entities, filter))
         cur.execute(f"SELECT count(*) AS n FROM {self._t('memory')} WHERE {where}", params)
         count = cur.fetchone()["n"]
@@ -810,7 +800,7 @@ class MemoryStore:
         holds = []
         for i, word in enumerate(keywords):
             params[f"kw{i}"] = word
-            holds.append(f"strpos(translate(lower(content), %(fold_from)s, %(fold_to)s), %(kw{i})s) > 0")
+            holds.append(f"strpos({_FOLDED_CONTENT}, %(kw{i})s) > 0")
         cur.execute(
             f"SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {self._t('memory')} "
             f"WHERE {where} AND ({' OR '.join(holds)})", params,

@@ -1,8 +1,8 @@
 # hybrid-search proofs
 
-**HEAD**: 2b99ba1
+**HEAD**: 45be27f
 **Tree**: clean
-**Result**: 23 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 23 pass, 0 fail; mutations 4 killed, 1 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -29,3 +29,13 @@
 | C21 | `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "config_show_lists_search_keys"` | 1 | 1 | pass |
 | C22 | `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "bench_codes or hybrid_docs"` | 2 | 2 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub scripts` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| max_df boundary <= -> < (a keyword in exactly max_df of the rows dropped) | `src/memhub/storage/rules.py:183` | yes |
+| a row in both legs labelled matched_by vector | `src/memhub/storage/rules.py:204` | yes |
+| rows scoring 0 kept (vector_weight 0 still returns vector-only rows) | `src/memhub/storage/rules.py:207` | yes |
+| Postgres prefilter without accent folding (PRÉFÈRE not found by prefere) | `src/memhub/storage/postgres.py:813` | yes |
+| keyword leg run without the tier's Filter | `src/memhub/service.py:416` | no |

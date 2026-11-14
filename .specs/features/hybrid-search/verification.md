@@ -1,0 +1,21 @@
+# Hybrid search verification
+
+**Verdict**: FAIL
+**Mutations**: 5 - probed C10, C19, C17, C6, C7
+**Proofs**: `proofs.md` at 2b99ba1 (re-run with the mutations at 45be27f, a docs-only commit on 2b99ba1: 23 pass, 0 fail; mutations 4 killed, 1 not)
+**Verifier**: independent sub-agent (author != verifier)
+
+## Findings
+
+| Finding | Evidence | Fix | Closed |
+| --- | --- | --- | --- |
+| AC 9 breaks on a search over several memory types: with no keyword left, hybrid on interleaves the types by per-type rank, while `hybrid=False` orders them by similarity | own example: `fact one` 0.9, `fact two` 0.8, `episode one` 0.7, `episode two` 0.6, `types=["fact","episode"]`, query `"de la do the"` (and `"zzzz"`): on `[fact one, episode one, fact two, episode two]`, off `[fact one, fact two, episode one, episode two]`. Cause: `service.py` no-keyword path sets `_score = 1/(60+i)` and the type merge sorts by `(_tier, -_score, -similarity)`; C11 only tests one type | when no keyword is left, return the rows without `_score` (or `_score` 0) so the merge orders by similarity as with hybrid off; add a two-type case to C11 | |
+| The keyword leg reaching the service without the tier's `Filter` is not caught by any test | mutation `keyword leg run without the tier's Filter` (drop `filter=flt` from the `keyword_search` call in `service.py:416`) not killed: C7 and C18 use single-id subjects, which go through `EntityFilter`, never `Filter`. Own example `filters={"observed_at": {"gte": "2026-10-01"}}`, `vector_weight 0`, query `"E47"`: at HEAD `["recent fault E47"]`, under the mutation `old fault E47` comes back too | add a service-level case (C7) with a non-entity filter (`observed_at`, `areas`, or an `OR` of subjects); the example above kills the mutation | |
+| Postgres's keyword prefilter does not fold as `rules.fold` does, so the same query finds a row on in-memory and SQLite but not on Postgres | own contract-style example, `keyword_search` on in-memory and Postgres: content `"Le client préfère le café"` in NFD (decomposed accents), keyword `prefere` -> in-memory finds it, Postgres `[]`; `"Straße 12"` / `strasse` and `"surface 20 m²"` / `m2` -> same split. `translate()` maps only precomposed Latin-1/Extended-A letters; `rules.fold` is NFKD + casefold. C6 covers only precomposed `PRÉFÈRE` | in the Postgres prefilter use `regexp_replace(normalize(lower(content), NFKD), '[̀-ͯ]', '', 'g')` (PG13+, UTF8) or keep `translate` and add `normalize(..., NFC)` first; add an NFD row to C6 | |
+| AC 16 says `similarity` is the cosine in every case; a vector-leg row (`both` or `vector`) carries the cosine plus `apply_boosts`' area / text boost, while a keyword-only row carries the raw cosine, and the fusion tie-break compares the two | own example: area row + `"fault E47 in area"` at cosine 0.5 linked to it, query `"E47"`: `similarity` 0.55, `matched_by: both` (also 0.55 with hybrid off). C19 seeds no area and no glossary term, so it never meets a boost | either restate AC 16 as "the vector leg's similarity, boosts included, as today; the cosine for a keyword-only row" (user to confirm), or keep the boost out of the returned `similarity` | |
+| `vector_weight` is ignored for a type whose keywords `keyword_max_df` dropped, so in a multi-type search its vector-only rows outrank another type's vector-only rows of better rank | own example, `vector_weight 0.2`, `types=["fact","episode"]`, `E47` in 1 of 4 facts and 3 of 4 episodes: `episode plain` (episode vector rank 4, score `1/64`) ranks above `fact other 2` (fact vector rank 1, score `0.2/61`); by AC 14's formula the fact row leads | in the no-keyword path use `cfg.vector_weight / (RRF_K + i)`, consistent with `fuse`; settle together with the first finding | |
+
+## Probed, no finding
+
+- Mutations killed: `max_df` boundary `<=` -> `<` (C10), `both` labelled `vector` (C19), rows scoring 0 kept (C17), Postgres prefilter without `translate` (C6 Postgres leg).
+- Own examples that hold at HEAD: whole token on `E47's`, `#E47`, `E47...`, `_E47_` (match), `P-101/2` vs `p-101`, `E-47` vs `e47` (no match), typographic apostrophe `l’usine`; `max_df` on 2 of 3 rows (dropped), 0 searchable rows, 500 and 501 of 1000 rows (kept / dropped).

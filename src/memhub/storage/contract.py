@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import unicodedata
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -1040,5 +1041,19 @@ def test_keyword_search_prefilter_count_and_similarity(backend):
         rows, searchable = uow.vectors.keyword_search(keywords=["zzz"], query_embedding=vec(1.0),
                                                       workspace_id="ws", user_id="alice", now=NOW)
     assert rows == [] and searchable == 3
+    decomposed = unicodedata.normalize("NFD", "il préfère")  # the accent as a combining mark, as some apps store it
+    with backend.unit_of_work() as uow:
+        add(uow, decomposed, vec(0.5))
+        add(uow, "Straße 12", vec(0.5))
+        add(uow, "area 40 m²", vec(0.5))
+    with backend.unit_of_work() as uow:
+        def found(word: str) -> set[str]:
+            rows, _ = uow.vectors.keyword_search(keywords=[word], query_embedding=vec(1.0), workspace_id="ws",
+                                                 user_id="alice", now=NOW)
+            return set(contents(rows))
+
+        assert found("prefere") == {"Le client PRÉFÈRE le café", decomposed}
+        assert found("strasse") == {"Straße 12"}
+        assert found("m2") == {"area 40 m²"}
 
 __all__ = ["backend", *sorted(n for n in dir() if n.startswith("test_"))]
