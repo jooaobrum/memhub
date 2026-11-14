@@ -46,3 +46,32 @@ def test_search_issues_the_sql_recorded_before_the_ports(service, monkeypatch):
     if os.environ.get("MEMHUB_RECORD_SQL") == "1":
         GOLDEN.write_text("\n".join(seen) + "\n")
     assert seen == GOLDEN.read_text().splitlines()
+
+
+SUBJECTS_GOLDEN = Path(__file__).parent / "data" / "search_sql_subjects_before_filters.txt"
+
+
+def test_subject_filters_issue_the_sql_recorded_before_the_filter_grammar(store, settings, registry, fake_embeddings,
+                                                                          monkeypatch):
+    """#25 C18: today's keys with exact ids (`entities` tiers, `entity_type`, `widen`, the `require_filter` guard) run
+    the Postgres SQL they ran before the filter grammar. Recorded at 65233c5 (MEMHUB_RECORD_SQL=1 rewrites it)."""
+    from memhub.config import EntityConfig
+    from memhub.service import MemoryService
+
+    s = settings.model_copy(update={"entity_types": [], "entities": {
+        "machine": EntityConfig(), "patient": EntityConfig(require_filter=True)}})
+    service = MemoryService(store=store, settings=s, registry=registry, embeddings=fake_embeddings)
+    admin = Actor(id="admin-1", roles=["workspace_admin"])
+    for text, ent in (("pump P-101 vibrates", "P-101"), ("pump P-102 is quiet", "P-102")):
+        service.add(admin, type="fact", scope="user", user_id="alice",
+                    fields={"content": text, "entities": [{"type": "machine", "id": ent}]})
+    seen = _record(monkeypatch, store.prefix)
+    a, b = {"type": "machine", "id": "P-101"}, {"type": "machine", "id": "P-102"}
+    service.search(admin, "pump", user_id="alice", k=3, subjects=[a, b])
+    service.search(admin, "pump", user_id="alice", k=3, subjects=[a], widen=True)
+    service.search(admin, "pump", user_id="alice", k=3, entity_type="machine")
+    service.search(admin, "pump", user_id="alice", k=3)
+    monkeypatch.undo()
+    if os.environ.get("MEMHUB_RECORD_SQL") == "1":
+        SUBJECTS_GOLDEN.write_text("\n".join(seen) + "\n")
+    assert seen == SUBJECTS_GOLDEN.read_text().splitlines()

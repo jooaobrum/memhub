@@ -23,6 +23,7 @@ from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not
 from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.rules import (
     EntityFilter,
+    Filter,
     MEMORY_COLUMNS,
     NO_TABLES,
     RUN_COLUMNS,
@@ -514,6 +515,7 @@ class _Tx:
         area_boost: uuid.UUID | None = None,
         text_boost: list[str] | None = None,
         entities: EntityFilter | None = None,
+        filter: Filter | None = None,
     ) -> list[Row]:
         now = now or datetime.now(timezone.utc)
         rows = [
@@ -523,6 +525,7 @@ class _Tx:
             and (include_stale or not self._stale(r, now))
             and (r["type"] == type if type is not None else r["type"] != "area")
             and (entities is None or entities.matches(r["entities"]))
+            and (filter is None or filter.matches(r))
         ]
         return apply_boosts(
             self._nearest(rows, query_embedding, max(k * 4, 20)), k=k, boost=boost, area_boost=area_boost,

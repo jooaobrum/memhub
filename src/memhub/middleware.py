@@ -20,9 +20,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.tools import ToolRuntime
 from langchain_core.tools import tool
 
-from memhub.service import Actor, MemoryService, ServiceError
-from memhub.service import NotFound
-from memhub.toolkit import proposal_id, proposal_result
+from memhub.filters import HINT as FILTERS_HINT
+from memhub.filters import parse as parse_filters
+from memhub.service import Actor, MemoryService, ServiceError, ValidationError
+from memhub.toolkit import proposal_result
 
 log = logging.getLogger(__name__)
 
@@ -180,16 +181,24 @@ class MemoryMiddleware(AgentMiddleware):
         return handler(request.override(system_message=SystemMessage(content=base + MEMORY_FRAME + "\n" + extra)))
 
     def _search_memory_tool(self):
-        @tool
-        def search_memory(query: str, runtime: ToolRuntime, type: str | None = None) -> str:
-            """Search long-term memory, optionally restricted to one memory type."""
+        def search_memory(query: str, runtime: ToolRuntime, type: str | None = None,
+                          filters: dict | str | None = None) -> str:
             workspace_id, user_id = self._ids(runtime.context)
+            flt = None
+            if filters is not None:
+                try:
+                    flt = parse_filters(filters, declared=self.service.settings.declared_entity_types(),
+                                        types=[type] if type else None)
+                except ValidationError as exc:
+                    return f"invalid filters: {exc}"
             rows = self.service.search(
-                self.actor, query, workspace_id=workspace_id, user_id=user_id, k=self.k, type=type
+                self.actor, query, workspace_id=workspace_id, user_id=user_id, k=self.k,
+                **({"filter": flt} if flt is not None else {"type": type}),
             )
             return _memory_block(rows) if rows else "no matching memories"
 
-        return search_memory
+        search_memory.__doc__ = f"Search long-term memory, optionally restricted to one memory type. filters: {FILTERS_HINT}"
+        return tool(search_memory)
 
     def _load_skill_tool(self):
         @tool
