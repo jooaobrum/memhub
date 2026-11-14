@@ -409,6 +409,34 @@ def test_owner_cannot_approve(diagnosis, tmp_path, monkeypatch):
     assert row_of(db.memory, event.id)["status"] == "candidate"
 
 
+def test_owner_approves_when_type_needs_no_review(settings):
+    """C33 (AC 34, AD-057): an owner reviews their own candidate of a type that does not make user scope wait."""
+    m = memory(settings)
+    owner = Actor(id="anna")
+    a, b = (m.service.propose(Actor(id="agent"), type="fact", scope="user", fields={"content": text}, evidence=[],
+                              workspace_id="acme", user_id="anna") for text in ("Uses Okta for SSO", "Drinks green tea"))
+    assert m.service.approve(owner, a["id"])["status"] == "active" and row_of(m, str(a["memory_id"]))["reviewed_by"] == "anna"
+    assert m.service.reject(owner, b["id"])["status"] == "rejected"
+    m.settings.review = "all"
+    c = m.service.propose(Actor(id="agent"), type="fact", scope="user", fields={"content": "Works at Acme"}, evidence=[],
+                          workspace_id="acme", user_id="anna")
+    with pytest.raises(PermissionDenied):
+        m.service.approve(owner, c["id"])
+    assert row_of(m, str(c["memory_id"]))["status"] == "candidate"
+
+
+def test_owner_propose_approve_follows_rule(diagnosis):
+    """C34 (AC 35, AD-057)."""
+    m = memory(diagnosis)
+    owner = Actor(id="anna")
+    held = m.service.propose(owner, type="diagnosis", scope="user", fields={"content": "Has asthma"}, evidence=[],
+                             workspace_id="acme", user_id="anna", approve=True)
+    kept = m.service.propose(owner, type="fact", scope="user", fields={"content": "Lives in Lyon"}, evidence=[],
+                             workspace_id="acme", user_id="anna", approve=True)
+    assert held["status"] == "candidate"
+    assert (kept["status"], kept["verified"]) == ("active", True)
+
+
 def test_same_statement_merges_into_pending(diagnosis):
     """C19 (AC 19)."""
     first = conv("I have asthma", "Noted")

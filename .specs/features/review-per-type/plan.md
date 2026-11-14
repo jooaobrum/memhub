@@ -143,7 +143,9 @@ A user-scope memory that waits can be found, approved or rejected, and is not us
 16. WHEN `memhub queue --user U` runs THEN the system SHALL list only the user-scope candidates whose `user_id` is `U`
     - candidates for `U`, for `V` and a workspace one → only `U`'s
 17. WHEN an actor with a role in `roles.approve_workspace` approves or rejects a user-scope candidate THEN the system SHALL make it `active` (served by the next `search`) or `rejected`, with `reviewed_by` = that actor (AD-053)
-18. IF an actor with no role in `roles.approve_workspace` approves or rejects a user-scope candidate, its owner included, THEN the system SHALL raise `PermissionDenied` and leave it a `candidate`
+18. IF an actor with no role in `roles.approve_workspace` approves or rejects a user-scope candidate of a type whose rule makes user scope wait (`review: true`, or project `review: all` with the type unset), its owner included, THEN the system SHALL raise `PermissionDenied` and leave it a `candidate` (AD-057)
+34. WHEN the owner approves or rejects their own user-scope candidate of a type whose rule does not make user scope wait (e.g. a `fact` proposed by an agent, default `review: workspace`) THEN the system SHALL make it `active` or `rejected` with `reviewed_by` = the owner, as review-edit allows (AD-037, AD-041, AD-057)
+35. WHEN the owner calls `propose(..., approve=True)` for a type whose rule makes user scope wait THEN the system SHALL write a `candidate`; for a type whose rule does not, an `active`, `verified` row (AD-057)
 19. WHEN the same statement is extracted again while its user-scope candidate is pending THEN the system SHALL merge the new evidence into that candidate (`MERGE`) and SHALL NOT write a second candidate
 
 ### S4: what the app and the reviewer see (P1)
@@ -201,7 +203,7 @@ The config accepts the rule in short and long forms and shows it back.
 | Assumption | Chosen default | Rationale | Confirmed? |
 | --- | --- | --- | --- |
 | short form for type options | mapping keys `builtin: true` / `template:` | AD-056 | y |
-| who approves user-scope candidates | `roles.approve_workspace` | AD-053 | y |
+| who approves user-scope candidates | `roles.approve_workspace`; the owner too, except for a type whose rule makes user scope wait | AD-053, narrowed by AD-057 after review-edit merged | y |
 | `propose_memory` and `review: false` | always a candidate | AD-054 | y |
 | the auto-approval mark | `reviewed_by = "auto"`, both scopes, no backfill | AD-055 | y |
 | `/remember` orders | follow the same rule as extraction | they go through `route()` like extraction; a project that wants a type reviewed wants it whoever triggered extraction | n |
