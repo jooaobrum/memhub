@@ -29,13 +29,11 @@ log = logging.getLogger(__name__)
 
 Resolver = Union[str, Callable[[Any], str]]
 
-# Without it a model reads the blocks below as unrelated context and asks the user for what they already say.
-# e2e S3 ("dinner spot for my next work trip", memory: travels to Berlin monthly), gpt-4.1-mini: no frame 1/13;
-# "use it, do not ask for what it tells you" + "unverified may be out of date" 5/8; this wording 20/20.
+# Without it a model reads the blocks below as unrelated context and asks the user for what they already say
 MEMORY_FRAME = (
-    "What you remember about this user from earlier conversations follows. Assume it still holds and draw the "
-    "obvious conclusions from it: do not ask the user for something it answers or implies. \"unverified\" only "
-    "means no person has reviewed the entry yet."
+    "Long-term memory about this user from earlier conversations follows. Treat it as what you already know: "
+    "use it in your answer and do not ask the user for something it already tells you. "
+    "An entry marked unverified may be out of date."
 )
 
 
