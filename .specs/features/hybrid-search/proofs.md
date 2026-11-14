@@ -1,6 +1,6 @@
 # hybrid-search proofs
 
-**HEAD**: 0d7d9e4
+**HEAD**: fb5acd4
 **Tree**: clean
 **Result**: 25 pass, 0 fail; mutations 5 killed, 0 not
 
