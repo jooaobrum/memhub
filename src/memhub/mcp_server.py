@@ -66,8 +66,10 @@ def build_server(memory: Any, *, workspace_id: str, user_id: str, run_id: str) -
         return kit.call("search_memory", {"query": query, **({"type": type} if type else {}),
                                           **({"filters": filters} if filters is not None else {})})
 
-    def propose_memory(type: str, fields: dict, evidence: Optional[list[dict]] = None, scope: str = "user") -> str:
-        return kit.call("propose_memory", {"type": type, "fields": fields, "evidence": evidence or [], "scope": scope})
+    def propose_memory(type: str, fields: dict, evidence: Optional[list[dict]] = None, scope: str = "user",
+                       memory_id: Optional[str] = None, user_requested: bool = False) -> str:
+        return kit.call("propose_memory", {"type": type, "fields": fields, "evidence": evidence or [], "scope": scope,
+                                           "memory_id": memory_id, "user_requested": user_requested})
 
     # the configured types and scopes, as enums the model can see
     search_memory.__annotations__["type"] = Optional[Literal[types]]  # type: ignore[valid-type]

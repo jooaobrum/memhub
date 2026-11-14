@@ -36,6 +36,8 @@ from memhub.storage.rules import (
     apply_boosts,
     area_link,
     as_vector_list,
+    edited_note,
+    edited_version,
     fresh_evidence,
     newest_observed_at,
 )
@@ -255,10 +257,12 @@ class _Tx:
             raise Conflict("the active version changed concurrently; retry the edit")
         return self.add_memory(status="active", verified=verified, **common)
 
-    def amend_row(self, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
+    def amend_row(self, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None,
+                  entities: list[dict] | None = None) -> None:
         row = self._mem().get(id)
         if row is not None and row["status"] == "candidate":
-            self._set(id, content=content, payload=copy.deepcopy(payload), embedding=self._vector(embedding))
+            cols = {"entities": copy.deepcopy(entities)} if entities is not None else {}
+            self._set(id, content=content, payload=copy.deepcopy(payload), embedding=self._vector(embedding), **cols)
 
     def _supersede(self, row_id: uuid.UUID) -> int:
         row = self._mem().get(row_id)
@@ -289,6 +293,7 @@ class _Tx:
         resolve: str | None = None,
         note: str | None = None,
         merged: dict | None = None,
+        edit: dict | None = None,
     ) -> Row:
         row = self.get_by_id(id)
         if row is None:
@@ -320,6 +325,11 @@ class _Tx:
             if sibling_active is not None and sibling_active["id"] != row["id"]:
                 if self._supersede(sibling_active["id"]) == 0:
                     raise Conflict("the active version changed concurrently; retry the approval")
+        if edit is not None:  # the proposal stays in history as it was; the approved text is the next version
+            self._set(id, status="archived", reviewed_by=reviewed_by, reviewed_at=self.now, review_note=edited_note(note))
+            version = max(r["version"] for r in self._mem().values() if r["memory_id"] == row["memory_id"]) + 1
+            new = self.add_memory(**edited_version(row, edit, version))
+            return self._out(self._set(new["id"], reviewed_by=reviewed_by, reviewed_at=self.now, review_note=note))
         return self._out(self._set(
             id, status="active", verified=True, reviewed_by=reviewed_by, reviewed_at=self.now, review_note=note,
         ))

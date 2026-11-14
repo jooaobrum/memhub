@@ -122,6 +122,20 @@ def _print(obj: Any) -> None:
     typer.echo(json.dumps(_readable(obj), default=str, indent=2))
 
 
+def _set_fields(pairs: list[str]) -> dict[str, Any]:
+    """`--set KEY=VALUE` pairs as fields: VALUE as JSON when it parses (`count=3`), else the text as given."""
+    fields: dict[str, Any] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            raise ValueError(f"--set expects KEY=VALUE, got {pair!r}")
+        try:
+            fields[key.strip()] = json.loads(value)
+        except json.JSONDecodeError:
+            fields[key.strip()] = value
+    return fields
+
+
 def _fail(exc: Exception) -> None:
     typer.secho(f"{type(exc).__name__}: {exc}", fg=typer.colors.RED, err=True)
     raise typer.Exit(1)
@@ -377,11 +391,18 @@ def approve(
     id: str,
     resolve: Optional[str] = typer.Option(None, help="keep_old | replace | keep_both, for a conflicting candidate"),
     note: Optional[str] = None,
+    set_: Optional[list[str]] = typer.Option(
+        None, "--set", help="KEY=VALUE: correct a field before approving (repeatable; VALUE is JSON when it parses, else text)",
+    ),
     config: Optional[Path] = ConfigOpt,
 ) -> None:
+    try:
+        fields = _set_fields(set_ or [])
+    except ValueError as exc:
+        _fail(exc)
     service = _service(config)
     try:
-        row = service.approve(_actor(), uuid.UUID(id), resolve=resolve, note=note)
+        row = service.approve(_actor(), uuid.UUID(id), fields=fields or None, resolve=resolve, note=note)
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:
