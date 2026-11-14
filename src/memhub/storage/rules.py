@@ -5,7 +5,7 @@ Nothing here imports psycopg, so the in-memory backend and the service layer loa
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 Row = dict[str, Any]
@@ -145,3 +145,184 @@ class EntityFilter:
         return ((not self.any_of or bool(keys & set(self.any_of)))
                 and (self.of_type is None or self.of_type in types)
                 and not types & set(self.none_of_types))
+
+
+# --- the search filter tree (#25) -------------------------------------------------------------------------------
+#
+# `memhub.filters.parse` builds it from a `filters=` dict; `matches(row)` is the reference every backend's SQL is held
+# to by the contract suite. A comparison with a null field is false, and its `NOT` true (no SQL three-valued logic).
+
+class Filter:
+    """A node of the filter tree."""
+
+    def matches(self, row: Row) -> bool:  # pragma: no cover - every node overrides it
+        raise NotImplementedError
+
+
+def _id_hit(op: str, values: tuple[str, ...], id_: Any) -> bool:
+    if not isinstance(id_, str):
+        return False
+    if op == "in":
+        return id_ in values
+    if op == "prefix":
+        return id_.startswith(values[0])
+    return values[0] in id_  # contains
+
+
+@dataclass(frozen=True)
+class EntityIs(Filter):
+    """The row names an entity of `type` whose id passes `op` (`in` - exact is `in` of one -, `prefix`, `contains`)."""
+
+    type: str
+    op: str
+    values: tuple[str, ...]
+
+    def hit(self, e: dict) -> bool:
+        return e.get("type") == self.type and _id_hit(self.op, self.values, e.get("id"))
+
+    def matches(self, row: Row) -> bool:
+        return any(self.hit(e) for e in row["entities"] or [])
+
+
+@dataclass(frozen=True)
+class EntityTypeIn(Filter):
+    """The row names an entity of one of these types."""
+
+    types: tuple[str, ...]
+
+    def hit(self, e: dict) -> bool:
+        return e.get("type") in self.types
+
+    def matches(self, row: Row) -> bool:
+        return any(self.hit(e) for e in row["entities"] or [])
+
+
+@dataclass(frozen=True)
+class TypeIn(Filter):
+    """The row's memory type is one of these."""
+
+    types: tuple[str, ...]
+
+    def matches(self, row: Row) -> bool:
+        return row["type"] in self.types
+
+
+@dataclass(frozen=True)
+class AreaRef(Filter):
+    """Areas named by key or title; the service resolves it to an `AreaIn` of the caller's area ids before any query."""
+
+    names: tuple[str, ...]
+
+    def matches(self, row: Row) -> bool:
+        raise ValueError("an AreaRef must be resolved to an AreaIn before it filters rows")
+
+
+@dataclass(frozen=True)
+class AreaIn(Filter):
+    """The row links (`in_area`) to one of these area memory ids; none given matches no row."""
+
+    ids: tuple[str, ...]
+
+    def matches(self, row: Row) -> bool:
+        return bool(set(area_ids(row.get("links") or [])) & set(self.ids))
+
+
+def _aware(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+@dataclass(frozen=True)
+class TimeRange(Filter):
+    """`field` (`observed_at` or `valid_until`) >= `gte`, < `lt`, <= `lte`, each when given. A null `valid_until` never
+    expires: it passes every lower bound and no upper one (AD-050); a null `observed_at` passes nothing."""
+
+    field: str
+    gte: datetime | None = None
+    lt: datetime | None = None
+    lte: datetime | None = None
+
+    def matches(self, row: Row) -> bool:
+        value = _aware(row.get(self.field))
+        if value is None:
+            return self.field == "valid_until" and self.lt is None and self.lte is None
+        return ((self.gte is None or value >= self.gte) and (self.lt is None or value < self.lt)
+                and (self.lte is None or value <= self.lte))
+
+
+@dataclass(frozen=True)
+class ContentContains(Filter):
+    """The row's content holds `text`, ignoring case (`str.lower` on both sides)."""
+
+    text: str
+
+    def matches(self, row: Row) -> bool:
+        return self.text.lower() in (row.get("content") or "").lower()
+
+
+@dataclass(frozen=True)
+class AllOf(Filter):
+    parts: tuple[Filter, ...]
+
+    def matches(self, row: Row) -> bool:
+        return all(p.matches(row) for p in self.parts)
+
+
+@dataclass(frozen=True)
+class AnyOf(Filter):
+    parts: tuple[Filter, ...]
+
+    def matches(self, row: Row) -> bool:
+        return any(p.matches(row) for p in self.parts)
+
+
+@dataclass(frozen=True)
+class NotOf(Filter):
+    part: Filter
+
+    def matches(self, row: Row) -> bool:
+        return not self.part.matches(row)
+
+
+def all_of(*parts: Filter | None) -> Filter | None:
+    """The AND of the given parts, `None` dropped; one part is itself, none is `None`."""
+    kept = tuple(p for p in parts if p is not None)
+    return None if not kept else kept[0] if len(kept) == 1 else AllOf(kept)
+
+
+def positive_entity_nodes(flt: Filter | None, negated: bool = False) -> list[Filter]:
+    """The `EntityIs` / `EntityTypeIn` nodes not under a `NOT`: what a filter "names" (guard, `matched_on`)."""
+    if flt is None:
+        return []
+    if isinstance(flt, (AllOf, AnyOf)):
+        return [n for p in flt.parts for n in positive_entity_nodes(p, negated)]
+    if isinstance(flt, NotOf):
+        return positive_entity_nodes(flt.part, not negated)
+    if isinstance(flt, (EntityIs, EntityTypeIn)) and not negated:
+        return [flt]
+    return []
+
+
+def named_entity_types(flt: Filter | None) -> set[str]:
+    out: set[str] = set()
+    for n in positive_entity_nodes(flt):
+        out |= {n.type} if isinstance(n, EntityIs) else set(n.types)
+    return out
+
+
+def map_areas(flt: Filter | None, resolve: Any) -> Filter | None:
+    """The tree with each `AreaRef` replaced by `resolve(names)` (an `AreaIn`)."""
+    if flt is None:
+        return None
+    if isinstance(flt, AreaRef):
+        return resolve(flt.names)
+    if isinstance(flt, AllOf):
+        return AllOf(tuple(map_areas(p, resolve) for p in flt.parts))
+    if isinstance(flt, AnyOf):
+        return AnyOf(tuple(map_areas(p, resolve) for p in flt.parts))
+    if isinstance(flt, NotOf):
+        return NotOf(map_areas(flt.part, resolve))
+    return flt

@@ -11,7 +11,11 @@ import getpass
 import re
 import uuid
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
+
+from pydantic import Field
+
+from memhub.filters import HINT as FILTERS_HINT
 
 AGENT_ID = "mcp"
 # e2e S5: when this only said that a proposal "waits for a person's review", Claude Code saved "remember X" in its
@@ -58,14 +62,16 @@ def build_server(memory: Any, *, workspace_id: str, user_id: str, run_id: str) -
     scopes = tuple(memory.settings.scopes)
     server = server_class("memhub", instructions=INSTRUCTIONS)
 
-    def search_memory(query: str, type: Optional[str] = None) -> str:
-        return kit.call("search_memory", {"query": query, **({"type": type} if type else {})})
+    def search_memory(query: str, type: Optional[str] = None, filters: Optional[Union[dict, str]] = None) -> str:
+        return kit.call("search_memory", {"query": query, **({"type": type} if type else {}),
+                                          **({"filters": filters} if filters is not None else {})})
 
     def propose_memory(type: str, fields: dict, evidence: Optional[list[dict]] = None, scope: str = "user") -> str:
         return kit.call("propose_memory", {"type": type, "fields": fields, "evidence": evidence or [], "scope": scope})
 
     # the configured types and scopes, as enums the model can see
     search_memory.__annotations__["type"] = Optional[Literal[types]]  # type: ignore[valid-type]
+    search_memory.__annotations__["filters"] = Annotated[Optional[Union[dict, str]], Field(description=FILTERS_HINT)]
     propose_memory.__annotations__["type"] = Literal[types]  # type: ignore[valid-type]
     propose_memory.__annotations__["scope"] = Literal[scopes]  # type: ignore[valid-type]
     specs = {s["function"]["name"]: s["function"]["description"] for s in kit.tool_specs()}

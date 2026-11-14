@@ -27,7 +27,10 @@ from typing import Any
 import pytest
 
 from memhub.storage.base import Backend, Capability
-from memhub.storage.rules import MEMORY_COLUMNS, RUN_COLUMNS, EntityFilter, NotFound, area_link, as_vector_list
+from memhub.storage.rules import (
+    MEMORY_COLUMNS, RUN_COLUMNS, AllOf, AnyOf, AreaIn, ContentContains, EntityFilter, EntityIs, EntityTypeIn, NotFound,
+    NotOf, TimeRange, TypeIn, area_link, as_vector_list,
+)
 
 DIMS = 16
 MODEL = "contract-embed"
@@ -713,6 +716,187 @@ def test_reembed_to_new_dims(backend, settings, registry):
         assert sorted(r["status"] for r in rows) == ["active", "candidate", "superseded"]
         assert all(len(as_vector_list(r["embedding"])) == 20 for r in rows)
         assert uow.meta.get_meta("embedding") == {"model": "bigger", "dims": 20}
+
+# --- search filters (#25): the `Filter` tree inside each backend's nearest-neighbour query -------------------------
+
+
+def _m(id_: str, type: str = "machine") -> dict:
+    return {"type": type, "id": id_}
+
+
+def _at(text: str) -> datetime:
+    return datetime.fromisoformat(text).replace(tzinfo=timezone.utc) if "+" not in text else datetime.fromisoformat(text)
+
+
+def fsearch(uow, flt, *, k: int = 50, user_id: str = "alice") -> set[str]:
+    rows = uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id=user_id, k=k, filter=flt,
+                              include_stale=True, now=NOW)
+    return set(contents(rows))
+
+
+def test_filter_entity_id_prefix(backend):
+    """#25 C1: `prefix` keeps ids that start with it; `_` is a plain character and case counts."""
+    with backend.unit_of_work() as uow:
+        for i, (name, ent) in enumerate([("prd1", _m("PRD_1")), ("prd10", _m("PRD_10")), ("prd2", _m("PRD_2")),
+                                         ("prd3", _m("PRD_3")), ("prdx1", _m("PRDX1")), ("lower", _m("prd_1")),
+                                         ("line", _m("LINE_1")), ("other type", _m("PRD_9", "line"))]):
+            add(uow, name, vec(0.9 - i * 0.05), entities=[ent])
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, EntityIs("machine", "prefix", ("PRD_",))) == {"prd1", "prd10", "prd2", "prd3"}
+
+
+def test_filter_entity_id_in_and_contains(backend):
+    """#25 C3."""
+    with backend.unit_of_work() as uow:
+        for i, (name, ent) in enumerate([("prd1", "PRD_1"), ("prd12", "PRD_12"), ("prd2", "PRD_2"), ("prd3", "PRD_3"),
+                                         ("lower", "prd_1")]):
+            add(uow, name, vec(0.9 - i * 0.05), entities=[_m(ent)])
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, EntityIs("machine", "in", ("PRD_1", "PRD_2"))) == {"prd1", "prd2"}
+        assert fsearch(uow, EntityIs("machine", "contains", ("D_1",))) == {"prd1", "prd12"}
+
+
+def test_filter_and_or_not(backend):
+    """#25 C4: AND of two subjects, OR of a subject and a subject type, NOT of a subject."""
+    with backend.unit_of_work() as uow:
+        add(uow, "both", vec(0.95), entities=[_m("PRD_1"), _m("PRD_2")])
+        add(uow, "one", vec(0.9), entities=[_m("PRD_1")])
+        add(uow, "two", vec(0.85), entities=[_m("PRD_2")])
+        add(uow, "line", vec(0.8), entities=[_m("L1", "line")])
+        add(uow, "untagged", vec(0.75))
+    p1, p2 = EntityIs("machine", "in", ("PRD_1",)), EntityIs("machine", "in", ("PRD_2",))
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, AllOf((p1, p2))) == {"both"}
+        rows = uow.vectors.search(query_embedding=vec(1.0), workspace_id="ws", user_id="alice", k=50, now=NOW,
+                                  filter=AnyOf((p1, EntityTypeIn(("line",)))))
+        assert sorted(contents(rows)) == ["both", "line", "one"]  # each once
+        assert fsearch(uow, NotOf(p1)) == {"two", "line", "untagged"}
+
+
+def test_filter_entity_type_in(backend):
+    """#25 C5."""
+    with backend.unit_of_work() as uow:
+        add(uow, "machine", vec(0.9), entities=[_m("M1")])
+        add(uow, "line", vec(0.85), entities=[_m("L1", "line")])
+        add(uow, "part", vec(0.8), entities=[_m("6205", "part")])
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, EntityTypeIn(("machine", "line"))) == {"machine", "line"}
+
+
+def test_filter_areas(backend):
+    """#25 C6: rows linked `in_area` to one of the ids; an empty id set keeps none."""
+    bearings, lube, other = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    with backend.unit_of_work() as uow:
+        add(uow, "in bearings", vec(0.9), links=[area_link(bearings)])
+        add(uow, "in lube", vec(0.85), links=[area_link(lube)])
+        add(uow, "in other", vec(0.8), links=[area_link(other)])
+        add(uow, "no area", vec(0.75))
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, AreaIn((str(bearings),))) == {"in bearings"}
+        assert fsearch(uow, AreaIn((str(bearings), str(lube)))) == {"in bearings", "in lube"}
+        assert fsearch(uow, AreaIn(())) == set()
+        assert fsearch(uow, NotOf(AreaIn((str(bearings),)))) == {"in lube", "in other", "no area"}
+
+
+def test_filter_observed_at_bounds(backend):
+    """#25 C8: a date-only `lte` keeps its whole UTC day (AD-049); a datetime bound compares exactly."""
+    with backend.unit_of_work() as uow:
+        for i, at in enumerate(["2026-10-31T15:00:00", "2026-10-01T00:00:00", "2026-11-01T00:00:00",
+                                "2026-09-30T23:59:00", "2026-10-01T11:59:00", "2026-10-01T12:00:00"]):
+            add(uow, at, vec(0.9 - i * 0.05), observed_at=_at(at))
+    october = TimeRange("observed_at", gte=_at("2026-10-01T00:00:00"), lt=_at("2026-11-01T00:00:00"))
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, october) == {"2026-10-31T15:00:00", "2026-10-01T00:00:00", "2026-10-01T11:59:00",
+                                         "2026-10-01T12:00:00"}
+        assert fsearch(uow, TimeRange("observed_at", gte=_at("2026-10-01T12:00:00+00:00"))) == {
+            "2026-10-31T15:00:00", "2026-11-01T00:00:00", "2026-10-01T12:00:00"}
+        assert fsearch(uow, TimeRange("observed_at", lte=_at("2026-10-01T11:59:00"))) == {
+            "2026-10-01T00:00:00", "2026-09-30T23:59:00", "2026-10-01T11:59:00"}
+
+
+def test_filter_valid_until_bounds(backend):
+    """#25 C9: a null `valid_until` never expires: it passes every lower bound and no upper one (AD-050)."""
+    with backend.unit_of_work() as uow:
+        add(uow, "dec 1 10:00", vec(0.9), valid_until=_at("2026-12-01T10:00:00"))
+        add(uow, "nov 30", vec(0.85), valid_until=_at("2026-11-30T08:00:00"))
+        add(uow, "never", vec(0.8))
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, TimeRange("valid_until", gte=_at("2026-12-01T00:00:00"))) == {"dec 1 10:00", "never"}
+        assert fsearch(uow, TimeRange("valid_until", lt=_at("2026-12-02T00:00:00"))) == {"dec 1 10:00", "nov 30"}
+
+
+def test_filter_content_contains(backend):
+    """#25 C10: case-insensitive, non-ASCII included; `%` and `_` are plain characters."""
+    with backend.unit_of_work() as uow:
+        add(uow, "Error E47 on start", vec(0.9))
+        add(uow, "Ölpumpe defekt", vec(0.85))
+        add(uow, "500 rpm", vec(0.8))
+        add(uow, "speed 5x0", vec(0.75))
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, ContentContains("e47")) == {"Error E47 on start"}
+        assert fsearch(uow, ContentContains("ölpumpe")) == {"Ölpumpe defekt"}
+        assert fsearch(uow, ContentContains("ÖLPUMPE")) == {"Ölpumpe defekt"}
+        assert fsearch(uow, ContentContains("50%")) == set()
+        assert fsearch(uow, ContentContains("5_0")) == set()
+
+
+def test_filter_not_of_null_comparison(backend):
+    """#25 C11: a comparison with a null field is false, so its NOT is true (no SQL three-valued logic)."""
+    with backend.unit_of_work() as uow:
+        add(uow, "never expires", vec(0.9))
+        add(uow, "expires nov 30", vec(0.85), valid_until=_at("2026-11-30T00:00:00"))
+        add(uow, "seen sept", vec(0.8), observed_at=_at("2026-09-15T00:00:00"))
+    with backend.unit_of_work() as uow:
+        before_dec = TimeRange("valid_until", lt=_at("2026-12-02T00:00:00"))
+        assert "never expires" in fsearch(uow, NotOf(before_dec))
+        assert "expires nov 30" not in fsearch(uow, NotOf(before_dec))
+        assert "seen sept" in fsearch(uow, NotOf(TimeRange("observed_at", gte=_at("2026-10-01T00:00:00"))))
+
+
+FILTER_TABLE = [
+    EntityIs("machine", "in", ("PRD_1",)),
+    EntityIs("machine", "prefix", ("PRD_",)),
+    EntityIs("machine", "contains", ("D_1",)),
+    EntityTypeIn(("line",)),
+    TypeIn(("preference",)),
+    ContentContains("pump"),
+    TimeRange("observed_at", gte=datetime(2026, 1, 5, tzinfo=timezone.utc)),
+    TimeRange("valid_until", gte=datetime(2026, 6, 1, tzinfo=timezone.utc)),
+    TimeRange("valid_until", lte=datetime(2026, 6, 1, tzinfo=timezone.utc)),
+    AnyOf((EntityTypeIn(("line",)), ContentContains("PUMP"))),
+    AllOf((EntityIs("machine", "prefix", ("PRD",)), NotOf(ContentContains("pump")))),
+    NotOf(AnyOf((EntityIs("machine", "in", ("PRD_1",)), TimeRange("valid_until", lte=datetime(2026, 6, 1, tzinfo=timezone.utc))))),
+]
+
+
+@pytest.mark.parametrize("flt", FILTER_TABLE, ids=[f"f{i}" for i in range(len(FILTER_TABLE))])
+def test_filter_matches_agrees_with_search(backend, flt):
+    """#25 C12: `Filter.matches` (what `service.list` uses) keeps exactly the rows the backend's query keeps."""
+    rows = [
+        dict(content="pump PRD_1", entities=[_m("PRD_1")], observed_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        dict(content="fan PRD_12", entities=[_m("PRD_12"), _m("L1", "line")], valid_until=datetime(2026, 7, 1, tzinfo=timezone.utc)),
+        dict(content="Pump line", entities=[_m("L2", "line")], type="preference", valid_until=datetime(2026, 5, 1, tzinfo=timezone.utc)),
+        dict(content="nothing", entities=[], observed_at=datetime(2026, 1, 9, tzinfo=timezone.utc)),
+        dict(content="PRDX", entities=[_m("PRDX")]),
+    ]
+    with backend.unit_of_work() as uow:
+        for i, r in enumerate(rows):
+            add(uow, embedding=vec(0.9 - i * 0.05), **r)
+    with backend.unit_of_work() as uow:
+        stored = uow.memories.list_memories(workspace_id="ws")
+        expected = {r["content"] for r in stored if flt.matches(r)}
+        assert fsearch(uow, flt) == expected
+
+
+def test_filter_fills_k_from_matching_rows(backend):
+    """#25 C13: the filter runs inside the query, so 30 nearer non-matching rows do not crowd out the 2 that match."""
+    with backend.unit_of_work() as uow:
+        for i in range(30):
+            add(uow, f"line {i}", vec(0.99 - i * 0.001), entities=[_m("LINE_1")])
+        add(uow, "prd a", vec(0.3), entities=[_m("PRD_1")])
+        add(uow, "prd b", vec(0.2), entities=[_m("PRD_1")])
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, EntityIs("machine", "prefix", ("PRD_",)), k=5) == {"prd a", "prd b"}
 
 
 __all__ = ["backend", *sorted(n for n in dir() if n.startswith("test_"))]

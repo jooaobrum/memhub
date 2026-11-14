@@ -31,7 +31,17 @@ from memhub.storage.base import FIXES, METHODS, BoundUnitOfWork, Capability, not
 from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.memory import _contains, _cosine
 from memhub.storage.rules import (
+    AllOf,
+    AnyOf,
+    AreaIn,
+    ContentContains,
     EntityFilter,
+    EntityIs,
+    EntityTypeIn,
+    Filter,
+    NotOf,
+    TimeRange,
+    TypeIn,
     NO_TABLES,
     UNSET,
     Conflict,
@@ -184,6 +194,52 @@ def _entity_sql(table: str, flt: EntityFilter | None) -> tuple[list[str], list[A
         params += list(flt.none_of_types)
     return clauses, params
 
+def _lower(value: Any) -> Any:
+    """Python's `str.lower` as the SQL function `memhub_lower`: SQLite's own `lower()` folds ASCII only."""
+    return value.lower() if isinstance(value, str) else value
+
+
+def _filter_sql(table: str, flt: Filter) -> tuple[str, list[Any]]:
+    """A `Filter` tree as one boolean SQL expression over `table`; every leaf is true or false, never null (`NOT` of a
+    comparison with a null field is true, as `Filter.matches`)."""
+    each = f"EXISTS (SELECT 1 FROM json_each({table}.entities) e WHERE json_extract(e.value, '$.type') "
+    if isinstance(flt, EntityIs):
+        id_ = "json_extract(e.value, '$.id')"
+        if flt.op == "in":
+            return f"{each}= ? AND {id_} IN ({', '.join('?' for _ in flt.values)}))", [flt.type, *flt.values]
+        if flt.op == "prefix":  # substr, not LIKE: `_` and `%` in an id are plain characters
+            return f"{each}= ? AND substr({id_}, 1, ?) = ?)", [flt.type, len(flt.values[0]), flt.values[0]]
+        return f"{each}= ? AND instr({id_}, ?) > 0)", [flt.type, flt.values[0]]
+    if isinstance(flt, EntityTypeIn):
+        return f"{each}IN ({', '.join('?' for _ in flt.types)}))", list(flt.types)
+    if isinstance(flt, TypeIn):
+        return f"type IN ({', '.join('?' for _ in flt.types)})", list(flt.types)
+    if isinstance(flt, AreaIn):
+        if not flt.ids:
+            return "0", []
+        return (f"EXISTS (SELECT 1 FROM json_each({table}.links) l WHERE json_extract(l.value, '$.kind') = 'in_area' "
+                f"AND json_extract(l.value, '$.memory_id') IN ({', '.join('?' for _ in flt.ids)}))", list(flt.ids))
+    if isinstance(flt, TimeRange):
+        col, bounds, params = flt.field, [], []
+        for op, value in ((">=", flt.gte), ("<", flt.lt), ("<=", flt.lte)):
+            if value is not None:
+                bounds.append(f"{col} {op} ?")
+                params.append(_ts(value))
+        if col == "valid_until" and flt.lt is None and flt.lte is None:  # null never expires (AD-050)
+            return f"({col} IS NULL OR {' AND '.join(bounds)})", params
+        return f"({col} IS NOT NULL AND {' AND '.join(bounds)})", params
+    if isinstance(flt, ContentContains):
+        return "instr(memhub_lower(content), ?) > 0", [flt.text.lower()]
+    if isinstance(flt, (AllOf, AnyOf)):
+        parts = [_filter_sql(table, x) for x in flt.parts]
+        glue = " AND " if isinstance(flt, AllOf) else " OR "
+        return "(" + glue.join(sql for sql, _ in parts) + ")", [v for _, ps in parts for v in ps]
+    if isinstance(flt, NotOf):
+        sql, params = _filter_sql(table, flt.part)
+        return f"NOT ({sql})", params
+    raise TypeError(f"cannot filter by {flt!r}: resolve areas first")
+
+
 class _Tx:
     """One transaction on `conn`: the `MemoryStore` methods, without the cursor."""
 
@@ -192,6 +248,7 @@ class _Tx:
         self.now = datetime.now(timezone.utc)  # Postgres now(): the transaction's start
         self.mem, self.runs, self.meta = f"{prefix}_memory", f"{prefix}_memory_runs", f"{prefix}_memhub_meta"
         self._dims: int | None = None
+        conn.create_function("memhub_lower", 1, _lower, deterministic=True)  # the content filter (#25)
 
     # --- plumbing -----------------------------------------------------------------------------------------------
 
@@ -609,6 +666,7 @@ class _Tx:
         area_boost: uuid.UUID | None = None,
         text_boost: list[str] | None = None,
         entities: EntityFilter | None = None,
+        filter: Filter | None = None,
     ) -> list[Row]:
         clauses = ["status = 'active'", "workspace_id = ?", "(scope = 'workspace' OR (scope = 'user' AND user_id = ?))"]
         params: list[Any] = [workspace_id, user_id]
@@ -623,6 +681,10 @@ class _Tx:
         more, more_params = _entity_sql(self.mem, entities)
         clauses += more
         params += more_params
+        if filter is not None:  # inside the query, so `k` is filled from matching rows (#25)
+            sql, filter_params = _filter_sql(self.mem, filter)
+            clauses.append(sql)
+            params += filter_params
         return apply_boosts(
             self._nearest(" AND ".join(clauses), params, query_embedding, max(k * 4, 20)), k=k, boost=boost,
             area_boost=area_boost, text_boost=text_boost, entity_boost=entity_boost,

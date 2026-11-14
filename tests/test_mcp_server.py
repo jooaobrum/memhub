@@ -52,7 +52,7 @@ def test_tools_and_their_schemas():
     tools = anyio.run(run)
     assert set(tools) == {"search_memory", "propose_memory"}
     search, propose = tools["search_memory"], tools["propose_memory"]
-    assert search["required"] == ["query"] and set(search["properties"]) == {"query", "type"}
+    assert search["required"] == ["query"] and set(search["properties"]) == {"query", "type", "filters"}  # #25
     assert json.dumps(search["properties"]["type"]).count('"fact"') == 1 and '"preference"' in json.dumps(search["properties"]["type"])
     assert sorted(propose["required"]) == ["fields", "type"]
     assert set(propose["properties"]) == {"type", "fields", "evidence", "scope"}
