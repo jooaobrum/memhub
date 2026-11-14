@@ -116,6 +116,30 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: validate_verification (workflow)
 - last seen: 2026-11-12T19:05:09Z
 
+### L-018 - Prove each comparison bound (gte, lt, lte) separately against a null field, not only the bounds the first example used
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `storage` · harmful: 0
+- features: search-filters
+- evidence: src/memhub/storage/rules.py TimeRange.matches (C9) (storage)
+- last seen: 2026-11-14T10:40:20Z
+
+### L-019 - Prove a parsing rule through the parser, not through hand-built trees of what the parser should produce
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `filters` · harmful: 0
+- features: search-filters
+- evidence: src/memhub/filters.py _time (AC 9, AD-049) (filters)
+- last seen: 2026-11-14T10:40:20Z
+
+### L-020 - A guard that combinators can lift needs a criterion per combinator, asserting the exact result set, not membership
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `search` · harmful: 0
+- features: search-filters
+- evidence: AD-052, test_search_filters.py guard tests (AC 26) (search)
+- last seen: 2026-11-14T10:40:20Z
+
+### L-021 - Stage hunks, not whole files, when the working tree holds uncommitted work that is not this feature's
+- signal: `spec_deviation` · recurrence: 1 feature(s) · scope: `git` · harmful: 0
+- features: search-filters
+- evidence: e4965bd src/memhub/middleware.py MEMORY_FRAME (git)
+- last seen: 2026-11-14T10:40:20Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.

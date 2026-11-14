@@ -3,7 +3,7 @@
   "promote_threshold": 2,
   "window_days": 45,
   "quarantine_threshold": 2,
-  "next_id": 18,
+  "next_id": 22,
   "lessons": [
     {
       "id": "L-001",
@@ -310,6 +310,78 @@
       ],
       "created": "2026-11-12T19:05:09Z",
       "last_seen": "2026-11-12T19:05:09Z"
+    },
+    {
+      "id": "L-018",
+      "key": "surviving_mutant::prove each comparison bound gte lt lte separately against a null field not only the bounds the first example used",
+      "text": "Prove each comparison bound (gte, lt, lte) separately against a null field, not only the bounds the first example used",
+      "signal": "surviving_mutant",
+      "scope": "storage",
+      "status": "candidate",
+      "features": [
+        "search-filters"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "src/memhub/storage/rules.py TimeRange.matches (C9) (storage)"
+      ],
+      "created": "2026-11-14T10:40:20Z",
+      "last_seen": "2026-11-14T10:40:20Z"
+    },
+    {
+      "id": "L-019",
+      "key": "ac_gap::prove a parsing rule through the parser not through hand built trees of what the parser should produce",
+      "text": "Prove a parsing rule through the parser, not through hand-built trees of what the parser should produce",
+      "signal": "ac_gap",
+      "scope": "filters",
+      "status": "candidate",
+      "features": [
+        "search-filters"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "src/memhub/filters.py _time (AC 9, AD-049) (filters)"
+      ],
+      "created": "2026-11-14T10:40:20Z",
+      "last_seen": "2026-11-14T10:40:20Z"
+    },
+    {
+      "id": "L-020",
+      "key": "spec_precision_gap::a guard that combinators can lift needs a criterion per combinator asserting the exact result set not membership",
+      "text": "A guard that combinators can lift needs a criterion per combinator, asserting the exact result set, not membership",
+      "signal": "spec_precision_gap",
+      "scope": "search",
+      "status": "candidate",
+      "features": [
+        "search-filters"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "AD-052, test_search_filters.py guard tests (AC 26) (search)"
+      ],
+      "created": "2026-11-14T10:40:20Z",
+      "last_seen": "2026-11-14T10:40:20Z"
+    },
+    {
+      "id": "L-021",
+      "key": "spec_deviation::stage hunks not whole files when the working tree holds uncommitted work that is not this feature s",
+      "text": "Stage hunks, not whole files, when the working tree holds uncommitted work that is not this feature's",
+      "signal": "spec_deviation",
+      "scope": "git",
+      "status": "candidate",
+      "features": [
+        "search-filters"
+      ],
+      "recurrence": 1,
+      "harmful": 0,
+      "evidence": [
+        "e4965bd src/memhub/middleware.py MEMORY_FRAME (git)"
+      ],
+      "created": "2026-11-14T10:40:20Z",
+      "last_seen": "2026-11-14T10:40:20Z"
     }
   ]
 }
