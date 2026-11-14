@@ -85,9 +85,11 @@ memory.get_all(filters={"entities": [P101]}, workspace_id="plant-a", user_id="te
 | `entity_type: "machine"` | Memories about any subject of that type. |
 | `types: [...]` | The same as the `types=` parameter. Give it in one place only. |
 
-- **`widen=True`** adds a last tier, `general`: memories about no isolated subject. It needs `filters["entities"]`.
+Ids also take `in`, `prefix` and `contains`, and `areas`, `observed_at`, `valid_until`, `content`, `AND`, `OR` and `NOT` narrow further: see [filters.md](filters.md). Top-level keys are ANDed, so `entities` with `entity_type` keeps memories naming both.
+
+- **`widen=True`** adds a last tier, `general`: memories about no isolated subject that pass the other top-level keys. It needs `filters["entities"]`.
 - **`top_k`** cuts across all tiers, so a subject's own memories are never pushed out by better-scoring general ones.
-- **`matched_on`** is present on every hit when `filters` is given, and absent otherwise.
+- **`matched_on`** is present on every hit when `filters` names a subject, and absent otherwise.
 - **Unknown keys, unknown types or malformed entities** raise `ValidationError` before any database call.
 
 memhub stores no relation between subjects. You pass the order to widen in, because your registry knows that P-101 is a CR-32.
@@ -108,4 +110,4 @@ Without `filters`, search returns what it always did, with one exception: a `req
 - **They don't resolve names to ids.** Pass canonical ids.
 - **They don't hold one keyed value per subject.** A keyed slot is one per owner, and another subject's value becomes a conflict. Use a non-keyed type, such as a `fact` tagged with the subject, for per-subject attributes.
 - **They don't split memories merged before subjects were declared.** Their history is kept.
-- **The toolkit, middleware, CLI and MCP take no filter yet.** They only get the `require_filter` guard.
+- **They are not passed from the agent automatically.** The `search_memory` tool (toolkit, middleware, MCP) and `memhub search` / `memhub list` take the same `filters` ([filters.md](filters.md)), but the model or the person must send it.

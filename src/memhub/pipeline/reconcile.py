@@ -235,15 +235,22 @@ class _Reconciler:
                 return self.conflict(row)
             if stated_over_inferred:
                 return Decision("drop", reason="inferred")
-        if row["status"] != "active" or row["type"] != p.candidate.type:
-            return self.conflict(row)  # a pending candidate, or a row of another type: no version to replace, a person decides
+        pending = row["status"] == "candidate" and row["conflicts_with"] is None
+        if row["type"] != p.candidate.type or not (row["status"] == "active" or pending):
+            return self.conflict(row)  # a row of another type, or a conflict waiting for review: a person decides
+        if pending and verdict.verdict not in ("extends", "updates"):
+            return self.conflict(row)
+        # Nobody has reviewed a pending candidate yet: a later state or a complement of it rewrites it in place, and
+        # it stays a candidate. A conflict would make the reviewer choose between two versions of one statement.
         if verdict.verdict == "extends":
             merged = (verdict.content or "").strip()
             if not merged or not _only_own_words(merged, row["content"], p.memory.content) or self.embeddings is None:
                 return self.conflict(row)
             p.memory = p.memory.model_copy(update={"content": merged})
             p.embedding = list(self.embeddings.embed_query(merged))
-            return Decision("supersede", row, extends=True)
+            return Decision("amend", row) if pending else Decision("supersede", row, extends=True)
+        if pending:
+            return Decision("amend", row)
         if verdict.verdict == "updates" and mutable:
             return Decision("supersede", row)
         return self.conflict(row)  # `conflicts`, `unrelated` for a slot, or `updates` of an immutable key

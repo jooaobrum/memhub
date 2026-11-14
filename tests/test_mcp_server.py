@@ -52,10 +52,10 @@ def test_tools_and_their_schemas():
     tools = anyio.run(run)
     assert set(tools) == {"search_memory", "propose_memory"}
     search, propose = tools["search_memory"], tools["propose_memory"]
-    assert search["required"] == ["query"] and set(search["properties"]) == {"query", "type"}
+    assert search["required"] == ["query"] and set(search["properties"]) == {"query", "type", "filters"}  # #25
     assert json.dumps(search["properties"]["type"]).count('"fact"') == 1 and '"preference"' in json.dumps(search["properties"]["type"])
     assert sorted(propose["required"]) == ["fields", "type"]
-    assert set(propose["properties"]) == {"type", "fields", "evidence", "scope"}
+    assert set(propose["properties"]) == {"type", "fields", "evidence", "scope", "memory_id", "user_requested"}
     assert propose["properties"]["type"]["enum"] == ["fact", "preference"]
     assert propose["properties"]["scope"]["enum"] == ["user", "workspace"]
 
@@ -81,7 +81,7 @@ def test_propose_memory():
     [result] = _call(server, ("propose_memory", {"type": "fact", "fields": {"content": "CI runs on every push"}, "scope": "workspace"}))
     answer = _json(result)
     [row] = m.queue(workspace_id="acme", user_id="lead", run_id="r", roles=["workspace_admin"])
-    assert answer == {"id": str(row["memory_id"]), "event": "PENDING", "status": "candidate"}
+    assert answer == {"id": str(row["memory_id"]), "event": "PENDING", "status": "candidate", "content": "CI runs on every push"}
     assert run_id.startswith("mcp-") and (row["run_id"], row["agent_id"], row["status"]) == (run_id, "mcp", "candidate")
 
 

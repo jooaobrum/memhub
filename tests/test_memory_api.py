@@ -470,7 +470,7 @@ def test_toolkit_propose_returns_id_event_status(mem):
     kit = mem.tools(**IDS)
     out = json.loads(kit.call("propose_memory", {"type": "fact", "fields": {"content": "uses okta"}, "scope": "user"}))
     [row] = mem.get_all(**IDS, status="candidate")
-    assert out == {"id": str(row["memory_id"]), "event": "PENDING", "status": "candidate"}
+    assert out == {"id": str(row["memory_id"]), "event": "PENDING", "status": "candidate", "content": "uses okta"}
 
 
 def test_ingest_runs_single_source(pool):
