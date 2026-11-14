@@ -1,8 +1,8 @@
 # search-filters proofs
 
-**HEAD**: 9e44ebf
+**HEAD**: 8a18b0e
 **Tree**: clean
-**Result**: 39 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 41 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -43,5 +43,15 @@
 | C33 | `.venv/bin/python -m pytest tests/test_search_filters.py -k "docs_reference_the_grammar"` | 1 | 1 | pass |
 | C34 | `.venv/bin/python -m pytest tests/test_search_filters.py -k "sqlite_borrowed_connection_content_filter"` | 1 | 1 | pass |
 | C35 | `.venv/bin/python -m pytest tests/test_search_filters.py -k "naive_datetime_is_utc"` | 1 | 1 | pass |
-| C36 | `.venv/bin/python -m pytest -q` | 256 | 256 | pass |
+| C36 | `.venv/bin/python -m pytest -q` | 261 | 261 | pass |
+| C37 | `.venv/bin/python -m pytest tests/test_search_filters.py -k "guard_scoped_to_the_named_subject"` | 1 | 1 | pass |
+| C38 | `.venv/bin/python -m pytest tests/test_contract_memory.py tests/test_contract_sqlite.py tests/test_contract_pos` | 4 | 4 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| SQLite whole-day upper bound < -> <= (keeps 2026-11-01T00:00Z) | `src/memhub/storage/sqlite.py:224` | yes |
+| null valid_until passes a datetime lte (AD-050 upper bound) | `src/memhub/storage/rules.py:251` | yes |
+| NOT branch counted as naming a type (guard lifted by NOT) | `src/memhub/storage/rules.py:303` | yes |
