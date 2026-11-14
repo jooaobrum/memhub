@@ -82,6 +82,29 @@ def fresh_evidence(existing: list[dict], new: list[dict]) -> list[dict]:
     return out
 
 
+EDITED_ON_REVIEW = "edited on review"
+
+
+def edited_note(note: str | None) -> str:
+    """The `review_note` of a candidate a reviewer changed before approving it."""
+    return f"{EDITED_ON_REVIEW}: {note}" if note else EDITED_ON_REVIEW
+
+
+def edited_version(row: Row, edit: dict, version: int) -> dict[str, Any]:
+    """`add_memory` arguments for the version a reviewer approved with changes: the edited content, payload,
+    entities and embedding, and everything else (evidence, run, agent, owner, times) carried over from the
+    candidate `row`, so the approval keeps where the memory came from."""
+    return dict(
+        type=row["type"], schema_version=row["schema_version"], scope=row["scope"], workspace_id=row["workspace_id"],
+        user_id=row["user_id"], content=edit["content"], payload=edit["payload"], entities=edit["entities"],
+        embedding=edit["embedding"], evidence=row["evidence"], status="active", verified=True,
+        created_by=row["created_by"], memory_id=row["memory_id"], version=version, seen_count=row["seen_count"],
+        score=row["score"], observed_at=row["observed_at"], valid_from=row["valid_from"],
+        valid_until=row["valid_until"], durability=row["durability"], assertion=row["assertion"],
+        links=row["links"], run_id=row["run_id"], agent_id=row["agent_id"],
+    )
+
+
 def area_link(area_memory_id: Any) -> dict:
     return {"kind": "in_area", "memory_id": str(area_memory_id)}
 

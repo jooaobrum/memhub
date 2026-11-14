@@ -1,0 +1,17 @@
+[
+  {"file": "src/memhub/service.py",
+   "old": "        if row[\"scope\"] == \"user\" and row[\"user_id\"] == actor.id:\n            return\n",
+   "new": "        if row[\"scope\"] == \"user\":\n            return\n",
+   "proof": ".venv/bin/python -m pytest tests/test_review_edit.py -k \"user_scope_owner_or_role\"",
+   "label": "C11 any user may review a user-scope candidate (owner test dropped)"},
+  {"file": "src/memhub/service.py",
+   "old": "if cfg is not None and cfg.keyed and _slot_text(payload.get(\"key\")) != _slot_text(row[\"payload\"].get(\"key\")):",
+   "new": "if cfg is not None and cfg.keyed and payload.get(\"key\") != row[\"payload\"].get(\"key\"):",
+   "proof": ".venv/bin/python -m pytest tests/test_review_edit.py -k \"key_change_on_review\"",
+   "label": "C8 key compared raw, so \"1\" -> 1 counts as a key change"},
+  {"file": "src/memhub/service.py",
+   "old": "round(_cosine(embedding, as_vector_list(row[\"embedding\"]) or []), 6) >= self.settings.reconcile.duplicate",
+   "new": "round(_cosine(embedding, as_vector_list(row[\"embedding\"]) or []), 6) > self.settings.reconcile.duplicate",
+   "proof": ".venv/bin/python -m pytest tests/test_review_propose.py -k \"rejected_repeat\"",
+   "label": "C24 rejected-repeat threshold >= -> >"}
+]
