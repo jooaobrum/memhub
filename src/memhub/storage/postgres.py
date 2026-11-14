@@ -52,6 +52,8 @@ from memhub.storage.rules import (
     apply_boosts,
     area_link,
     as_vector_list,
+    edited_note,
+    edited_version,
     fresh_evidence,
     newest_observed_at,
 )
@@ -461,6 +463,7 @@ class MemoryStore:
         links: list[dict] | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        reviewed_by: str | None = None,
     ) -> Row:
         """`observed_at` defaults to the newest evidence timestamp, else now. `run_id` / `agent_id` are the app's
         ids of the call that wrote the row; they are only written when given, so a ledger whose `init` predates
@@ -474,17 +477,17 @@ class MemoryStore:
             INSERT INTO {self._t('memory')}
               (id, memory_id, version, type, schema_version, scope, workspace_id, user_id,
                status, verified, content, payload, entities, embedding, evidence,
-               seen_count, score, conflicts_with, created_by, observed_at, valid_from, valid_until, durability, assertion, links
-               {", run_id, agent_id" if ids else ""})
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s, COALESCE(%s, now()), %s,%s,%s,%s,%s
+               seen_count, score, conflicts_with, created_by, reviewed_by, observed_at, valid_from, valid_until, durability,
+               assertion, links {", run_id, agent_id" if ids else ""})
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s, COALESCE(%s, now()), %s,%s,%s,%s,%s
                {", %s, %s" if ids else ""})
             RETURNING *
             """,
             (
                 row_id, memory_id, version, type, schema_version, scope, workspace_id, user_id,
                 status, verified, content, Jsonb(payload), Jsonb(entities), embedding, Jsonb(evidence),
-                seen_count, score, conflicts_with, created_by, observed_at, valid_from, valid_until, durability, assertion,
-                Jsonb(links or []), *((run_id, agent_id) if ids else ()),
+                seen_count, score, conflicts_with, created_by, reviewed_by, observed_at, valid_from, valid_until, durability,
+                assertion, Jsonb(links or []), *((run_id, agent_id) if ids else ()),
             ),
         )
         return cur.fetchone()
@@ -506,6 +509,7 @@ class MemoryStore:
         evidence: list[dict] | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        reviewed_by: str | None = None,
     ) -> Row:
         """Insert version N+1 (active, or candidate when `as_candidate`), and
         (for the active path) mark version N superseded, atomically. Version N+1 inherits
@@ -535,14 +539,16 @@ class MemoryStore:
             workspace_id=active["workspace_id"], user_id=active["user_id"], content=content,
             payload=payload, entities=entities, embedding=embedding, evidence=evidence,
             status="active", verified=verified, created_by=created_by, memory_id=memory_id,
-            version=new_version, links=links, run_id=run_id, agent_id=agent_id, **times,
+            version=new_version, links=links, run_id=run_id, agent_id=agent_id, reviewed_by=reviewed_by, **times,
         )
 
-    def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
-        """Rewrite a pending candidate in place (its evidence is merged separately)."""
+    def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None,
+                  entities: list[dict] | None = None) -> None:
+        """Rewrite a pending candidate in place (its evidence is merged separately); `entities` too when given."""
         cur.execute(
-            f"UPDATE {self._t('memory')} SET content=%s, payload=%s, embedding=%s WHERE id=%s AND status='candidate'",
-            (content, Jsonb(payload), embedding, id),
+            f"UPDATE {self._t('memory')} SET content=%s, payload=%s, embedding=%s, entities=COALESCE(%s, entities) "
+            f"WHERE id=%s AND status='candidate'",
+            (content, Jsonb(payload), embedding, None if entities is None else Jsonb(entities), id),
         )
 
     def _supersede(self, cur: Cursor, row_id: uuid.UUID) -> int:
@@ -583,6 +589,7 @@ class MemoryStore:
         resolve: str | None = None,
         note: str | None = None,
         merged: dict | None = None,
+        edit: dict | None = None,
     ) -> Row:
         """`merged` ({content, payload, embedding}) is the single statement `keep_both` writes for a keyed slot:
         a slot holds one value, so both values become one new version of the existing row."""
@@ -633,6 +640,20 @@ class MemoryStore:
             if sibling_active is not None and sibling_active["id"] != row["id"]:
                 if self._supersede(cur, sibling_active["id"]) == 0:
                     raise Conflict("the active version changed concurrently; retry the approval")
+
+        if edit is not None:  # the proposal stays in history as it was; the approved text is the next version
+            cur.execute(
+                f"UPDATE {self._t('memory')} SET status='archived', reviewed_by=%s, reviewed_at=now(), review_note=%s "
+                f"WHERE id=%s",
+                (reviewed_by, edited_note(note), id),
+            )
+            cur.execute(f"SELECT max(version) AS v FROM {self._t('memory')} WHERE memory_id=%s", (row["memory_id"],))
+            new = self.add_memory(cur, **edited_version(row, edit, cur.fetchone()["v"] + 1))
+            cur.execute(
+                f"UPDATE {self._t('memory')} SET reviewed_by=%s, reviewed_at=now(), review_note=%s WHERE id=%s RETURNING *",
+                (reviewed_by, note, new["id"]),
+            )
+            return cur.fetchone()
 
         cur.execute(
             f"UPDATE {self._t('memory')} SET status='active', verified=true, reviewed_by=%s, "

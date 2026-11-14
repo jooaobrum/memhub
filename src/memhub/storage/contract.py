@@ -124,6 +124,18 @@ def test_rows_have_the_reference_keys_and_types(backend):
     assert (row["version"], row["seen_count"], row["assertion"], row["links"]) == (1, 1, "stated", [])
 
 
+def test_reviewed_by_is_stored(backend):
+    """`reviewed_by` given to `add_memory` / `edit_memory` is stored (`auto`: let in with no person, AD-055); omitted, NULL."""
+    with backend.unit_of_work() as uow:
+        auto, plain = add(uow, "auto row", reviewed_by="auto"), add(uow, "plain row")
+        edited = uow.memories.edit_memory(plain["memory_id"], content="plain v2", payload={"content": "plain v2"}, entities=[],
+                                          embedding=vec(1.0), verified=False, created_by="contract", reviewed_by="auto")
+        again = uow.memories.edit_memory(auto["memory_id"], content="auto v2", payload={"content": "auto v2"}, entities=[],
+                                         embedding=vec(1.0), verified=False, created_by="contract")
+        stored = {r["content"]: r["reviewed_by"] for r in (uow.memories.get_by_id(x["id"]) for x in (auto, plain, edited, again))}
+    assert stored == {"auto row": "auto", "plain row": None, "plain v2": "auto", "auto v2": None}
+
+
 def test_naive_datetimes_are_stored_as_utc(backend):
     naive = datetime(2026, 1, 1, 12)
     with backend.unit_of_work() as uow:
@@ -440,6 +452,47 @@ def test_conflict_resolutions(backend):
         assert (new["memory_id"], new["version"], new["content"]) == (slot["memory_id"], 2, "tea; coffee")
         assert [e["message_id"] for e in new["evidence"]] == ["m1", "m2"]
         assert uow.memories.get_by_id(both["id"])["status"] == "archived"
+
+
+def _edit(content: str, similarity: float = 0.5) -> dict:
+    return {"content": content, "payload": {"content": content}, "entities": [{"type": "machine", "id": "P-101"}],
+            "embedding": vec(similarity)}
+
+
+def test_approve_with_edit_writes_the_next_version(backend):
+    """An edit on review keeps the proposal as an archived row and writes the approved text as the next version."""
+    with backend.unit_of_work() as uow:
+        cand = add(uow, "Login uses Auth0", status="candidate", scope="workspace", workspace_id="ws2", user_id=None,
+                   evidence=[{"message_id": "m1", "quote": "we use Auth0"}], run_id="run-7", agent_id="agent-3",
+                   created_by="agent")
+        new = uow.memories.approve(cand["id"], reviewed_by="rev", edit=_edit("Login uses Okta"))
+        old = uow.memories.get_by_id(cand["id"])
+        history = uow.memories.history(cand["memory_id"])
+    assert (old["status"], old["review_note"], old["reviewed_by"], old["content"]) == (
+        "archived", "edited on review", "rev", "Login uses Auth0")
+    assert (new["memory_id"], new["version"], new["status"], new["verified"], new["reviewed_by"]) == (
+        cand["memory_id"], 2, "active", True, "rev")
+    assert new["reviewed_at"] is not None and new["review_note"] is None
+    assert (new["content"], new["payload"], new["entities"]) == (
+        "Login uses Okta", {"content": "Login uses Okta"}, [{"type": "machine", "id": "P-101"}])
+    assert as_vector_list(new["embedding"]) == pytest.approx(vec(0.5))
+    assert new["evidence"] == [{"message_id": "m1", "quote": "we use Auth0"}]
+    assert (new["run_id"], new["agent_id"], new["type"], new["scope"], new["workspace_id"], new["user_id"]) == (
+        "run-7", "agent-3", "fact", "workspace", "ws2", None)
+    assert [(r["version"], r["status"]) for r in history] == [(1, "archived"), (2, "active")]
+
+
+def test_approve_with_edit_supersedes_the_active_version(backend):
+    with backend.unit_of_work() as uow:
+        v1 = add(uow, "v1", status="superseded")
+        v2 = add(uow, "v2", memory_id=v1["memory_id"], version=2)
+        v3 = add(uow, "v3", status="candidate", memory_id=v1["memory_id"], version=3)
+        new = uow.memories.approve(v3["id"], reviewed_by="a", edit=_edit("v3 edited"))
+        history = uow.memories.history(v1["memory_id"])
+    assert (new["version"], new["content"]) == (4, "v3 edited")
+    assert [(r["version"], r["status"]) for r in history] == [
+        (1, "superseded"), (2, "superseded"), (3, "archived"), (4, "active")]
+    assert sum(r["status"] == "active" for r in history) == 1 and v2["status"] == "active"
 
 
 def test_plain_candidate_version_supersedes_its_active_sibling(backend):

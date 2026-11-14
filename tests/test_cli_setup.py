@@ -245,7 +245,7 @@ def test_init_flags_writes_memory_file(tmp_path, monkeypatch):
     assert _loaded()["memory"] == "./memory.md" and _loaded()["scopes"] == ["user"]  # AD-035
     text = Path("memory.md").read_text()
     front = yaml.safe_load(text.split("---")[1])
-    assert front == {"types": {"fact": "builtin", "preference": "builtin", "profile": "builtin"}}
+    assert front == {"review": "workspace", "types": {"fact": "builtin", "preference": "builtin", "profile": "builtin"}}  # C31 (#29)
     body = text.split("---", 2)[2].strip()
     assert body.startswith(f"# What to remember\n\n{cli_setup.DEFAULT_BODY}\n") and body.endswith(cli_setup.STARTER_RULES.strip())
     cfg = resolve(Path.cwd() / "memhub.yaml").config

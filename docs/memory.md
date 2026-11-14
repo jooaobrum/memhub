@@ -17,14 +17,14 @@ memory: ./memory.md        # relative to this yaml
 
 A `memory.md` has two parts:
 
-- **Frontmatter** between two `---` lines (YAML). It may hold only `types`, `areas`, `strict` and `entities`, because database,
+- **Frontmatter** between two `---` lines (YAML). It may hold only `types`, `areas`, `strict`, `entities` and `review`, because database,
   models and sources stay in `memhub.yaml`.
 - **Body**: Markdown that tells the extractor what to keep and what never to keep. It becomes
   `extraction.instructions`. When the body is empty, memhub's default instructions apply.
 
 A file with no frontmatter is all body, and the starter types apply.
 
-Each key lives in one place. If `memhub.yaml` also sets `types`, `areas` or `extraction.instructions`, loading stops
+Each key lives in one place. If `memhub.yaml` also sets `types`, `areas`, `review` or `extraction.instructions`, loading stops
 with `types is set in both memhub.yaml and memory.md: keep one`.
 
 The memory file can also be named with `MEMHUB_MEMORY=./memory.md`, or from code with
@@ -61,6 +61,17 @@ types:
   preference: builtin
 ```
 
+**Options beside a short form.** A mapping with `builtin: true` or `template:` is the short form plus options; the
+options written beside it win over the built-in's own:
+
+```yaml
+types:
+  profile: {builtin: true, review: false}                 # built-in profile, auto-approved
+  fix: {template: "{fault}: {action}", review: true}      # a template, always reviewed
+```
+
+A mapping gives its schema once: `builtin`, `template` and `fields` / `class` do not go together.
+
 ## Types: the long form
 
 Use the long form when a field needs a description for the extractor, or when a type needs more options. Any type
@@ -85,10 +96,48 @@ types:
 | `scopes` | `user`, `workspace` or both (default: the project's `scopes`) |
 | `retrieval` | `search` (default), `always` (in every prompt), `index_then_load` |
 | `keyed`, `keys` | one active row per key (a new value replaces the old one) |
-| `review` | `false`: a workspace memory is active at once, without review |
+| `review` | `true`: an extracted memory of this type waits for review in every scope; `false`: never; unset: the project's `review` |
 | `extract`, `on_remember` | whether extraction proposes it, and whether a `/remember` order may |
 | `area` | `required` or `optional` |
 | `ttl`, `max_active`, `type_prior` | lifetime, cap per owner, weight in the admission score |
+
+## review: who waits for a person
+
+An extracted memory is either `active` at once (served to the agent) or a `candidate` in `memhub queue` until someone
+with a role in `roles.approve_workspace` runs `memhub approve`. One rule decides it, for both scopes:
+
+```yaml
+review: workspace            # the project default: none | workspace | all
+types:
+  profile:    {builtin: true, review: false}     # auto-approved, even when shared
+  preference: builtin                            # follows the project default
+  diagnosis:                                     # one user's, but a person approves it
+    fields: {condition: str, since: "date?"}
+    scopes: [user]
+    review: true
+```
+
+The type's own `review` wins; else the project's:
+
+| Project `review` | A user-scope memory | A workspace-scope memory |
+| --- | --- | --- |
+| `review: none` | active | active |
+| `review: workspace` (the default: memhub's behaviour before this option) | active | candidate |
+| `review: all` | candidate | candidate |
+
+`review` sits in the `memory.md` frontmatter or in `memhub.yaml`, not both. `memhub config show` prints the rule in
+force for every type (`review.<type>  none | workspace | all  <where it was set>`).
+
+Whatever `review` says:
+
+- **A conflict always waits.** A memory that contradicts an active one is a candidate with `conflicts_with` set.
+- **A person's edit is never overwritten.** A `verified` row is kept; the new value goes to the queue.
+- **An agent's proposal always waits.** `propose_memory` (toolkit, middleware, MCP) writes a candidate.
+- **The checks still run.** Grounding, the admission score and the injection scan drop what they drop.
+- **A memory added by hand** (`memhub add`, `Memory.add("text")`) keeps its status: a person wrote it.
+
+A row that went active with no person carries `reviewed_by: "auto"`; an approved or rejected row carries the
+reviewer's id. Rows written before this option have `reviewed_by` empty.
 
 ## Areas
 

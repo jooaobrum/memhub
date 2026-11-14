@@ -29,11 +29,13 @@ log = logging.getLogger(__name__)
 
 Resolver = Union[str, Callable[[Any], str]]
 
-# Without it a model reads the blocks below as unrelated context and asks the user for what they already say
+# Without it a model reads the blocks below as unrelated context and asks the user for what they already say.
+# e2e S3 ("dinner spot for my next work trip", memory: travels to Berlin monthly), gpt-4.1-mini: no frame 1/13;
+# "use it, do not ask for what it tells you" + "unverified may be out of date" 5/8; this wording 20/20.
 MEMORY_FRAME = (
-    "Long-term memory about this user from earlier conversations follows. Treat it as what you already know: "
-    "use it in your answer and do not ask the user for something it already tells you. "
-    "An entry marked unverified may be out of date."
+    "What you remember about this user from earlier conversations follows. Assume it still holds and draw the "
+    "obvious conclusions from it: do not ask the user for something it answers or implies. \"unverified\" only "
+    "means no person has reviewed the entry yet."
 )
 
 
@@ -213,9 +215,12 @@ class MemoryMiddleware(AgentMiddleware):
     def _propose_memory_tool(self):
         @tool
         def propose_memory(
-            type: str, fields: dict, evidence: list[dict], runtime: ToolRuntime, scope: str = "user"
+            type: str, fields: dict, evidence: list[dict], runtime: ToolRuntime, scope: str = "user",
+            memory_id: str | None = None, user_requested: bool = False,
         ) -> str:
-            """Propose a new memory. It is saved as a candidate and needs review before it is used."""
+            """Propose a new memory. It is saved as a candidate and needs review before it is used. To correct a
+            draft you proposed, pass its id as memory_id. Set user_requested only when the user explicitly asks to
+            save something a reviewer rejected before."""
             workspace_id, user_id = self._ids(runtime.context)
             try:
                 row = self.service.propose(
@@ -226,9 +231,11 @@ class MemoryMiddleware(AgentMiddleware):
                     evidence=evidence,
                     workspace_id=workspace_id,
                     user_id=user_id,
+                    memory_id=proposal_id(memory_id),
+                    user_requested=user_requested,
                 )
-            except ServiceError as exc:
-                return f"rejected: {exc}"
+            except (ServiceError, NotFound) as exc:
+                return json.dumps({"rejected": str(exc)})
             return json.dumps(proposal_result(row))
 
         return propose_memory

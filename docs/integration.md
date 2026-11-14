@@ -236,12 +236,25 @@ Notes:
 | Item | Behaviour | Action |
 |---|---|---|
 | User-scope memory | Active immediately, `verified=false` | `edit` (marks verified), `archive`, `delete` |
-| Workspace-scope memory, or any conflict | `candidate`, invisible to search | `queue` → `approve [--resolve keep_old\|replace\|keep_both]` / `reject` |
+| Workspace-scope memory, or any conflict | `candidate`, invisible to search | `queue` → `approve [--set KEY=VALUE] [--resolve keep_old\|replace\|keep_both]` / `reject` |
 | Wrong area layout | – | `areas`, `areas merge <from> <to>` |
 | Something needs adding by hand | – | `add --type fact --scope user --user <id> --file x.json` (fields validated against the type) |
 | Erasure request | – | `delete --user <id>` |
 
 Once a person edits or approves a row it is `verified`, and the extractor will never overwrite it: contradictions arrive as conflict candidates.
+
+`approve --set KEY=VALUE` (`approve(id, fields={...})` in code) corrects a candidate and approves it in one transaction. The fields are checked like any write; the proposal stays in history as `archived` with `review_note` "edited on review", and the corrected text is the next version, active and verified, with the proposal's evidence, `run_id` and `agent_id`. The key of a keyed type cannot change on review (reject and propose again). With a conflict, `--set` goes with `--resolve replace` or with `keep_both` on a type without keys; `keep_old` and a keyed `keep_both` take no `--set`.
+
+Who may review: a role in `roles.approve_workspace` for any candidate, and the owner for a user-scope candidate.
+
+**Review from the chat.** An app builds its own review flow on public calls:
+
+- `m.check_fields(type, fields)` checks fields as a write would, without saving (`{"content", "payload"}`, or the write's `ValidationError`).
+- `m.propose(type, fields, evidence=..., scope=...)` writes a candidate (`PENDING`). With `approve=True` the caller reviewed it: it is saved active and verified (`ADD`) when the caller may approve that scope, else it stays a candidate.
+- `m.propose(..., memory_id=<id>)` corrects a pending candidate of the caller in place instead of adding a second one.
+- A proposal close to one a reviewer rejected for the same owner (same type, similarity at or above `reconcile.duplicate`) is refused with `a reviewer already rejected this memory`, unless `user_requested=True`.
+
+The agent's `propose_memory` tool (`m.tools()`, `m.middleware()`, `memhub mcp`) takes the same `memory_id` and `user_requested`, never writes active, and returns `{"id", "event", "status", "content"}` or `{"rejected": reason}`. [examples/review_inline](../examples/review_inline) shows inline approve / edit / reject with LangChain's human-in-the-loop middleware on these calls.
 
 CLI identity: `cli:<os user>`; roles from `MEMHUB_CLI_ROLES` (default `workspace_admin`).
 
