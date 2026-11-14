@@ -14,10 +14,14 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 AGENT_ID = "mcp"
+# e2e S5: when this only said that a proposal "waits for a person's review", Claude Code saved "remember X" in its
+# own notes instead, and memhub never saw it
 INSTRUCTIONS = (
-    "Long-term memory of this project and user. Call search_memory before answering when past decisions, "
-    "preferences or fixes may matter. Call propose_memory for something durable worth keeping: it waits for a "
-    "person's review before it is ever used."
+    "memhub is the long-term memory of this project and user, shared by every session and agent. Call "
+    "search_memory before answering when past decisions, conventions, preferences or fixes may matter. When the "
+    "user asks you to remember something, or states a lasting convention, decision or fact, save it with "
+    "propose_memory, even if you also keep notes of your own: this is where the project's memory lives. A proposal "
+    "is a candidate that a person approves before it is used; that review is expected and is no reason to skip it."
 )
 
 

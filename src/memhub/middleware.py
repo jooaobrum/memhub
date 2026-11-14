@@ -28,6 +28,15 @@ log = logging.getLogger(__name__)
 
 Resolver = Union[str, Callable[[Any], str]]
 
+# Without it a model reads the blocks below as unrelated context and asks the user for what they already say.
+# e2e S3 ("dinner spot for my next work trip", memory: travels to Berlin monthly), gpt-4.1-mini: no frame 1/13;
+# "use it, do not ask for what it tells you" + "unverified may be out of date" 5/8; this wording 20/20.
+MEMORY_FRAME = (
+    "What you remember about this user from earlier conversations follows. Assume it still holds and draw the "
+    "obvious conclusions from it: do not ask the user for something it answers or implies. \"unverified\" only "
+    "means no person has reviewed the entry yet."
+)
+
 
 class MemoryState(AgentState):
     memory_snapshot: NotRequired[str]  # profile + skill index, fixed per thread
@@ -168,7 +177,7 @@ class MemoryMiddleware(AgentMiddleware):
             return handler(request)
         # Injected into this request only; never saved in the message history.
         base = request.system_message.text + "\n\n" if request.system_message else ""
-        return handler(request.override(system_message=SystemMessage(content=base + extra)))
+        return handler(request.override(system_message=SystemMessage(content=base + MEMORY_FRAME + "\n" + extra)))
 
     def _search_memory_tool(self):
         @tool
