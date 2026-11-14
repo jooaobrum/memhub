@@ -132,8 +132,13 @@ second time.
 |---|---|
 | about one user, extracted or added | `active` at once and served to the agent |
 | shared with the workspace (a glossary term, a fix, an account fact) | a `candidate` until someone runs `memhub approve <id>` |
+| of a type with `review: true` (a `diagnosis`), even about one user | a `candidate` until approved |
+| of a type with `review: false` (a `profile`), even shared | `active` at once, marked `reviewed_by: "auto"` |
 | contradicting an active one | a conflict in `memhub queue`, resolved with `--resolve keep_old\|replace\|keep_both` |
 | edited by a person | a new version marked `verified`; a later extraction never overwrites it |
+
+The first two rows are the default, `review: workspace`. Set `review: none | workspace | all` in `memory.md` to change it
+for the whole project, or `review: true` / `false` on one type; see [memory.md](../memory.md#review-who-waits-for-a-person).
 
 `memhub history <memory_id>` shows every version with who wrote it and when.
 

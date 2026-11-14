@@ -13,7 +13,7 @@ areas:
 Only bird species knowledge and the user's sightings.
 ```
 
-The YAML frontmatter gives `types`, `areas`, `strict` and `entities` (no other key: connections stay in `memhub.yaml`); the
+The YAML frontmatter gives `types`, `areas`, `strict`, `entities` and `review` (no other key: connections stay in `memhub.yaml`); the
 Markdown body is the extraction prompt (`extraction.instructions`). A file with no frontmatter is all body.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ import yaml
 
 from memhub.config import ConfigError
 
-ALLOWED_KEYS = ("types", "areas", "strict", "entities")
+ALLOWED_KEYS = ("types", "areas", "strict", "entities", "review")
 
 
 def split(text: str, name: str) -> tuple[dict[str, Any], str]:

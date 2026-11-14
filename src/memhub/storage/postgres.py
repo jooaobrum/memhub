@@ -434,6 +434,7 @@ class MemoryStore:
         links: list[dict] | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        reviewed_by: str | None = None,
     ) -> Row:
         """`observed_at` defaults to the newest evidence timestamp, else now. `run_id` / `agent_id` are the app's
         ids of the call that wrote the row; they are only written when given, so a ledger whose `init` predates
@@ -447,17 +448,17 @@ class MemoryStore:
             INSERT INTO {self._t('memory')}
               (id, memory_id, version, type, schema_version, scope, workspace_id, user_id,
                status, verified, content, payload, entities, embedding, evidence,
-               seen_count, score, conflicts_with, created_by, observed_at, valid_from, valid_until, durability, assertion, links
-               {", run_id, agent_id" if ids else ""})
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s, COALESCE(%s, now()), %s,%s,%s,%s,%s
+               seen_count, score, conflicts_with, created_by, reviewed_by, observed_at, valid_from, valid_until, durability,
+               assertion, links {", run_id, agent_id" if ids else ""})
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s,%s,%s, %s,%s,%s,%s,%s, COALESCE(%s, now()), %s,%s,%s,%s,%s
                {", %s, %s" if ids else ""})
             RETURNING *
             """,
             (
                 row_id, memory_id, version, type, schema_version, scope, workspace_id, user_id,
                 status, verified, content, Jsonb(payload), Jsonb(entities), embedding, Jsonb(evidence),
-                seen_count, score, conflicts_with, created_by, observed_at, valid_from, valid_until, durability, assertion,
-                Jsonb(links or []), *((run_id, agent_id) if ids else ()),
+                seen_count, score, conflicts_with, created_by, reviewed_by, observed_at, valid_from, valid_until, durability,
+                assertion, Jsonb(links or []), *((run_id, agent_id) if ids else ()),
             ),
         )
         return cur.fetchone()
@@ -479,6 +480,7 @@ class MemoryStore:
         evidence: list[dict] | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        reviewed_by: str | None = None,
     ) -> Row:
         """Insert version N+1 (active, or candidate when `as_candidate`), and
         (for the active path) mark version N superseded, atomically. Version N+1 inherits
@@ -508,7 +510,7 @@ class MemoryStore:
             workspace_id=active["workspace_id"], user_id=active["user_id"], content=content,
             payload=payload, entities=entities, embedding=embedding, evidence=evidence,
             status="active", verified=verified, created_by=created_by, memory_id=memory_id,
-            version=new_version, links=links, run_id=run_id, agent_id=agent_id, **times,
+            version=new_version, links=links, run_id=run_id, agent_id=agent_id, reviewed_by=reviewed_by, **times,
         )
 
     def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None,

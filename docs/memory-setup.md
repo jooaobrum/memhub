@@ -19,8 +19,9 @@ Ask the project owner these questions, one at a time, and wait for each answer:
 2. **What must never be remembered?** Ask for things users say that must stay out (for example "their job, their
    family, the weather").
 3. **How does it group?** Ask whether these memories fall into a handful of topics a person would browse, and which.
-4. **Who shares it?** Ask whether each kind of memory belongs to one user, or is shared across a team or workspace
-   after review.
+4. **Who shares it, and who approves it?** Ask whether each kind of memory belongs to one user, or is shared across a
+   team or workspace. Then ask which kinds a person must approve before the agent uses them (a diagnosis, a fix, an
+   account fact) and which are safe to accept at once (a profile detail, a preference).
 
 ## 2. Write
 
@@ -32,6 +33,8 @@ From the answers, write `memory.md`:
   fits.
 - **The long form** (`fields` with a `description`) is for a field whose meaning the extractor could misread, or for a
   shared type (`scopes: [workspace]`).
+- **`review:`** from question 4: `review: workspace` (the default: shared memories wait), `none` or `all`, and
+  `review: true` / `false` on a type that differs, e.g. `profile: {builtin: true, review: false}`.
 - **Areas**, when the owner named topics: one `key: description` line each.
 - **`strict: true`** when the owner said the memory must hold their domain only.
 - **The body**: start with `# What to remember`, then one sentence on the purpose and one bullet per rule. Include

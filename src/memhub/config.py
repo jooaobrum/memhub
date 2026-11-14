@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, StrictBool, field_validator, model_validator
 
 from memhub.types import BUILTIN_OPTIONS, INTERNAL_TYPES, TypeRegistry, builtin_spec, parse_template
 
@@ -68,7 +68,7 @@ class TypeConfig(BaseModel):
     max_chars: int | None = None  # `always` types: prompt budget, whole entries only
     max_active: int | None = None  # cap on active rows of this type per owner (user, or workspace)
     extract: bool = True
-    review: bool = True  # false: a workspace-scope memory of this type is active at once, not a candidate for an admin
+    review: StrictBool | None = None  # true: extracted memories wait for review in every scope; false: never; None: the project's `review`
     content_template: str | None = None  # `content` is composed from the fields, e.g. "Symptom: {symptom} Action: {action}"
     on_remember: bool = False  # offered to the extractor when the user orders `/remember`, even if `extract` is false
     ttl: timedelta | None = None  # how long a memory of this type holds; beats the durability ttl
@@ -282,6 +282,28 @@ class ModelsConfig(BaseModel):
 _BUILTIN_NAMES = [n for n in BUILTIN_OPTIONS if n not in INTERNAL_TYPES]
 
 
+# The keys that give a type its schema: a mapping holds at most one of them (`class` and `fields` may go together).
+_SCHEMA_KEYS = ("builtin", "template", "fields", "class")
+
+
+def _mapped_type(name: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """`{builtin: true, <options>}` is `builtin` with options, `{template: "...", <options>}` a template string with
+    options (AD-052); the options written beside it win. Any other mapping is the long form, unchanged."""
+    if "builtin" not in spec and "template" not in spec:
+        return spec
+    present = [k for k in _SCHEMA_KEYS if k in spec]
+    if spec.get("builtin", True) is not True:
+        raise ValueError(f"{name}: `builtin` takes only true; drop it to write the long form")
+    if len(present) > 1:
+        raise ValueError(f"{name}: a type mapping gives its schema once, but it holds {' and '.join(present)}: keep one")
+    options = {k: v for k, v in spec.items() if k not in ("builtin", "template")}
+    if "builtin" in spec:
+        return {**_short_type(name, "builtin"), **options}
+    if not isinstance(spec["template"], str):
+        raise ValueError(f"{name}: `template` is a string with {{fields}}")
+    return {**_short_type(name, spec["template"].strip()), **options}
+
+
 def _short_type(name: str, text: str) -> dict[str, Any]:
     if text == "builtin":
         if name not in _BUILTIN_NAMES:
@@ -362,6 +384,8 @@ class Config(BaseModel):
     entity_types: list[str] = Field(default_factory=list)  # shorthand: each name is an isolated subject type
     entities: dict[str, EntityConfig] = Field(default_factory=dict)  # subject types with their rules (memory.md)
     scopes: list[str] = Field(default_factory=lambda: ["user"])
+    # Which extracted memories wait for a person, unless their type sets `review`: none | workspace (scope) | all
+    review: Literal["none", "workspace", "all"] = "workspace"
     types: dict[str, TypeConfig]
     # Default lifetime by durability, used when neither the text nor the type sets `valid_until`; null = never.
     ttl: dict[Durability, timedelta | None] = Field(
@@ -396,6 +420,8 @@ class Config(BaseModel):
         for name, spec in data["types"].items():
             if isinstance(spec, str):
                 spec = _short_type(str(name), spec.strip())
+            elif isinstance(spec, dict):
+                spec = _mapped_type(str(name), spec)
             types[name] = spec
         return {**data, "types": types}
 
@@ -413,6 +439,18 @@ class Config(BaseModel):
         if both:
             raise ValueError(f"entity type {both[0]!r} is declared in both entity_types and entities: keep one")
         return self
+
+    def needs_review(self, type: str, scope: str) -> bool:
+        """Whether an extracted memory of `type` in `scope` waits for a person: the type's `review`, else the project's."""
+        own = self.types[type].review
+        if own is not None:
+            return own
+        return self.review == "all" or (self.review == "workspace" and scope == "workspace")
+
+    def review_rule(self, type: str) -> str:
+        """The effective rule of a type, as the project values name it: `true` is `all`, `false` is `none`."""
+        own = self.types[type].review
+        return self.review if own is None else ("all" if own else "none")
 
     def entity_rules(self) -> dict[str, EntityConfig]:
         """Every declared entity type and its rules: an `entity_types` name is an isolated subject."""

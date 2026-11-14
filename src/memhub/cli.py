@@ -379,11 +379,15 @@ def search(
 
 
 @app.command()
-def queue(workspace: Optional[str] = typer.Option(None, "--ws"), config: Optional[Path] = ConfigOpt) -> None:
-    """Workspace candidates awaiting review, conflicts first."""
+def queue(
+    workspace: Optional[str] = typer.Option(None, "--ws"),
+    user: Optional[str] = typer.Option(None, "--user", help="Only this user's own (user-scope) candidates"),
+    config: Optional[Path] = ConfigOpt,
+) -> None:
+    """Candidates awaiting review (workspace and user scope), conflicts first."""
     service = _service(config)
     workspace, _ = _ids(workspace, None)
-    _print(service.queue(_actor(), workspace_id=workspace))
+    _print(service.queue(_actor(), workspace_id=workspace, user_id=user))
 
 
 @app.command()
