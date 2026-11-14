@@ -277,13 +277,16 @@ class MemoryService:
         return {"content": instance.content, "payload": instance.model_dump(mode="json")}
 
     def _authorize_review(self, actor: Actor, row: Row) -> None:
-        """Approve and reject: an approving role, or for a user-scope candidate its owner (AD-037, AD-041)."""
+        """Approve and reject: an approving role, or for a user-scope candidate its owner (AD-037, AD-041) - unless the
+        type's rule makes user scope wait for review (`review: true`, or `review: all`): then a role only (AD-057)."""
         if any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
             return
-        if row["scope"] == "user" and row["user_id"] == actor.id:
+        reviewed = row["type"] in self.settings.types and self.settings.needs_review(row["type"], "user")
+        if row["scope"] == "user" and row["user_id"] == actor.id and not reviewed:
             return
         raise PermissionDenied(
-            "only the owner or an approving role may review this candidate" if row["scope"] == "user"
+            f"a {row['type']} needs review by an approving role, not its owner" if row["scope"] == "user" and reviewed
+            else "only the owner or an approving role may review this candidate" if row["scope"] == "user"
             else "actor lacks an approving role"
         )
 
