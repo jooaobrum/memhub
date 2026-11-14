@@ -258,14 +258,22 @@ class Resolved:
         dumped = _leaves(_plain(self.config.model_dump(mode="python", by_alias=True)))
         set_values = _leaves(self.values)
         out = []
-        for key in sorted(dumped):
+        for key in sorted(k for k in dumped if k != "review"):  # `review` is printed with the per-type rule below
             source = self.source_of(key)
             if source == "default" and not all:
                 continue
             value = set_values[key] if key in set_values else dumped[key]
             shown = {name: alias for alias, name in KEY_ALIASES.items()}.get(key, key)  # the short names `init` writes
             out.append((shown, mask(key, value), source))
-        return out
+        return out + self.review_rows()
+
+    def review_rows(self) -> list[tuple[str, str, str]]:
+        """`review` and one `review.<type>` per type: the effective rule (`none` | `workspace` | `all`) and where it was set."""
+        project = self.source_of("review")
+        rows = [("review", self.config.review, project)]
+        for name, spec in sorted(self.config.types.items()):
+            rows.append((f"review.{name}", self.config.review_rule(name), project if spec.review is None else self.source_of(f"types.{name}")))
+        return rows
 
 
 def mask(key: str, value: Any) -> Any:
@@ -350,7 +358,7 @@ def _with_memory_file(layers: list[tuple[str, dict[str, Any]]], path: Path | Non
         where = (path.resolve().parent if label == "yaml" and path is not None else Path.cwd()) / where
     memory = read_memory_file(where)
     namer = path.name if label == "yaml" and path is not None else _LAYER_NAMES.get(label, label)
-    clashes = [k for k in ("types", "areas", "strict", "entities") if k in memory and k in layer]
+    clashes = [k for k in ("types", "areas", "strict", "entities", "review") if k in memory and k in layer]
     if "extraction" in memory and isinstance(layer.get("extraction"), dict) and "instructions" in layer["extraction"]:
         clashes.append("extraction.instructions")
     if clashes:

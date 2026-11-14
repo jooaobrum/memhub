@@ -201,6 +201,7 @@ class _Tx:
         links: list[dict] | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        reviewed_by: str | None = None,
     ) -> Row:
         row: Row = dict.fromkeys(MEMORY_COLUMNS)
         row.update(
@@ -211,7 +212,7 @@ class _Tx:
             conflicts_with=conflicts_with, created_by=created_by, created_at=self.now,
             observed_at=_utc(observed_at or newest_observed_at(evidence) or self.now), valid_from=_utc(valid_from),
             valid_until=_utc(valid_until), durability=durability, assertion=assertion, links=copy.deepcopy(links or []),
-            run_id=run_id, agent_id=agent_id,
+            run_id=run_id, agent_id=agent_id, reviewed_by=reviewed_by,
         )
         self._check_unique(row)
         self._mem()[row["id"]] = row
@@ -233,6 +234,7 @@ class _Tx:
         evidence: list[dict] | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        reviewed_by: str | None = None,
     ) -> Row:
         active = self.get_active(memory_id)
         if active is None:
@@ -252,7 +254,7 @@ class _Tx:
             return self.add_memory(status="candidate", verified=False, conflicts_with=None, **common)
         if self._supersede(active["id"]) == 0:
             raise Conflict("the active version changed concurrently; retry the edit")
-        return self.add_memory(status="active", verified=verified, **common)
+        return self.add_memory(status="active", verified=verified, reviewed_by=reviewed_by, **common)
 
     def amend_row(self, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
         row = self._mem().get(id)

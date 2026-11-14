@@ -120,6 +120,18 @@ def test_rows_have_the_reference_keys_and_types(backend):
     assert (row["version"], row["seen_count"], row["assertion"], row["links"]) == (1, 1, "stated", [])
 
 
+def test_reviewed_by_is_stored(backend):
+    """`reviewed_by` given to `add_memory` / `edit_memory` is stored (`auto`: let in with no person, AD-055); omitted, NULL."""
+    with backend.unit_of_work() as uow:
+        auto, plain = add(uow, "auto row", reviewed_by="auto"), add(uow, "plain row")
+        edited = uow.memories.edit_memory(plain["memory_id"], content="plain v2", payload={"content": "plain v2"}, entities=[],
+                                          embedding=vec(1.0), verified=False, created_by="contract", reviewed_by="auto")
+        again = uow.memories.edit_memory(auto["memory_id"], content="auto v2", payload={"content": "auto v2"}, entities=[],
+                                         embedding=vec(1.0), verified=False, created_by="contract")
+        stored = {r["content"]: r["reviewed_by"] for r in (uow.memories.get_by_id(x["id"]) for x in (auto, plain, edited, again))}
+    assert stored == {"auto row": "auto", "plain row": None, "plain v2": "auto", "auto v2": None}
+
+
 def test_naive_datetimes_are_stored_as_utc(backend):
     naive = datetime(2026, 1, 1, 12)
     with backend.unit_of_work() as uow:

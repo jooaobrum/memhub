@@ -12,7 +12,7 @@ Run with `PYTHONPATH=src` exported, so the tests import this tree's `src`. `test
 
 ### S1 - one rule decides who waits, in both scopes
 
-**C1** - With no `review` anywhere, an extracted user-scope `fact` is `active` and a workspace-scope `fact` is a `candidate`; the whole suite passes, and no test file other than `tests/test_review_per_type.py` and the starter assertion of `tests/test_cli_setup.py` (C31) differs from the branch base (AC 1)
+**C1** - With no `review` anywhere, an extracted user-scope `fact` is `active` and a workspace-scope `fact` is a `candidate`; the whole suite passes, and no test file other than `tests/test_review_per_type.py`, the starter assertion of `tests/test_cli_setup.py` (C31) and the `"review"` values of `tests/fixtures/examples_resolved_base.json` (`true` -> `null`, the new unset default; user-approved mid-build) differs from the branch base (AC 1)
 Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "default_rule_is_todays"`
 Proof: `.venv/bin/python -m pytest tests -q -x`
 Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "old_tests_unchanged"`
@@ -165,7 +165,7 @@ Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "docs_state_
 
 ## Handoff
 
-- **Settled mid-build:** branch - user chose "Worktree off main (Recommended)": `feat/review-per-type` in its own worktree from `main`, search-filters untouched
+- **Settled mid-build:** branch - user chose "Worktree off main (Recommended)": `feat/review-per-type` in its own worktree from `main`, search-filters untouched; baseline - asked "tests/fixtures/examples_resolved_base.json stores `\"review\": true` (the old default) on 11 types ... How should I handle it?", user chose "Update baseline + C1 (Recommended)": those 11 become `null`, and C1 allows that fixture to differ in the `review` key only
 - **Dispatched:** none yet
 - **Boundary:** none yet
 - **Abandoned:** none
