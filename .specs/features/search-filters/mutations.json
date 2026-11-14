@@ -1,0 +1,17 @@
+[
+  {"file": "src/memhub/storage/sqlite.py",
+   "old": "(\"<\", flt.lt)",
+   "new": "(\"<=\", flt.lt)",
+   "proof": ".venv/bin/python -m pytest tests/test_contract_sqlite.py -k \"filter_observed_at_bounds\"",
+   "label": "SQLite whole-day upper bound < -> <= (keeps 2026-11-01T00:00Z)"},
+  {"file": "src/memhub/storage/rules.py",
+   "old": "return self.field == \"valid_until\" and self.lt is None and self.lte is None",
+   "new": "return self.field == \"valid_until\" and self.lt is None",
+   "proof": ".venv/bin/python -m pytest tests/test_contract_memory.py -k \"filter_valid_until_bounds or filter_parsed_time_bounds\"",
+   "label": "null valid_until passes a datetime lte (AD-050 upper bound)"},
+  {"file": "src/memhub/storage/rules.py",
+   "old": "return positive_entity_nodes(flt.part, not negated)",
+   "new": "return positive_entity_nodes(flt.part, negated)",
+   "proof": ".venv/bin/python -m pytest tests/test_search_filters.py -k \"guard_counts_positive_branches_only\"",
+   "label": "NOT branch counted as naming a type (guard lifted by NOT)"}
+]

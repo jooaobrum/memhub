@@ -31,7 +31,17 @@ from memhub.connection import ConnectionSource, advisory_lock, advisory_unlock, 
 from memhub.storage.base import FIXES, BoundUnitOfWork, Capability, require
 from memhub.storage.migrations import SCHEMA_KEY, SCHEMA_VERSION, check, pending
 from memhub.storage.rules import (
+    AllOf,
+    AnyOf,
+    AreaIn,
+    ContentContains,
     EntityFilter,
+    EntityIs,
+    EntityTypeIn,
+    Filter,
+    NotOf,
+    TimeRange,
+    TypeIn,
     NO_TABLES,
     Conflict,
     EmbeddingMismatch,
@@ -42,6 +52,8 @@ from memhub.storage.rules import (
     apply_boosts,
     area_link,
     as_vector_list,
+    edited_note,
+    edited_version,
     fresh_evidence,
     newest_observed_at,
 )
@@ -97,6 +109,50 @@ def _entity_sql(flt: EntityFilter | None, params: dict[str, Any]) -> list[str]:
         params[f"ent_not{i}"] = Jsonb([{"type": t}])
         clauses.append(f"NOT entities @> %(ent_not{i})s")
     return clauses
+
+def _filter_sql(flt: Filter, params: dict[str, Any]) -> str:
+    """A `Filter` tree as one boolean SQL expression; every leaf is true or false, never null (`NOT` of a comparison
+    with a null field is true, as `Filter.matches`). Parameters are added to `params` as `f0`, `f1`, ..."""
+
+    def p(value: Any) -> str:
+        name = f"f{sum(1 for k in params if k.startswith('f') and k[1:].isdigit())}"
+        params[name] = value
+        return f"%({name})s"
+
+    def each(cond: str) -> str:
+        return f"EXISTS (SELECT 1 FROM jsonb_array_elements(entities) e WHERE {cond})"
+
+    if isinstance(flt, EntityIs):
+        if flt.op == "in":
+            return "(" + " OR ".join(f"entities @> {p(Jsonb([{'type': flt.type, 'id': v}]))}" for v in flt.values) + ")"
+        id_sql = "starts_with(e->>'id', {})" if flt.op == "prefix" else "strpos(e->>'id', {}) > 0"
+        return each(f"e->>'type' = {p(flt.type)} AND " + id_sql.format(p(flt.values[0])))
+    if isinstance(flt, EntityTypeIn):
+        return "(" + " OR ".join(f"entities @> {p(Jsonb([{'type': t}]))}" for t in flt.types) + ")"
+    if isinstance(flt, TypeIn):
+        return f"type = ANY({p(list(flt.types))})"
+    if isinstance(flt, AreaIn):
+        if not flt.ids:
+            return "FALSE"
+        return "(" + " OR ".join(
+            f"COALESCE(links, '[]'::jsonb) @> {p(Jsonb([{'kind': 'in_area', 'memory_id': i}]))}" for i in flt.ids) + ")"
+    if isinstance(flt, TimeRange):
+        col = flt.field
+        bounds = [f"{col} >= {p(flt.gte)}"] if flt.gte else []
+        bounds += [f"{col} < {p(flt.lt)}"] if flt.lt else []
+        bounds += [f"{col} <= {p(flt.lte)}"] if flt.lte else []
+        if col == "valid_until" and flt.lt is None and flt.lte is None:  # null never expires (AD-050)
+            return f"({col} IS NULL OR {' AND '.join(bounds)})"
+        return f"({col} IS NOT NULL AND {' AND '.join(bounds)})"
+    if isinstance(flt, ContentContains):
+        return f"strpos(lower(content), lower({p(flt.text)})) > 0"
+    if isinstance(flt, AllOf):
+        return "(" + " AND ".join(_filter_sql(x, params) for x in flt.parts) + ")"
+    if isinstance(flt, AnyOf):
+        return "(" + " OR ".join(_filter_sql(x, params) for x in flt.parts) + ")"
+    if isinstance(flt, NotOf):
+        return f"NOT {_filter_sql(flt.part, params)}"
+    raise TypeError(f"cannot filter by {flt!r}: resolve areas first")
 
 class MemoryStore:
     """The Postgres backend. Its methods take an open cursor; `unit_of_work()` / `bind(cur)` give the same
@@ -457,11 +513,13 @@ class MemoryStore:
             version=new_version, links=links, run_id=run_id, agent_id=agent_id, reviewed_by=reviewed_by, **times,
         )
 
-    def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None) -> None:
-        """Rewrite a pending candidate in place (its evidence is merged separately)."""
+    def amend_row(self, cur: Cursor, id: uuid.UUID, *, content: str, payload: dict, embedding: list[float] | None,
+                  entities: list[dict] | None = None) -> None:
+        """Rewrite a pending candidate in place (its evidence is merged separately); `entities` too when given."""
         cur.execute(
-            f"UPDATE {self._t('memory')} SET content=%s, payload=%s, embedding=%s WHERE id=%s AND status='candidate'",
-            (content, Jsonb(payload), embedding, id),
+            f"UPDATE {self._t('memory')} SET content=%s, payload=%s, embedding=%s, entities=COALESCE(%s, entities) "
+            f"WHERE id=%s AND status='candidate'",
+            (content, Jsonb(payload), embedding, None if entities is None else Jsonb(entities), id),
         )
 
     def _supersede(self, cur: Cursor, row_id: uuid.UUID) -> int:
@@ -502,6 +560,7 @@ class MemoryStore:
         resolve: str | None = None,
         note: str | None = None,
         merged: dict | None = None,
+        edit: dict | None = None,
     ) -> Row:
         """`merged` ({content, payload, embedding}) is the single statement `keep_both` writes for a keyed slot:
         a slot holds one value, so both values become one new version of the existing row."""
@@ -552,6 +611,20 @@ class MemoryStore:
             if sibling_active is not None and sibling_active["id"] != row["id"]:
                 if self._supersede(cur, sibling_active["id"]) == 0:
                     raise Conflict("the active version changed concurrently; retry the approval")
+
+        if edit is not None:  # the proposal stays in history as it was; the approved text is the next version
+            cur.execute(
+                f"UPDATE {self._t('memory')} SET status='archived', reviewed_by=%s, reviewed_at=now(), review_note=%s "
+                f"WHERE id=%s",
+                (reviewed_by, edited_note(note), id),
+            )
+            cur.execute(f"SELECT max(version) AS v FROM {self._t('memory')} WHERE memory_id=%s", (row["memory_id"],))
+            new = self.add_memory(cur, **edited_version(row, edit, cur.fetchone()["v"] + 1))
+            cur.execute(
+                f"UPDATE {self._t('memory')} SET reviewed_by=%s, reviewed_at=now(), review_note=%s WHERE id=%s RETURNING *",
+                (reviewed_by, note, new["id"]),
+            )
+            return cur.fetchone()
 
         cur.execute(
             f"UPDATE {self._t('memory')} SET status='active', verified=true, reviewed_by=%s, "
@@ -677,6 +750,7 @@ class MemoryStore:
         area_boost: uuid.UUID | None = None,
         text_boost: list[str] | None = None,
         entities: EntityFilter | None = None,
+        filter: Filter | None = None,
     ) -> list[Row]:
         """`area_boost` (an area's memory_id) lifts the rows linked to that area; `text_boost` lifts the rows whose
         content mentions one of the words. Neither filters."""
@@ -695,6 +769,8 @@ class MemoryStore:
         else:  # an area row is a page header (derived text), not a claim
             clauses.append("type <> 'area'")
         clauses += _entity_sql(entities, params)
+        if filter is not None:  # inside the query, so `k` is filled from matching rows (#25)
+            clauses.append(_filter_sql(filter, params))
         sql = (
             f"SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {self._t('memory')} "
             f"WHERE {' AND '.join(clauses)} ORDER BY embedding <=> %(qe)s::vector LIMIT %(limit)s"

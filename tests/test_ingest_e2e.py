@@ -144,12 +144,12 @@ def test_candidates_are_capped_at_max_candidates(env):
 
 def test_extract_error_records_status_and_advances_watermark(env):
     env.write(line())
-    model = FakeChatModel([PARSE_ERROR])
+    model = FakeChatModel([PARSE_ERROR] * 2)  # the first answer and the one retry
     s = env.run(model)
     assert (s.extract_errors, s.created, s.segments_processed) == (1, 0, 1)
     assert [r["status"] for r in env.runs()] == ["extract_error"]
     env.run(model)
-    assert model.calls == 1
+    assert model.calls == 2  # the watermark moved on: the second run makes no call
 
 
 def test_llm_failure_rolls_back_and_is_retried_next_run(env):

@@ -285,7 +285,7 @@ def test_band_needs_shared_entity_or_no_entities_on_both_sides(store, settings):
 def test_unreadable_verdict_is_treated_as_a_conflict(store, settings):
     from tests.fakes import PARSE_ERROR
     _seed(store, 0.85, observed_at=NOW - timedelta(days=10))
-    assert _reconcile(store, settings, _proposal(), FakeChatModel([PARSE_ERROR])).action == "conflict"
+    assert _reconcile(store, settings, _proposal(), FakeChatModel([PARSE_ERROR] * 2)).action == "conflict"
 
 
 def test_judge_sees_both_statements_with_their_observed_at_dates(store, settings):
@@ -635,6 +635,13 @@ def test_extract_samples_again_when_the_output_is_unparseable(settings, registry
     assert not out.ok
 
 
+def test_by_default_a_failed_sample_is_tried_once_more():
+    # e2e S1: one runaway generation on a one-turn session lost all of its memories (it cannot be cut in halves)
+    from memhub.config import ExtractionConfig
+
+    assert ExtractionConfig().retries == 1
+
+
 @pytest.mark.parametrize("content", ["Precisa de um médico generalista", "Tem interesse em saber sobre a CVEC", "Wants to buy a bike"])
 def test_a_need_or_request_is_not_a_fact(settings, registry, content):
     kept, dropped = _ground(settings, registry, cand(fields={"content": content}))
@@ -684,11 +691,11 @@ def test_a_slice_the_model_keeps_failing_on_is_extracted_in_two_halves(settings,
     from tests.fakes import PARSE_ERROR
 
     seg = _seg(msg("m1", content="I live in Lyon"), msg("m1:a", "assistant", "ok"), msg("m2", content="I live in Lyon too"), msg("m2:a", "assistant", "ok"))
-    model = FakeChatModel([PARSE_ERROR, Extraction(candidates=[cand()]), Extraction(candidates=[cand(mid="m2", quote="I live in Lyon too")])])
+    model = FakeChatModel([PARSE_ERROR] * 2 + [Extraction(candidates=[cand()]), Extraction(candidates=[cand(mid="m2", quote="I live in Lyon too")])])
     out = extract(model, seg, settings=settings, registry=registry)
     assert out.ok and [c.evidence[0].message_id for c in out.candidates] == ["m1", "m2"]
     single = _seg(msg("m1"), msg("m1:a", "assistant", "ok"))
-    assert not extract(FakeChatModel([PARSE_ERROR]), single, settings=settings, registry=registry).ok
+    assert not extract(FakeChatModel([PARSE_ERROR] * 2), single, settings=settings, registry=registry).ok
 
 
 def test_a_bare_word_is_too_thin_to_be_a_claim(settings, registry):

@@ -23,6 +23,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from memhub.config import Config, EmbeddingConfig
+from memhub.filters import SearchFilter
+from memhub.filters import parse as parse_filters
 from memhub.settings import Parts, Resolved, embedding_model_id, resolve
 from memhub.middleware import MemoryMiddleware
 from memhub.service import MemoryService, NotFound, ValidationError
@@ -310,27 +312,9 @@ class Memory:
             out.append({"type": e["type"], "id": e["id"]})
         return out
 
-    def _filters(self, filters: Any, types: list[str] | None, widen: bool) -> tuple[list[dict], str | None, list[str] | None]:
-        """`filters` checked: `(subjects, entity_type, types)`."""
-        if filters is None:
-            if widen:
-                raise ValidationError('widen=True needs filters={"entities": [...]} to widen from')
-            return [], None, types
-        if not isinstance(filters, dict):
-            raise ValidationError(f"filters must be a dict, not {type(filters).__name__}")
-        unknown = [k for k in filters if k not in ("entities", "entity_type", "types")]
-        if unknown:
-            raise ValidationError(f"unknown filter {unknown[0]!r} (allowed: entities, entity_type, types)")
-        if "types" in filters and types:
-            raise ValidationError("types is given both as a parameter and in filters: keep one")
-        subjects = self._subjects(filters.get("entities"))
-        entity_type = filters.get("entity_type")
-        if entity_type is not None and entity_type not in self.settings.declared_entity_types():
-            raise ValidationError(
-                f"unknown entity type {entity_type!r} (declared: {self.settings.declared_entity_types()})")
-        if widen and not subjects:
-            raise ValidationError('widen=True needs filters={"entities": [...]} to widen from')
-        return subjects, entity_type, filters.get("types", types)
+    def _filters(self, filters: Any, types: list[str] | None, widen: bool) -> SearchFilter:
+        """`filters` parsed and checked before any model or database work (`memhub.filters`, #25)."""
+        return parse_filters(filters, declared=self.settings.declared_entity_types(), types=types, widen=widen)
 
     def _push(self, data: Any, ctx: CallContext, *, type: str | None, thread_id: str | None,
               subjects: list[dict] | None = None) -> AddResult:
@@ -397,11 +381,42 @@ class Memory:
 
     def approve(self, id: Any, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
                 agent_id: Any = None, roles: list[str] | None = None, resolve: str | None = None,
-                note: str | None = None) -> MemoryEvent:
-        """Make a candidate active. `id` is a memory id (its newest candidate) or a version id."""
+                note: str | None = None, fields: dict[str, Any] | None = None) -> MemoryEvent:
+        """Make a candidate active. `id` is a memory id (its newest candidate) or a version id. `fields` corrects it
+        first: the proposal stays in history (`archived`, "edited on review") and the corrected text is the next
+        version. `ADD` when the memory was never active before, else `UPDATE`."""
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
-        row = self.service.approve(ctx.actor, self._candidate(id, ctx)["id"], resolve=resolve, note=note)
-        return _event(row, "ADD" if row["version"] == 1 else "UPDATE")
+        candidate = self._candidate(id, ctx)
+        row = self.service.approve(ctx.actor, candidate["id"], fields=fields, resolve=resolve, note=note)
+        # every version after the first is made from an active one, so a first-version candidate was never active
+        return _event(row, "ADD" if candidate["version"] == 1 else "UPDATE")
+
+    def propose(self, type: str, fields: dict[str, Any], *, evidence: list[dict[str, Any]] | None = None,
+                scope: str = "user", memory_id: Any = None, user_requested: bool = False, approve: bool = False,
+                workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
+                roles: list[str] | None = None) -> MemoryEvent:
+        """A proposed memory: a candidate waiting for review (`PENDING`), whatever the scope.
+
+        - `memory_id`: correct that pending candidate of the caller instead of adding a second one.
+        - A proposal close to one a reviewer rejected for the same owner is refused (`ValidationError`), unless
+          `user_requested=True`: the user asked for it again.
+        - `approve=True`: the caller reviewed it. It is saved active and verified (`ADD`) when the caller may approve
+          that scope (the owner for user scope, a role in `roles.approve_workspace` for workspace scope); otherwise
+          it is a candidate, as without `approve`."""
+        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        row = self.service.propose(
+            ctx.actor, type=type, scope=scope, fields=fields, evidence=list(evidence or []),
+            workspace_id=ctx.workspace_id, user_id=ctx.user_id, run_id=ctx.run_id, agent_id=ctx.agent_id,
+            memory_id=None if memory_id is None else _uuid(memory_id), user_requested=user_requested, approve=approve,
+        )
+        return _event(row, "ADD" if row["status"] == "active" else "PENDING")
+
+    def check_fields(self, type: str, fields: dict[str, Any], *, workspace_id: Any = None, user_id: Any = None,
+                     run_id: Any = None, agent_id: Any = None, roles: list[str] | None = None) -> dict[str, Any]:
+        """Check `fields` as a `type` memory, as every write does, without saving: `{"content", "payload"}`.
+        Raises `ValidationError` (or `InjectionDetected`) with the message a write would raise."""
+        self._ctx(workspace_id, user_id, run_id, agent_id, roles)
+        return self.service.check_fields(type, fields)
 
     def reject(self, id: Any, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
                agent_id: Any = None, roles: list[str] | None = None, note: str | None = None) -> MemoryEvent:
@@ -436,18 +451,13 @@ class Memory:
         `filters={"entities": [{"type", "id"}, ...]}` keeps the memories about one of those subjects, ranked in
         that order; `widen=True` then adds the memories about no isolated subject (`general`).
         `filters={"entity_type": "machine"}` keeps the memories about any machine. `filters["types"]` is the
-        `types` parameter. With `filters`, each hit says what it matched in `matched_on`."""
-        subjects, entity_type, types = self._filters(filters, types, widen)
+        `types` parameter. Ids take `in`, `prefix`, `contains`; `areas`, `observed_at`, `valid_until`, `content`,
+        `AND`, `OR`, `NOT` narrow further (`docs/filters.md`). With an entity in the filter, each hit says what it
+        matched in `matched_on`."""
+        flt = self._filters(filters, types, widen)
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
-        by = dict(subjects=subjects, entity_type=entity_type, widen=widen) if filters is not None else {}
-        if not types:
-            rows = self.service.search(ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k,
-                                       **by)
-        else:
-            rows = [r for t in types for r in self.service.search(
-                ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k, type=t, **by)]
-            tier = {label: i for i, label in enumerate([f"{e['type']}:{e['id']}" for e in subjects] + ["general"])}
-            rows = sorted(rows, key=lambda r: (tier.get(r.get("matched_on"), 0), -r["similarity"]))[:top_k]
+        rows = self.service.search(ctx.actor, query, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=top_k,
+                                   filter=flt, widen=widen)
         return [_clean(r) for r in rows]
 
     def get(self, id: Any, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
@@ -461,14 +471,12 @@ class Memory:
                 filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Your user memories and the workspace's, with that status, newest first; `filters` as in `search`
         (`entities`, `entity_type`; `types` keeps the memories of those types)."""
-        subjects, entity_type, types = self._filters(filters, None, False)
-        if types and type is not None:
+        flt = self._filters(filters, None, False)
+        if flt.types and type is not None:
             raise ValidationError("type is given both as a parameter and as filters['types']: keep one")
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
         rows = self.service.list(ctx.actor, status=status, type=type, workspace_id=ctx.workspace_id,
-                                 subjects=subjects, entity_type=entity_type)
-        if types:
-            rows = [r for r in rows if r["type"] in types]
+                                 filter=flt, viewer=ctx.user_id)
         return [_clean(r) for r in rows if r["scope"] == "workspace" or r["user_id"] == ctx.user_id]
 
     def history(self, id: Any, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
@@ -525,7 +533,7 @@ class Memory:
 
 
 _SCOPED = ("add", "search", "get", "get_all", "update", "delete", "delete_all", "history", "queue", "approve",
-           "reject", "promote", "middleware", "tools", "ingest")
+           "reject", "promote", "propose", "check_fields", "middleware", "tools", "ingest")
 
 
 class ScopedMemory:

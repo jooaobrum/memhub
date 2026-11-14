@@ -31,6 +31,7 @@ dev = [
   "pytest-cov>=5.0",
   "sqlite-vec>=0.1.6",
   "mcp>=2.0,<3",
+  "langchain>=1.4.6",  # examples/review_inline: per-call human-in-the-loop interrupts
 ]
 
 [project.scripts]

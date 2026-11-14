@@ -238,7 +238,7 @@ class ExtractionConfig(BaseModel):
     instructions: str = DEFAULT_EXTRACTION_INSTRUCTIONS
     passes: int = 1  # independent extraction samples per slice, their candidates united (a cheap model misses different facts each time)
     remember_instructions: str | None = None  # what to do with a `/remember` order (None: the built-in text)
-    retries: int = 0  # extra attempts when the model returns unparseable output (cheap models truncate the JSON now and then)
+    retries: int = 1  # extra attempts when the model returns unparseable or cut-off output (cheap models truncate the JSON now and then)
 
 
 class AdmissionConfig(BaseModel):
@@ -288,7 +288,7 @@ _SCHEMA_KEYS = ("builtin", "template", "fields", "class")
 
 def _mapped_type(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     """`{builtin: true, <options>}` is `builtin` with options, `{template: "...", <options>}` a template string with
-    options (AD-052); the options written beside it win. Any other mapping is the long form, unchanged."""
+    options (AD-056); the options written beside it win. Any other mapping is the long form, unchanged."""
     if "builtin" not in spec and "template" not in spec:
         return spec
     present = [k for k in _SCHEMA_KEYS if k in spec]

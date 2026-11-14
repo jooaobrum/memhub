@@ -122,12 +122,59 @@ def _print(obj: Any) -> None:
     typer.echo(json.dumps(_readable(obj), default=str, indent=2))
 
 
+def _set_fields(pairs: list[str]) -> dict[str, Any]:
+    """`--set KEY=VALUE` pairs as fields: VALUE as JSON when it parses (`count=3`), else the text as given."""
+    fields: dict[str, Any] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            raise ValueError(f"--set expects KEY=VALUE, got {pair!r}")
+        try:
+            fields[key.strip()] = json.loads(value)
+        except json.JSONDecodeError:
+            fields[key.strip()] = value
+    return fields
+
+
 def _fail(exc: Exception) -> None:
     typer.secho(f"{type(exc).__name__}: {exc}", fg=typer.colors.RED, err=True)
     raise typer.Exit(1)
 
 
 ConfigOpt = typer.Option(None, "--config", "-c", help="Path to memhub.yaml (default: ./memhub.yaml, $MEMHUB_CONFIG, ~/.config/memhub/memhub.yaml)")
+FilterOpt = typer.Option(None, "--filter", help='A filter as JSON, e.g. \'{"entities": {"type": "machine", "id": {"prefix": "PRD_"}}}\' (docs/filters.md)')
+EntityOpt = typer.Option(None, "--entity", help="A subject as TYPE:ID; repeat for any of several, ranked in that order")
+
+
+def _filter(service: MemoryService, raw: Optional[str], entities: Optional[list[str]], memory_type: Optional[str] = None) -> Any:
+    """`--filter` and `--entity` as one parsed filter (`memhub.filters`), or None when neither is given. A bad one
+    exits 1 with the reason on stderr."""
+    if raw is None and not entities:
+        return None
+    from memhub.filters import parse as parse_filters
+    from memhub.service import ValidationError
+
+    try:
+        try:
+            data = json.loads(raw) if raw is not None else {}
+        except json.JSONDecodeError as exc:
+            raise ValidationError(f"--filter is not valid JSON: {exc}") from None
+        if entities:
+            if not isinstance(data, dict):
+                raise ValidationError(f"--filter must be a JSON object, not {type(data).__name__}")
+            if "entities" in data:
+                raise ValidationError("give the subjects once: --entity, or \"entities\" in --filter")
+            items = []
+            for e in entities:
+                kind, sep, id_ = e.partition(":")
+                if not sep or not kind or not id_:
+                    raise ValidationError(f"--entity takes TYPE:ID, got {e!r}")
+                items.append({"type": kind, "id": id_})
+            data = {"entities": items, **data}
+        return parse_filters(data, declared=service.settings.declared_entity_types(),
+                             types=[memory_type] if memory_type else None)
+    except ValidationError as exc:
+        _fail(exc)
 
 
 @app.command()
@@ -283,12 +330,16 @@ def list_(
     workspace: Optional[str] = typer.Option(None, "--ws"),
     stale: bool = typer.Option(False, "--stale", help="Only memories whose valid_until has passed"),
     area: Optional[str] = typer.Option(None, "--area", help="Only memories linked to this area (key or title)"),
+    filter: Optional[str] = FilterOpt,
+    entity: Optional[list[str]] = EntityOpt,
     config: Optional[Path] = ConfigOpt,
 ) -> None:
     """List every memory, each with a `stale` flag (valid_until passed)."""
     service = _service(config)
+    flt = _filter(service, filter, entity)
     workspace, user = _ids(workspace, user)
-    rows = service.list(_actor(), status=status, type=type, user_id=user, workspace_id=workspace, stale=stale, area=area)
+    rows = service.list(_actor(), status=status, type=type, user_id=user, workspace_id=workspace, stale=stale, area=area,
+                        **({"filter": flt, "viewer": user} if flt is not None else {}))
     _print([{**r, "key": r["payload"].get("key")} for r in rows])  # `key` names the slot of a keyed type
 
 
@@ -300,14 +351,18 @@ def search(
     type: Optional[str] = None,
     k: int = 10,
     include_stale: bool = typer.Option(False, "--include-stale", help="Also return expired memories"),
+    filter: Optional[str] = FilterOpt,
+    entity: Optional[list[str]] = EntityOpt,
     config: Optional[Path] = ConfigOpt,
 ) -> None:
     service = _service(config)
+    flt = _filter(service, filter, entity, type)
     workspace, user = _ids(workspace, user)
     try:
         expansion = service.expansion(_actor(), query, workspace_id=workspace, include_stale=include_stale)
         rows = service.search(
-            _actor(), query, workspace_id=workspace, user_id=user, k=k, type=type, include_stale=include_stale
+            _actor(), query, workspace_id=workspace, user_id=user, k=k, include_stale=include_stale,
+            **({"filter": flt} if flt is not None else {"type": type}),
         )
     except ServiceError as exc:
         _fail(exc)
@@ -340,11 +395,18 @@ def approve(
     id: str,
     resolve: Optional[str] = typer.Option(None, help="keep_old | replace | keep_both, for a conflicting candidate"),
     note: Optional[str] = None,
+    set_: Optional[list[str]] = typer.Option(
+        None, "--set", help="KEY=VALUE: correct a field before approving (repeatable; VALUE is JSON when it parses, else text)",
+    ),
     config: Optional[Path] = ConfigOpt,
 ) -> None:
+    try:
+        fields = _set_fields(set_ or [])
+    except ValueError as exc:
+        _fail(exc)
     service = _service(config)
     try:
-        row = service.approve(_actor(), uuid.UUID(id), resolve=resolve, note=note)
+        row = service.approve(_actor(), uuid.UUID(id), fields=fields or None, resolve=resolve, note=note)
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:

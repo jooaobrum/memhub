@@ -148,7 +148,7 @@ Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "docs_state_
 | `memhub config show` statuses (2) | 200 C30 · 422 C25 | - |
 | rows returned statuses (1) | 200 C22 | - |
 | Landing doors (3) | 1 `reviewed_by = "auto"` C21 C22 · 2 project rule C24 C25 C26 · 3 type override and short form C27 C28 C29 | - |
-| decisions (4) | AD-052 C27 C28 · AD-053 C17 C18 · AD-054 C11 · AD-055 C22 C23 | - |
+| decisions (4) | AD-056 C27 C28 · AD-053 C17 C18 · AD-054 C11 · AD-055 C22 C23 | - |
 | docs readers (3) | `docs/memory.md` C32 · guide 01 C32 · `docs/memory-setup.md` C32 | - |
 
 ## Swept

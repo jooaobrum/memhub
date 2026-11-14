@@ -9,19 +9,27 @@ needs several writes in one transaction), not through this class.
 """
 from __future__ import annotations
 
+import json
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError as PydanticValidationError
 
 from memhub import injection
 from memhub.config import Settings
 from memhub.storage import Backend, UnitOfWork
-from memhub.storage.rules import Actor, EntityFilter, NotFound, Row, area_ids, as_vector_list
+from memhub.storage.rules import (
+    Actor, AnyOf, AreaIn, EntityFilter, EntityIs, EntityTypeIn, Filter, NotFound, NotOf, Row, all_of, area_ids,
+    as_vector_list, map_areas, positive_entity_nodes,
+)
 from memhub.types import TypeRegistry
+
+if TYPE_CHECKING:
+    from memhub.filters import SearchFilter
 
 __all__ = [
     "Actor",
@@ -63,6 +71,22 @@ def _occurs(name: str, text: str) -> bool:
     return bool(name.strip()) and re.search(rf"(?<!\w){re.escape(name.strip())}(?!\w)", text, re.I) is not None
 
 
+REJECTED_REPEAT = "a reviewer already rejected this memory"
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _slot_text(key: Any) -> str | None:
+    """A key as the slot index reads it (`payload->>'key'`): a string as it is, any other value as its JSON text."""
+    if key is None:
+        return None
+    return key if isinstance(key, str) else json.dumps(key)
+
+
 class Embedder:
     """Structural type: anything with `.embed_query(str) -> list[float]`."""
 
@@ -86,10 +110,12 @@ class MemoryService:
         if scope not in self.settings.scopes:
             raise ValidationError(f"scope {scope!r} is not enabled (config.scopes = {self.settings.scopes})")
 
-    def _validate(self, type_name: str, fields: dict[str, Any]):
+    def _validate(self, type_name: str, fields: dict[str, Any], schema_version: int | None = None):
+        """The one field check of every write (add, edit, propose, approve with fields, `check_fields`): the type's
+        model (at `schema_version`, else the latest), the injection scan, declared entity types and allowed keys."""
         if type_name not in self.registry:
             raise ValidationError(f"unknown memory type {type_name!r}")
-        cls = self.registry.latest(type_name)
+        cls = self.registry.latest(type_name) if schema_version is None else self.registry.get(type_name, schema_version)
         try:
             instance = cls.model_validate(fields)
         except PydanticValidationError as exc:
@@ -191,13 +217,7 @@ class MemoryService:
             if active is None:
                 raise NotFound(f"no active version for memory {memory_id}")
             self._authorize_owner_or_admin(actor, active)
-            cls = self.registry.get(active["type"], active["schema_version"])
-            merged = {**active["payload"], **fields}
-            try:
-                instance = cls.model_validate(merged)
-            except PydanticValidationError as exc:
-                raise ValidationError(str(exc)) from exc
-            self._check_instance(instance)
+            instance = self._validate(active["type"], {**active["payload"], **fields}, active["schema_version"])
             self._guard_embedding_config(uow)
             embedding = self._embed(instance.content)
             return uow.memories.edit_memory(
@@ -251,25 +271,68 @@ class MemoryService:
         with self.store.unit_of_work() as uow:
             return uow.memories.delete_user(user_id)
 
-    def approve(self, actor: Actor, id: uuid.UUID, *, resolve: str | None = None, note: str | None = None) -> Row:
-        if not any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
-            raise PermissionDenied("actor lacks an approving role")
+    def check_fields(self, type_name: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Validate `fields` as a `type_name` memory without saving anything: `{"content", "payload"}`."""
+        instance = self._validate(type_name, fields)
+        return {"content": instance.content, "payload": instance.model_dump(mode="json")}
+
+    def _authorize_review(self, actor: Actor, row: Row) -> None:
+        """Approve and reject: an approving role, or for a user-scope candidate its owner (AD-037, AD-041)."""
+        if any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
+            return
+        if row["scope"] == "user" and row["user_id"] == actor.id:
+            return
+        raise PermissionDenied(
+            "only the owner or an approving role may review this candidate" if row["scope"] == "user"
+            else "actor lacks an approving role"
+        )
+
+    def _review_edit(self, uow: UnitOfWork, row: Row, fields: dict[str, Any], resolve: str | None) -> dict | None:
+        """What a reviewer's `fields` make of the candidate: `{content, payload, entities, embedding}` to approve as the
+        next version, or None when they change nothing. Checked like any write, before anything is saved."""
+        if row["conflicts_with"] is not None and resolve == "keep_old":
+            raise ValidationError("keep_old rejects the candidate: there is nothing to edit")
+        if row["conflicts_with"] is not None and resolve == "keep_both" and row["payload"].get("key") is not None:
+            raise ValidationError("keep_both on a keyed slot writes one merged statement: approve without fields, "
+                                  "then edit the merged memory")
+        instance = self._validate(row["type"], {**row["payload"], **fields}, row["schema_version"])
+        payload = instance.model_dump(mode="json")
+        if payload == row["payload"]:
+            return None
+        cfg = self.settings.types.get(row["type"])
+        if cfg is not None and cfg.keyed and _slot_text(payload.get("key")) != _slot_text(row["payload"].get("key")):
+            raise ValidationError("the key cannot change on review: reject and propose again")
+        self._guard_embedding_config(uow)
+        return {"content": instance.content, "payload": payload,
+                "entities": [e.model_dump() for e in instance.entities], "embedding": self._embed(instance.content)}
+
+    def approve(self, actor: Actor, id: uuid.UUID, *, fields: dict[str, Any] | None = None,
+                resolve: str | None = None, note: str | None = None) -> Row:
+        """Make a candidate active. With `fields` that change it, the reviewer's corrections are checked like any
+        write; the candidate is kept as `archived` (`edited on review`) and the corrected text becomes the next
+        version, in the same transaction."""
         with self.store.unit_of_work() as uow:
             merged = None
             row = uow.memories.get_by_id(id)
-            if resolve == "keep_both" and row is not None and row["conflicts_with"] is not None \
+            if row is None:
+                raise NotFound(f"no row {id}")
+            self._authorize_review(actor, row)
+            edit = self._review_edit(uow, row, fields, resolve) if fields else None
+            if resolve == "keep_both" and row["conflicts_with"] is not None \
                     and row["payload"].get("key") is not None:
                 old = uow.memories.get_active(row["conflicts_with"])
                 if old is not None:  # one slot, one row: keeping both values means one statement holding both
                     content = f"{old['content']}; {row['content']}"
                     merged = {"content": content, "payload": {**old["payload"], "content": content},
                               "embedding": self._embed(content)}
-            return uow.memories.approve(id, reviewed_by=actor.id, resolve=resolve, note=note, merged=merged)
+            return uow.memories.approve(id, reviewed_by=actor.id, resolve=resolve, note=note, merged=merged, edit=edit)
 
     def reject(self, actor: Actor, id: uuid.UUID, *, note: str | None = None) -> Row:
-        if not any(actor.has_role(r) for r in self.settings.roles.approve_workspace):
-            raise PermissionDenied("actor lacks an approving role")
         with self.store.unit_of_work() as uow:
+            row = uow.memories.get_by_id(id)
+            if row is None:
+                raise NotFound(f"no row {id}")
+            self._authorize_review(actor, row)
             return uow.memories.reject(id, reviewed_by=actor.id, note=note)
 
     def promote(
@@ -323,10 +386,13 @@ class MemoryService:
         area: str | None = None,
         subjects: list[dict] | None = None,
         entity_type: str | None = None,
+        filter: SearchFilter | None = None,
+        viewer: str | None = None,
     ) -> list[Row]:
         """Every row (stale ones marked); `stale=True` lists only the stale ones; `area` (key, title or id)
         keeps the rows linked to that area of the owner; `subjects` / `entity_type` keep the rows about one of
-        those subjects / about any subject of that type."""
+        those subjects / about any subject of that type. `filter` (`memhub.filters.parse`) keeps the rows it
+        matches; its `areas` are those of `viewer` (a user id) and of the workspace."""
         with self.store.unit_of_work() as uow:
             rows = uow.memories.list_memories(
                 status=status, type=type, user_id=user_id, workspace_id=workspace_id, stale=stale, now=now
@@ -334,6 +400,10 @@ class MemoryService:
             if subjects or entity_type:
                 flt = EntityFilter(any_of=tuple((e["type"], e["id"]) for e in subjects or []), of_type=entity_type)
                 rows = [r for r in rows if flt.matches(r["entities"])]
+            if filter is not None:
+                tree = self._resolve_areas(uow, filter.tree(), workspace_id or self.settings.workspace_default, viewer)
+                rows = [r for r in rows if (tree is None or tree.matches(r))
+                        and (not filter.types or r["type"] in filter.types)]
             if area is None:
                 return rows
             found = self._find_area(uow, area, workspace_id or self.settings.workspace_default, user_id)
@@ -354,6 +424,7 @@ class MemoryService:
         subjects: list[dict] | None = None,
         entity_type: str | None = None,
         widen: bool = False,
+        filter: SearchFilter | None = None,
     ) -> list[Row]:
         """Nearest memories. Rows in the query's best area are boosted (never filtered); that area is `area`
         (a key, title or id) when given, else the owner's area whose description is nearest the query.
@@ -361,8 +432,14 @@ class MemoryService:
 
         `subjects`: only rows about one of them, in tiers by the order given (AD-030), then, with `widen`, rows
         about no isolated subject (`general`); `entity_type`: rows about any subject of that type. With either,
-        each row carries `matched_on`. A `require_filter` type the filter does not name is left out (AD-033)."""
+        each row carries `matched_on`. A `require_filter` type the filter does not name is left out (AD-033).
+
+        `filter` (`memhub.filters.parse`, #25) replaces `subjects` / `entity_type`: its top-level `entities` are the
+        tiers, the rest of it applies to every tier, and its `types` are searched one at a time and merged by tier,
+        then similarity."""
         workspace_id = workspace_id or self.settings.workspace_default
+        if filter is None and (subjects or entity_type or widen):
+            filter = _legacy_filter(subjects or [], entity_type)
         with self.store.unit_of_work() as uow:
             expansion = self._expand(uow, query, workspace_id, include_stale, now)
         embedding = self._embed(expansion.text)
@@ -373,14 +450,24 @@ class MemoryService:
                 query_embedding=embedding,
             )
 
-            def nearest(entities: EntityFilter | None) -> list[Row]:
+            def nearest(entities: EntityFilter | None, flt: Filter | None = None, type: str | None = type) -> list[Row]:
                 return uow.vectors.search(
                     query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=k, type=type,
                     include_stale=include_stale, now=now, area_boost=best["memory_id"] if best else None,
                     text_boost=expansion.related, **({"entities": entities} if entities is not None else {}),
+                    **({"filter": flt} if flt is not None else {}),
                 )
 
-            rows = self._subject_tiers(nearest, subjects or [], entity_type, widen, k)
+            if filter is not None:
+                filter = _with_rest(filter, self._resolve_areas(uow, filter.rest, workspace_id, user_id))
+            if filter is not None and filter.types:  # one search per type, merged by tier, then similarity
+                rows = [r for t in filter.types
+                        for r in self._subject_tiers(lambda e, f=None, t=t: nearest(e, f, t), filter, widen, k)]
+                rows = sorted(rows, key=lambda r: (r["_tier"], -r["similarity"]))[:k]
+            else:
+                rows = self._subject_tiers(nearest, filter, widen, k)
+            for r in rows:
+                r.pop("_tier", None)
             titles = uow.memories.areas_by_memory_id([i for r in rows for i in area_ids(r["links"])])
             for r in rows:
                 r["areas"] = [titles[i]["payload"]["title"] for i in area_ids(r["links"]) if i in titles]
@@ -388,32 +475,68 @@ class MemoryService:
                     r["expanded_by"] = list(expansion.terms)
             return rows
 
-    def _subject_tiers(self, nearest, subjects: list[dict], entity_type: str | None, widen: bool, k: int) -> list[Row]:
-        """One search per tier (a subject, in order; then `general`), each its own top `k`, so a subject's rows
-        are never cut by another's; a row is kept in the first tier it matches."""
-        named = {e["type"] for e in subjects} | ({entity_type} if entity_type else set())
+    def _subject_tiers(self, nearest, flt: SearchFilter | None, widen: bool, k: int) -> list[Row]:
+        """One search per tier (a top-level `entities` item, in order; then `general`), each its own top `k`, so a
+        subject's rows are never cut by another's; a row is kept in the first tier it matches and says which in
+        `_tier`. Exact-id tiers, `entity_type` alone and the guard keep their `EntityFilter`, so their SQL is the SQL
+        before #25 (AD-014); everything else is the `Filter` the backend runs in the same query."""
+        named = flt.named_types() if flt is not None else set()
         guard = tuple(t for t in self.settings.guarded_types() if t not in named)
-        if not subjects and entity_type is None:
-            return nearest(EntityFilter(none_of_types=guard) if guard else None)
-        if not subjects:
-            rows = nearest(EntityFilter(of_type=entity_type, none_of_types=guard))
+        guarded = EntityFilter(none_of_types=guard) if guard else None
+        rest = flt.rest if flt is not None else None
+        scoped = _guard_scope(flt, [t for t in self.settings.guarded_types() if t in named])
+        if scoped is not None:  # a named guarded type comes back only for the subject the filter names (AD-052)
+            rest = all_of(rest, scoped)
+        if flt is None or not flt.items:
+            if isinstance(rest, EntityTypeIn) and len(rest.types) == 1:  # `entity_type` alone, as before #25
+                rows = nearest(EntityFilter(of_type=rest.types[0], none_of_types=guard))
+            else:
+                rows = nearest(guarded, rest)
+            nodes = positive_entity_nodes(rest)
             for r in rows:
-                r["matched_on"] = next(f"{e['type']}:{e['id']}" for e in r["entities"] if e["type"] == entity_type)
+                r["_tier"] = 0
+                label = _first_hit(r, nodes)
+                if label:
+                    r["matched_on"] = label
             return rows
-        tiers = [(f"{e['type']}:{e['id']}", EntityFilter(any_of=((e["type"], e["id"]),), none_of_types=guard))
-                 for e in subjects]
+        tiers: list[tuple[str | None, EntityFilter | None, Filter | None, EntityIs | None]] = []
+        for item in flt.items:
+            if item.op == "in" and len(item.values) == 1:
+                tiers.append((f"{item.type}:{item.values[0]}",
+                              EntityFilter(any_of=((item.type, item.values[0]),), none_of_types=guard), rest, None))
+            else:
+                tiers.append((None, guarded, all_of(item, rest), item))
         if widen:
             isolated = tuple(dict.fromkeys([*self.settings.isolated_types(), *guard]))
-            tiers.append(("general", EntityFilter(none_of_types=isolated)))
+            tiers.append(("general", EntityFilter(none_of_types=isolated), rest, None))
         out: list[Row] = []
         seen: set[Any] = set()
-        for label, flt in tiers:
-            for r in nearest(flt):
+        for i, (label, entities, extra, item) in enumerate(tiers):
+            for r in nearest(entities, extra):
                 if r["memory_id"] not in seen:
                     seen.add(r["memory_id"])
-                    r["matched_on"] = label
+                    r["matched_on"] = label or _first_hit(r, [item])
+                    r["_tier"] = i
                     out.append(r)
         return out[:k]
+
+    def _resolve_areas(self, uow: UnitOfWork, flt: Filter | None, workspace_id: str, user_id: str | None) -> Filter | None:
+        """`flt` with each `areas` name replaced by the ids of the caller's areas (its user areas and the workspace's)
+        whose key or title is that name, ignoring case. A name no area has matches nothing."""
+        owned: list[Row] | None = None
+
+        def resolve(names: tuple[str, ...]) -> AreaIn:
+            nonlocal owned
+            if owned is None:  # read only when the filter names an area
+                owned = list(uow.memories.owner_areas(scope="workspace", workspace_id=workspace_id, user_id=None))
+                if user_id:
+                    owned += uow.memories.owner_areas(scope="user", workspace_id=workspace_id, user_id=user_id)
+            wanted = {n.strip().lower() for n in names}
+            return AreaIn(tuple(str(a["memory_id"]) for a in owned
+                                if str(a["payload"].get("key") or "").lower() in wanted
+                                or str(a["payload"].get("title") or "").lower() in wanted))
+
+        return map_areas(flt, resolve)
 
     def expansion(
         self, actor: Actor, query: str, *, workspace_id: str | None = None, include_stale: bool = False,
@@ -567,24 +690,46 @@ class MemoryService:
         user_id: str | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
+        memory_id: uuid.UUID | None = None,
+        user_requested: bool = False,
+        approve: bool = False,
     ) -> Row:
-        """Like `add`, but always a `candidate` (never active), even for user scope."""
+        """Like `add`, but a `candidate` (never active), even for user scope.
+
+        - `memory_id`: correct that pending candidate in place (same owner and workspace) instead of adding one.
+        - A proposal close to a candidate a reviewer rejected (same type and owner, similarity at or above
+          `reconcile.duplicate`) is refused, unless `user_requested` (the user asked for it again).
+        - `approve=True`: the proposal was reviewed by `actor`; it is written active and verified when `actor` may
+          approve that scope (an approving role, or the owner of a user-scope memory), else as a candidate."""
         self._check_scope(scope)
         instance = self._validate(type, fields)
         if scope == "user" and not user_id:
             raise ValidationError("user_id is required for scope=user")
+        workspace_id = workspace_id or self.settings.workspace_default
+        owner = user_id if scope == "user" else None
         embedding = self._embed(instance.content)
+        payload = instance.model_dump(mode="json")
+        entities = [e.model_dump() for e in instance.entities]
         with self.store.unit_of_work() as uow:
             self._guard_embedding_config(uow)
-            return uow.memories.add_memory(
+            if not user_requested:  # a correction may not turn a draft into what a reviewer rejected either
+                self._refuse_rejected_repeat(uow, type=type, scope=scope, workspace_id=workspace_id, user_id=owner,
+                                             embedding=embedding)
+            if memory_id is not None:
+                pending = self._own_candidate(uow, memory_id, type=type, scope=scope, workspace_id=workspace_id,
+                                              user_id=owner)
+                uow.memories.amend_row(pending["id"], content=instance.content, payload=payload, embedding=embedding,
+                                       entities=entities)
+                return uow.memories.get_by_id(pending["id"])
+            row = uow.memories.add_memory(
                 type=type,
                 schema_version=self.registry.latest_version(type),
                 scope=scope,
-                workspace_id=workspace_id or self.settings.workspace_default,
-                user_id=user_id if scope == "user" else None,
+                workspace_id=workspace_id,
+                user_id=owner,
                 content=instance.content,
-                payload=instance.model_dump(mode="json"),
-                entities=[e.model_dump() for e in instance.entities],
+                payload=payload,
+                entities=entities,
                 embedding=embedding,
                 evidence=evidence,
                 status="candidate",
@@ -593,6 +738,52 @@ class MemoryService:
                 run_id=run_id,
                 agent_id=agent_id,
             )
+            if approve and self._may_review(actor, row) and not self._slot_taken(uow, row, instance):
+                return uow.memories.approve(row["id"], reviewed_by=actor.id)
+            return row
+
+    def _may_review(self, actor: Actor, row: Row) -> bool:
+        try:
+            self._authorize_review(actor, row)
+        except PermissionDenied:
+            return False
+        return True
+
+    def _slot_taken(self, uow: UnitOfWork, row: Row, instance: Any) -> bool:
+        """A keyed proposal whose slot already holds an active value waits in the queue: one slot, one value."""
+        if not self.settings.is_slot(row["type"], instance):
+            return False
+        key = _slot_text(instance.key)
+        return any(
+            _slot_text(r["payload"].get("key")) == key and r["scope"] == row["scope"] and r["user_id"] == row["user_id"]
+            for r in uow.memories.list_memories(status="active", type=row["type"], workspace_id=row["workspace_id"])
+        )
+
+    def _own_candidate(self, uow: UnitOfWork, memory_id: uuid.UUID, *, type: str, scope: str, workspace_id: str,
+                       user_id: str | None) -> Row:
+        """The pending candidate a correction targets: the same owner, workspace and type, still a candidate."""
+        rows = uow.memories.history(memory_id)
+        if not rows:
+            raise NotFound(f"no memory {memory_id}")
+        newest = rows[-1]
+        if newest["workspace_id"] != workspace_id or newest["scope"] != scope or newest["user_id"] != user_id:
+            raise PermissionDenied(f"memory {memory_id} belongs to another owner or workspace")
+        pending = [r for r in rows if r["status"] == "candidate"]
+        if not pending:
+            raise ValidationError(f"memory {memory_id} is not a pending candidate (it is {newest['status']})")
+        if pending[-1]["type"] != type:
+            raise ValidationError(f"memory {memory_id} is a {pending[-1]['type']}: a correction keeps the type")
+        return pending[-1]
+
+    def _refuse_rejected_repeat(self, uow: UnitOfWork, *, type: str, scope: str, workspace_id: str,
+                                user_id: str | None, embedding: list[float]) -> None:
+        """AD-043: what a reviewer rejected for this owner is not proposed again."""
+        for row in uow.memories.list_memories(status="rejected", type=type, workspace_id=workspace_id):
+            if row["scope"] != scope or row["user_id"] != user_id:
+                continue
+            # rounded so float noise (and pgvector's float4) cannot move a value that sits on the threshold
+            if round(_cosine(embedding, as_vector_list(row["embedding"]) or []), 6) >= self.settings.reconcile.duplicate:
+                raise ValidationError(REJECTED_REPEAT)
 
     # --- maintenance -------------------------------------------------------------
 
@@ -622,3 +813,40 @@ class MemoryService:
             raise PermissionDenied("only a workspace_admin may purge dropped-candidate history")
         with self.store.unit_of_work() as uow:
             return uow.runs.purge_dropped(retention_days=self.settings.retention.dropped_days)
+
+
+def _legacy_filter(subjects: list[dict], entity_type: str | None) -> SearchFilter:
+    """`subjects` / `entity_type` (the service's arguments before #25) as a `SearchFilter`."""
+    from memhub.filters import SearchFilter
+
+    return SearchFilter(items=[EntityIs(e["type"], "in", (e["id"],)) for e in subjects],
+                        rest=EntityTypeIn((entity_type,)) if entity_type else None)
+
+
+def _with_rest(flt: SearchFilter, rest: Filter | None) -> SearchFilter:
+    from memhub.filters import SearchFilter
+
+    return SearchFilter(items=flt.items, rest=rest, types=flt.types, has_combinator=flt.has_combinator)
+
+
+def _first_hit(row: Row, nodes: list) -> str | None:
+    """`"<type>:<id>"` of the row's first entity a positive entity node of the filter matches (`matched_on`)."""
+    for e in row["entities"] or []:
+        if any(n is not None and n.hit(e) for n in nodes):
+            return f"{e['type']}:{e['id']}"
+    return None
+
+
+def _guard_scope(flt: SearchFilter | None, types: list[str]) -> Filter | None:
+    """For each guarded type the filter names: a row tagged with that type passes only when a positive entity node
+    naming that type matches it (AD-052). `None` when no guarded type is named."""
+    if flt is None or not types:
+        return None
+    nodes = [*flt.items, *positive_entity_nodes(flt.rest)]
+    parts = []
+    for t in types:
+        naming = tuple(n for n in nodes if (n.type == t if isinstance(n, EntityIs) else t in n.types))
+        if any(isinstance(n, EntityTypeIn) for n in naming):  # the whole type is named: every subject of it passes
+            continue
+        parts.append(AnyOf((NotOf(EntityTypeIn((t,))), *naming)))
+    return all_of(*parts)

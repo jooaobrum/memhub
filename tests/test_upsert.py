@@ -432,6 +432,22 @@ def test_a_verified_fact_is_protected_like_a_slot(areas):
     assert (s.conflicts_opened, pending["conflicts_with"]) == (1, row["memory_id"])
 
 
+@pytest.mark.parametrize("verdict", ["updates", Verdict(verdict="extends", about=1,
+                                     content="Has a Brazilian driving licence Exchanged it for a French one")])
+def test_a_later_state_of_a_pending_shared_fact_amends_it_instead_of_a_conflict(areas, verdict):
+    # e2e S6: "Replace the filter drier" then "Replaced it, unit restarted" in one chat gave two candidates in conflict
+    ledger = areas
+    shared = lambda content, quote, mid: fact(content, quote, mid).model_copy(update={"scope": "workspace"})
+    ledger.say("a", "Tenho CNH brasileira", AUG10, [shared("Has a Brazilian driving licence", "Tenho CNH brasileira", "a-1")],
+               owner=None)
+    s = ledger.say("b", "troquei a minha por uma francesa", SEP10,
+                   [shared("Exchanged it for a French one", "troquei a minha por uma francesa", "b-1")], [verdict], owner=None)
+    [row] = ledger.rows("fact", owner=None)
+    assert (s.conflicts_opened, row["status"], row["conflicts_with"]) == (0, "candidate", None)
+    assert row["content"] == (verdict.content if isinstance(verdict, Verdict) else "Exchanged it for a French one")
+    assert {e["quote"] for e in row["evidence"]} == {"Tenho CNH brasileira", "troquei a minha por uma francesa"}
+
+
 def test_an_older_fact_that_the_judge_calls_an_update_is_outdated(areas):
     ledger = areas
     ledger.say("b", "troquei a minha por uma francesa", SEP10,

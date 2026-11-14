@@ -19,7 +19,7 @@ When this ships, `memory.md` (or `memhub.yaml`) states one rule - a project defa
 
 This reuses `TypeConfig.review`, the existing `candidate` status, the review queue, `approve` / `reject` with `roles.approve_workspace` (AD-053), reconcile's handling of pending candidates, and the `reviewed_by` column every backend already stores; nothing is added to the schema. The rule that changes an outcome runs in one function, `Config.needs_review(type, scope)` in `config.py`, called by `route()`. Both are reached by `tests/test_pipeline_units.py`-style unit tests and by the storage contract suite with no model.
 
-1. `review:` in the `memory.md` frontmatter or `memhub.yaml`, and `review:` on a type (long form, `{builtin: true, ...}`, `{template: "...", ...}` - AD-052) -> `memory_file.read_memory_file` (exists) and `Config` validators in `config.py` (exists, door 2, door 3) - validates and hands on `Config.review` and `TypeConfig.review: bool | None`.
+1. `review:` in the `memory.md` frontmatter or `memhub.yaml`, and `review:` on a type (long form, `{builtin: true, ...}`, `{template: "...", ...}` - AD-056) -> `memory_file.read_memory_file` (exists) and `Config` validators in `config.py` (exists, door 2, door 3) - validates and hands on `Config.review` and `TypeConfig.review: bool | None`.
 2. `Config.needs_review(type, scope)` (new, in `config.py`) - decides: the type's `review` if set; else the project default (`all` -> both scopes, `workspace` -> workspace only, `none` -> neither).
 3. an extracted or `/remember` proposal -> `route()` (exists) - a new row or a superseding version is `candidate` when `needs_review` says so or it is a conflict; otherwise `active`, stamped reviewed_by = auto (door 1). Persists through `uow.memories.add_memory` / `edit_memory` (exists, gain a `reviewed_by` argument) on Postgres, SQLite and in-memory.
 4. `push` / `ingest` (exists) - turn the routed row into `ADD` / `UPDATE` (active) or `PENDING` / `CONFLICT` (candidate) via `_push_event` (exists, unchanged).
@@ -91,7 +91,7 @@ Config keys, Python API and CLI; there is no HTTP route. The codes in Status onl
 | --- | --- | --- |
 | 1. the auto-approval mark (AD-055) | `reviewed_by = "auto"` on rows `route()` writes `active` (new row or new version), both scopes; old rows stay `NULL` | a new `approved_by` column: a migration on three backends for a value the existing column holds; no mark: the user chose a queryable mark (#24's dashboard will bind to it) |
 | 2. the project rule in config | `review: none \| workspace \| all`, default `workspace`, allowed in the `memory.md` frontmatter and in `memhub.yaml`, set in at most one of them | a boolean project default: cannot say "every scope" |
-| 3. the type override and its short form (AD-052) | `review: true \| false` (unset = project default); `profile: {builtin: true, review: false}`; `fix: {template: "{fault}: {action}", review: true}` | a suffix inside the string (`builtin, review: false`): a second syntax inside a string |
+| 3. the type override and its short form (AD-056) | `review: true \| false` (unset = project default); `profile: {builtin: true, review: false}`; `fix: {template: "{fault}: {action}", review: true}` | a suffix inside the string (`builtin, review: false`): a second syntax inside a string |
 
 - Nothing else in this change is hard to reverse: `needs_review`, the `reviewed_by` argument on the storage port and the queue filter are internal.
 
@@ -167,7 +167,7 @@ The config accepts the rule in short and long forms and shows it back.
 24. IF `review` is any other value THEN the system SHALL raise `ConfigError` naming `none, workspace, all`
     - `review: maybe` → error; `review: true` at project level → error
 25. IF both `memhub.yaml` and its `memory.md` set `review` THEN the system SHALL raise `ConfigError` "review is set in both <yaml> and memory.md: keep one"
-26. WHEN a type is written `{builtin: true, <options>}` THEN the system SHALL read it as `builtin` with those options over the built-in's own (AD-052)
+26. WHEN a type is written `{builtin: true, <options>}` THEN the system SHALL read it as `builtin` with those options over the built-in's own (AD-056)
     - `profile: {builtin: true, review: false}` → profile's class and fields, `review: false`; `{builtin: true}` on `sighting` (not built in) → `ConfigError` as `sighting: builtin` gives today
 27. WHEN a type is written `{template: "<template>", <options>}` THEN the system SHALL read it as that template string with those options
     - `fix: {template: "{fault}: {action}", review: true}` → fields `fault`, `action`, `review: true`
@@ -200,7 +200,7 @@ The config accepts the rule in short and long forms and shows it back.
 
 | Assumption | Chosen default | Rationale | Confirmed? |
 | --- | --- | --- | --- |
-| short form for type options | mapping keys `builtin: true` / `template:` | AD-052 | y |
+| short form for type options | mapping keys `builtin: true` / `template:` | AD-056 | y |
 | who approves user-scope candidates | `roles.approve_workspace` | AD-053 | y |
 | `propose_memory` and `review: false` | always a candidate | AD-054 | y |
 | the auto-approval mark | `reviewed_by = "auto"`, both scopes, no backfill | AD-055 | y |
@@ -216,9 +216,9 @@ The config accepts the rule in short and long forms and shows it back.
 
 ## Differences from the source
 
-None - no capture or design binds this feature; the issue's proposal is followed except where AD-052 to AD-055 settle its open points (AD-055 picks `reviewed_by: "auto"` from the issue's two options).
+None - no capture or design binds this feature; the issue's proposal is followed except where AD-053 to AD-056 settle its open points (AD-055 picks `reviewed_by: "auto"` from the issue's two options).
 
 ## Sources
 
 - GitHub issue #29 "Approval per memory type: memory.md says which types need review and which are auto-approved" - binding - problem, rules to keep, scope and acceptance
-- `.specs/STATE.md` AD-025, AD-027, AD-031, AD-035 (memory.md as the project's one memory file; the init starter) and AD-052 to AD-055 (this feature's answers)
+- `.specs/STATE.md` AD-025, AD-027, AD-031, AD-035 (memory.md as the project's one memory file; the init starter) and AD-053 to AD-056 (this feature's answers)

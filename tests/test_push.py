@@ -397,7 +397,7 @@ def test_thread_lock(settings):
 
 
 def test_extract_error_is_a_drop(settings):
-    llm = FakeChatModel([PARSE_ERROR], unrelated_by_default=True)
+    llm = FakeChatModel([PARSE_ERROR] * 2, unrelated_by_default=True)  # the first answer and the one retry
     m = _memory(settings, llm)
     out = m.add(conv("I live in Lyon", "ok"), infer=True, **IDS)
     assert (out.results, out.dropped) == ([], [Dropped(content=None, reason="extract_error")])
