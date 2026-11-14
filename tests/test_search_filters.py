@@ -221,6 +221,7 @@ def test_guard_counts_positive_branches_only(m):
     seed(m, "patient p2 allergy", [{"type": "patient", "id": "p2"}])
     seed(m, "a plain fact")
     assert contents(search(m, {"NOT": {"entities": [p1]}})) == {"a plain fact"}
+    assert contents(search(m, {"OR": [{"NOT": {"entities": [p1]}}, {"types": ["fact"]}]})) == {"a plain fact"}
     assert contents(search(m, {"OR": [{"entities": [p1]}, {"types": ["fact"]}]})) == {"patient p1 allergy", "a plain fact"}
     assert contents(search(m, {"entity_type": {"in": ["patient"]}})) == {"patient p1 allergy", "patient p2 allergy"}
 
