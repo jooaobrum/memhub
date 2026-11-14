@@ -140,6 +140,36 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: e4965bd src/memhub/middleware.py MEMORY_FRAME (git)
 - last seen: 2026-11-14T10:40:20Z
 
+### L-022 - A search rule that claims 'same as without the option' needs a case per merge path: one type and several types (filters.types) merge differently in service.search.
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `search` · harmful: 0
+- features: hybrid-search
+- evidence: AC 9 (search)
+- last seen: 2026-11-14T15:30:39Z
+
+### L-023 - A subject filter with one exact id goes through EntityFilter, not Filter: a check that a new search leg honours filters needs a non-subject Filter case (observed_at, areas).
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `search` · harmful: 0
+- features: hybrid-search
+- evidence: service.py keyword_search filter=flt (search)
+- last seen: 2026-11-14T15:30:40Z
+
+### L-024 - Text folding done in Python and in SQL must be proven on decomposed (NFD), compatibility (m², ß) and precomposed input on every backend, not only precomposed accents.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `storage` · harmful: 0
+- features: hybrid-search
+- evidence: postgres.py _FOLDED_CONTENT (storage)
+- last seen: 2026-11-14T15:30:40Z
+
+### L-025 - Before stating a returned score's meaning, check what apply_boosts already adds to it; restate the field as 'today's value' rather than an ideal one.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `search` · harmful: 0
+- features: hybrid-search
+- evidence: AC 16 (search)
+- last seen: 2026-11-14T15:30:40Z
+
+### L-026 - Every path that assigns a rank score (fused or fallback) must apply the configured weights, or the weights silently stop holding on the fallback path.
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `search` · harmful: 0
+- features: hybrid-search
+- evidence: AC 14 (search)
+- last seen: 2026-11-14T15:30:40Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
