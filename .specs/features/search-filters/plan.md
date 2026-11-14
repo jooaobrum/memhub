@@ -155,7 +155,7 @@ Subject tiers keep their order and `matched_on` says what each hit matched.
     - `{"entities": [PRD_1], "content": {"contains": "pump"}}, widen=True` → a general memory about pumps is returned, a general memory about fans is not
 25. IF `widen=True` and the filter has no top-level `entities`, or has `AND` / `OR` / `NOT` at the top level THEN `search` SHALL raise `ValidationError` before any database call (AD-047)
 26. WHILE a type is marked `require_filter: true`, WHEN the filter names that type only inside a `NOT` THEN `search` SHALL return none of its tagged memories; WHEN a positive branch names it (an `entities` item, `entity_type` or its `in`) THEN its memories SHALL be returned
-    - guarded `patient`: `{"NOT": {"entities": [patient:p1]}}` → no patient memories; `{"OR": [{"entities": [patient:p1]}, {"types": ["fact"]}]}` → p1's memories can be returned
+    - guarded `patient`: `{"NOT": {"entities": [patient:p1]}}` → no patient memories; `{"OR": [{"entities": [patient:p1]}, {"types": ["fact"]}]}` → p1's memories can be returned, never p2's (AD-052: a guarded memory comes back only for the subject a positive part names; `entity_type: patient` names every patient)
 
 ### S4: the CLI, the tools and MCP take the same filter (P1)
 

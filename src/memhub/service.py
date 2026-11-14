@@ -21,8 +21,8 @@ from memhub import injection
 from memhub.config import Settings
 from memhub.storage import Backend, UnitOfWork
 from memhub.storage.rules import (
-    Actor, AreaIn, EntityFilter, EntityIs, EntityTypeIn, Filter, NotFound, Row, all_of, area_ids, as_vector_list,
-    map_areas, positive_entity_nodes,
+    Actor, AnyOf, AreaIn, EntityFilter, EntityIs, EntityTypeIn, Filter, NotFound, NotOf, Row, all_of, area_ids,
+    as_vector_list, map_areas, positive_entity_nodes,
 )
 from memhub.types import TypeRegistry
 
@@ -427,6 +427,9 @@ class MemoryService:
         guard = tuple(t for t in self.settings.guarded_types() if t not in named)
         guarded = EntityFilter(none_of_types=guard) if guard else None
         rest = flt.rest if flt is not None else None
+        scoped = _guard_scope(flt, [t for t in self.settings.guarded_types() if t in named])
+        if scoped is not None:  # a named guarded type comes back only for the subject the filter names (AD-052)
+            rest = all_of(rest, scoped)
         if flt is None or not flt.items:
             if isinstance(rest, EntityTypeIn) and len(rest.types) == 1:  # `entity_type` alone, as before #25
                 rows = nearest(EntityFilter(of_type=rest.types[0], none_of_types=guard))
@@ -706,3 +709,18 @@ def _first_hit(row: Row, nodes: list) -> str | None:
         if any(n is not None and n.hit(e) for n in nodes):
             return f"{e['type']}:{e['id']}"
     return None
+
+
+def _guard_scope(flt: SearchFilter | None, types: list[str]) -> Filter | None:
+    """For each guarded type the filter names: a row tagged with that type passes only when a positive entity node
+    naming that type matches it (AD-052). `None` when no guarded type is named."""
+    if flt is None or not types:
+        return None
+    nodes = [*flt.items, *positive_entity_nodes(flt.rest)]
+    parts = []
+    for t in types:
+        naming = tuple(n for n in nodes if (n.type == t if isinstance(n, EntityIs) else t in n.types))
+        if any(isinstance(n, EntityTypeIn) for n in naming):  # the whole type is named: every subject of it passes
+            continue
+        parts.append(AnyOf((NotOf(EntityTypeIn((t,))), *naming)))
+    return all_of(*parts)

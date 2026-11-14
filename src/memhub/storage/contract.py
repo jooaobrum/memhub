@@ -853,6 +853,32 @@ def test_filter_not_of_null_comparison(backend):
         assert "seen sept" in fsearch(uow, NotOf(TimeRange("observed_at", gte=_at("2026-10-01T00:00:00"))))
 
 
+
+def test_filter_parsed_time_bounds(backend):
+    """#25 C38: the bounds `memhub.filters.parse` builds - a date-only `lte` is its whole UTC day (AD-049); a datetime
+    `lte` drops a null `valid_until`, and its NOT keeps it (AD-050)."""
+    from memhub.filters import parse
+
+    def tree(f):
+        return parse(f, declared=[]).rest
+
+    with backend.unit_of_work() as uow:
+        add(uow, "last microsecond", vec(0.9), observed_at=_at("2026-10-31T23:59:59.999999"))
+        add(uow, "next day", vec(0.85), observed_at=_at("2026-11-01T00:00:00"))
+        add(uow, "first instant", vec(0.8), observed_at=_at("2026-10-01T00:00:00"))
+    with backend.unit_of_work() as uow:
+        assert fsearch(uow, tree({"observed_at": {"lte": "2026-10-31"}})) == {"last microsecond", "first instant"}
+        assert fsearch(uow, tree({"observed_at": {"gte": "2026-10-01", "lte": "2026-10-01"}})) == {"first instant"}
+    with backend.unit_of_work() as uow:
+        add(uow, "never expires", vec(0.7))
+        add(uow, "expires nov 30", vec(0.65), valid_until=_at("2026-11-30T00:00:00"))
+    with backend.unit_of_work() as uow:
+        upper = {"valid_until": {"lte": "2026-12-01T00:00:00Z"}}
+        assert fsearch(uow, tree(upper)) == {"expires nov 30"}
+        assert "never expires" in fsearch(uow, tree({"NOT": upper}))
+        assert fsearch(uow, tree({"valid_until": {"gte": "2026-11-01T00:00:00Z"}})) >= {"never expires", "expires nov 30"}
+
+
 FILTER_TABLE = [
     EntityIs("machine", "in", ("PRD_1",)),
     EntityIs("machine", "prefix", ("PRD_",)),

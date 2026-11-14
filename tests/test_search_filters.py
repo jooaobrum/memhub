@@ -221,8 +221,23 @@ def test_guard_counts_positive_branches_only(m):
     seed(m, "patient p2 allergy", [{"type": "patient", "id": "p2"}])
     seed(m, "a plain fact")
     assert contents(search(m, {"NOT": {"entities": [p1]}})) == {"a plain fact"}
-    assert "patient p1 allergy" in contents(search(m, {"OR": [{"entities": [p1]}, {"types": ["fact"]}]}))
+    assert contents(search(m, {"OR": [{"entities": [p1]}, {"types": ["fact"]}]})) == {"patient p1 allergy", "a plain fact"}
     assert contents(search(m, {"entity_type": {"in": ["patient"]}})) == {"patient p1 allergy", "patient p2 allergy"}
+
+
+def test_guard_scoped_to_the_named_subject(m):
+    """C37 (AD-052): naming patient p1 lets p1's memories through, never p2's - under OR, and in another tier."""
+    p1, p2, m1 = {"type": "patient", "id": "p1"}, {"type": "patient", "id": "p2"}, {"type": "machine", "id": "M1"}
+    seed(m, "patient p1 allergy", [p1])
+    seed(m, "patient p2 allergy", [p2])
+    seed(m, "a plain fact")
+    seed(m, "m1 used on p2", [m1, p2])
+    seed(m, "m1 alone", [m1])
+    assert contents(search(m, {"OR": [{"entities": [p1]}, {"types": ["fact"]}]})) == {
+        "patient p1 allergy", "a plain fact", "m1 alone"}
+    assert contents(search(m, {"entities": [p1, m1]})) == {"patient p1 allergy", "m1 alone"}
+    assert contents(search(m, {"entities": [p2, m1]})) == {"patient p2 allergy", "m1 used on p2", "m1 alone"}
+    assert contents(search(m, {"entity_type": "patient"})) == {"patient p1 allergy", "patient p2 allergy", "m1 used on p2"}
 
 
 def test_naive_datetime_is_utc(m):

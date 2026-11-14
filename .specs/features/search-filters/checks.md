@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub`
 Plan: `.specs/features/search-filters/plan.md`
 
-36 checks in 4 slices · 3 one-way doors · 0 open
+38 checks in 4 slices · 3 one-way doors · 0 open
 
 Run from the worktree with `PYTHONPATH=src` exported, so the tests import this tree's `src` and not the editable install's. The Postgres legs need Docker (the `pg_dsn` fixture).
 
@@ -130,6 +130,12 @@ Proof: `.venv/bin/python -m pytest tests/test_search_filters.py -k "naive_dateti
 **C36** - The full suite stays green (N1)
 Proof: `.venv/bin/python -m pytest -q`
 
+**C37** - With `patient` `require_filter`, `search` with `{"OR": [{"entities": [patient p1]}, {"types": ["fact"]}]}` returns p1's memory and the plain fact, never p2's memory; a tier for `machine M1` never returns a memory naming M1 and patient p2 unless p2 is named (AD-052, Verifier finding 3)
+Proof: `.venv/bin/python -m pytest tests/test_search_filters.py -k "guard_scoped_to_the_named_subject"`
+
+**C38** - Through `filters.parse`, a date-only `lte` keeps its whole UTC day on every backend: `{"observed_at": {"lte": "2026-10-31"}}` keeps 2026-10-31T23:59:59.999999Z and drops 2026-11-01T00:00:00Z; a datetime `{"valid_until": {"lte": "2026-12-01T00:00:00Z"}}` drops the null row and its `NOT` keeps it (AD-049, AD-050; Verifier findings 1, 2)
+Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py tests/test_contract_sqlite.py tests/test_contract_postgres.py -k "filter_parsed_time_bounds"`
+
 ## Coverage
 
 | Set (size) | Member -> proof | Unproven |
@@ -166,7 +172,7 @@ Proof: `.venv/bin/python -m pytest -q`
 
 ## Handoff
 
-- **Settled mid-build:** none
+- **Settled mid-build:** guard rule under OR (Verifier finding 3) - user chose "Only the named subject (Recommended)" -> AD-052, C37
 - **Dispatched:** Verifier at `9e44ebf` (proofs green, 39/39) - pending; no screens sub-agent (no capture binds)
 - **Boundary:** C1-C36 closed at `9e44ebf`
 - **Abandoned:** none
