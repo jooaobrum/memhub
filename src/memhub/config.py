@@ -238,7 +238,7 @@ class ExtractionConfig(BaseModel):
     instructions: str = DEFAULT_EXTRACTION_INSTRUCTIONS
     passes: int = 1  # independent extraction samples per slice, their candidates united (a cheap model misses different facts each time)
     remember_instructions: str | None = None  # what to do with a `/remember` order (None: the built-in text)
-    retries: int = 0  # extra attempts when the model returns unparseable output (cheap models truncate the JSON now and then)
+    retries: int = 1  # extra attempts when the model returns unparseable or cut-off output (cheap models truncate the JSON now and then)
 
 
 class AdmissionConfig(BaseModel):
