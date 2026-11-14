@@ -116,6 +116,24 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: validate_verification (workflow)
 - last seen: 2026-11-12T19:05:09Z
 
+### L-018 - When a test proves that written options override defaults, use an option the default itself sets; otherwise either merge order passes.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `config` · harmful: 0
+- features: review-per-type
+- evidence: C27 config.py:_mapped_type merge order (config)
+- last seen: 2026-11-14T11:34:21Z
+
+### L-019 - A criterion that names a source or origin column needs a test case where the value is actually set, not only the default.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `cli` · harmful: 0
+- features: review-per-type
+- evidence: C30 AC 29 source column (cli)
+- last seen: 2026-11-14T11:34:21Z
+
+### L-020 - When a new form reuses an existing parser, reject inputs the old parser reads as a different form (a template string that is a keyword).
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `config` · harmful: 0
+- features: review-per-type
+- evidence: config.py:_mapped_type {template: builtin} (config)
+- last seen: 2026-11-14T11:34:21Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
