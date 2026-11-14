@@ -166,6 +166,6 @@ Proof: `.venv/bin/python -m pytest tests/test_review_per_type.py -k "docs_state_
 ## Handoff
 
 - **Settled mid-build:** branch - user chose "Worktree off main (Recommended)": `feat/review-per-type` in its own worktree from `main`, search-filters untouched; baseline - asked "tests/fixtures/examples_resolved_base.json stores `\"review\": true` (the old default) on 11 types ... How should I handle it?", user chose "Update baseline + C1 (Recommended)": those 11 become `null`, and C1 allows that fixture to differ in the `review` key only
-- **Dispatched:** none yet
-- **Boundary:** none yet
+- **Dispatched:** Verifier at `9da53e1` (diff `65233c5..9da53e1`); no screens sub-agent (no capture)
+- **Boundary:** C1-C32 closed at `9da53e1` (35 proof rows green)
 - **Abandoned:** none
