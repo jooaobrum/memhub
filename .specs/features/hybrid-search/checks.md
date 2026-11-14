@@ -70,7 +70,7 @@ Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "fuse_weights"
 **C18** - With hybrid on and two subject tiers, every tier-1 row ranks above every tier-2 row, a keyword-only row included, and each tier's keyword hits are about that tier's subject (AC 15)
 Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "tiers_keep_their_order"`
 
-**C19** - `matched_by` is `both` for a row in both lists, `keyword` for keyword only, `vector` otherwise, and `similarity` is the cosine in all three cases; the toolkit, middleware and MCP `search_memory` results carry `matched_by` (AC 16)
+**C19** - `matched_by` is `both` for a row in both lists, `keyword` for keyword only, `vector` otherwise, and `similarity` is the cosine in all three cases; the toolkit and MCP `search_memory` results carry `matched_by`, the middleware's text block does not change (AC 16)
 Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "matched_by_and_similarity"`
 
 **C20** - Loading a config with `vector_weight: -1`, `keyword_weight: -0.1`, `keyword_max_df: 0`, `keyword_max_df: 1.5`, both weights 0, or `stopwords: "x"` raises `ConfigError` naming the key (AC 17)
@@ -101,7 +101,7 @@ Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "bench_codes o
 | `matched_by` values (3) | `both` C19 · `keyword` C19 · `vector` C19 | - |
 | search rules on the keyword leg, AC 5 (9) | candidate C5 · rejected C5 · archived C5 · stale C5 · area C5 · other workspace C5 · other user C5 · `EntityFilter` C5 · `Filter` C5 · guard C7 | - |
 | invalid config, AC 17 (6) | `vector_weight -1` C20 · `keyword_weight -0.1` C20 · `max_df 0` C20 · `max_df 1.5` C20 · both 0 C20 · `stopwords` not a list C20 | - |
-| readers (6) | `Memory.search` C1 C15 · `memhub search` C14 · toolkit `search_memory` C19 · middleware `search_memory` C19 · MCP `search_memory` C19 · `memhub config show` C21 | - |
+| readers (6) | `Memory.search` C1 C15 · `memhub search` C14 · toolkit `search_memory` C19 · middleware `search_memory` (text unchanged, order hybrid) C19 · MCP `search_memory` C19 · `memhub config show` C21 | - |
 | startup config: `search:` (2 assemblies) | `resolve` (yaml, `Memory()`) C16 C20 · `Config(...)` in code (tests, `Memory(config=)`) C16 | - |
 
 ## Swept
@@ -118,7 +118,7 @@ Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "bench_codes o
 
 ## Handoff
 
-- **Settled mid-build:** none
+- **Settled mid-build:** C19 reworded - asked "What should the middleware show?" - user chose "JSON tools only (Recommended)": toolkit and MCP results gain `matched_by`, the middleware's text stays as it is
 - **Dispatched:** none yet
 - **Boundary:** none yet
 - **Abandoned:** none

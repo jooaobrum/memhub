@@ -52,6 +52,7 @@ from memhub.storage.rules import (
     apply_boosts,
     area_link,
     as_vector_list,
+    fold,
     fresh_evidence,
     newest_observed_at,
 )
@@ -107,6 +108,44 @@ def _entity_sql(flt: EntityFilter | None, params: dict[str, Any]) -> list[str]:
         params[f"ent_not{i}"] = Jsonb([{"type": t}])
         clauses.append(f"NOT entities @> %(ent_not{i})s")
     return clauses
+
+def _search_clauses(params: dict[str, Any], type: str | None, include_stale: bool, now: datetime | None,
+                    entities: EntityFilter | None, filter: Filter | None) -> list[str]:
+    """The WHERE clauses of the rows a search may return; `params` holds `ws` and `uid` and gains the rest."""
+    clauses = [
+        "status='active'",
+        "((scope='workspace' AND workspace_id=%(ws)s) OR "
+        " (scope='user' AND workspace_id=%(ws)s AND user_id=%(uid)s))",
+    ]
+    if not include_stale:  # stale = active + expired; it stays in the ledger, just out of search
+        clauses.append(f"NOT ({_STALE_SQL.replace('%s', '%(now)s')})")
+        params["now"] = now or datetime.now(timezone.utc)
+    if type is not None:
+        clauses.append("type=%(type)s")
+        params["type"] = type
+    else:  # an area row is a page header (derived text), not a claim
+        clauses.append("type <> 'area'")
+    clauses += _entity_sql(entities, params)
+    if filter is not None:  # inside the query, so `k` is filled from matching rows (#25)
+        clauses.append(_filter_sql(filter, params))
+    return clauses
+
+
+def _fold_map() -> tuple[str, str]:
+    """`translate()` arguments that do to lowered text what `rules.fold` does to the Latin letters with accents
+    (Latin-1 and Latin Extended-A), upper case included for a database whose `lower()` folds ASCII only."""
+    src, dst = [], []
+    for code in range(0xC0, 0x180):
+        c = chr(code)
+        f = fold(c)
+        if len(f) == 1 and f != c:
+            src.append(c)
+            dst.append(f)
+    return "".join(src), "".join(dst)
+
+
+_FOLD_FROM, _FOLD_TO = _fold_map()
+
 
 def _filter_sql(flt: Filter, params: dict[str, Any]) -> str:
     """A `Filter` tree as one boolean SQL expression; every leaf is true or false, never null (`NOT` of a comparison
@@ -733,23 +772,8 @@ class MemoryStore:
     ) -> list[Row]:
         """`area_boost` (an area's memory_id) lifts the rows linked to that area; `text_boost` lifts the rows whose
         content mentions one of the words. Neither filters."""
-        clauses = [
-            "status='active'",
-            "((scope='workspace' AND workspace_id=%(ws)s) OR "
-            " (scope='user' AND workspace_id=%(ws)s AND user_id=%(uid)s))",
-        ]
         params: dict[str, Any] = {"ws": workspace_id, "uid": user_id, "qe": query_embedding, "limit": max(k * 4, 20)}
-        if not include_stale:  # stale = active + expired; it stays in the ledger, just out of search
-            clauses.append(f"NOT ({_STALE_SQL.replace('%s', '%(now)s')})")
-            params["now"] = now or datetime.now(timezone.utc)
-        if type is not None:
-            clauses.append("type=%(type)s")
-            params["type"] = type
-        else:  # an area row is a page header (derived text), not a claim
-            clauses.append("type <> 'area'")
-        clauses += _entity_sql(entities, params)
-        if filter is not None:  # inside the query, so `k` is filled from matching rows (#25)
-            clauses.append(_filter_sql(filter, params))
+        clauses = _search_clauses(params, type, include_stale, now, entities, filter)
         sql = (
             f"SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {self._t('memory')} "
             f"WHERE {' AND '.join(clauses)} ORDER BY embedding <=> %(qe)s::vector LIMIT %(limit)s"
@@ -758,6 +782,40 @@ class MemoryStore:
         return apply_boosts(
             cur.fetchall(), k=k, boost=boost, area_boost=area_boost, text_boost=text_boost, entity_boost=entity_boost,
         )
+
+    def keyword_search(
+        self,
+        cur: Cursor,
+        *,
+        keywords: list[str],
+        query_embedding: list[float],
+        workspace_id: str,
+        user_id: str | None = None,
+        type: str | None = None,
+        include_stale: bool = False,
+        now: datetime | None = None,
+        entities: EntityFilter | None = None,
+        filter: Filter | None = None,
+    ) -> tuple[list[Row], int]:
+        """The searchable rows whose folded content holds a keyword (a substring: whole tokens are the caller's rule),
+        each with `similarity`, and how many rows are searchable. Same WHERE as `search`; no index, no schema change
+        (#26): `content` is lowered and its accents translated to match `rules.fold`."""
+        params: dict[str, Any] = {"ws": workspace_id, "uid": user_id, "qe": query_embedding,
+                                  "fold_from": _FOLD_FROM, "fold_to": _FOLD_TO}
+        where = " AND ".join(_search_clauses(params, type, include_stale, now, entities, filter))
+        cur.execute(f"SELECT count(*) AS n FROM {self._t('memory')} WHERE {where}", params)
+        count = cur.fetchone()["n"]
+        if not keywords:
+            return [], count
+        holds = []
+        for i, word in enumerate(keywords):
+            params[f"kw{i}"] = word
+            holds.append(f"strpos(translate(lower(content), %(fold_from)s, %(fold_to)s), %(kw{i})s) > 0")
+        cur.execute(
+            f"SELECT *, 1 - (embedding <=> %(qe)s::vector) AS similarity FROM {self._t('memory')} "
+            f"WHERE {where} AND ({' OR '.join(holds)})", params,
+        )
+        return cur.fetchall(), count
 
     def top_similar(
         self,

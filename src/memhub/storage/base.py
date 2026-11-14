@@ -37,13 +37,15 @@ METHODS: dict[str, tuple[str, ...]] = {
         "has_final_pass",
     ),
     "meta": ("get_meta", "set_meta", "check_embedding_config"),
-    "vectors": ("search", "top_similar", "nearest_area", "iter_for_reembed", "update_embedding", "set_embedding_dims"),
+    "vectors": ("search", "keyword_search", "top_similar", "nearest_area", "iter_for_reembed", "update_embedding",
+                "set_embedding_dims"),
 }
 
 
 # The methods that need more than `transactions`, and what to do on a backend that lacks it.
 NEEDS: dict[str, Capability] = {
-    "search": Capability.VECTOR_SEARCH, "top_similar": Capability.VECTOR_SEARCH, "nearest_area": Capability.VECTOR_SEARCH,
+    "search": Capability.VECTOR_SEARCH, "keyword_search": Capability.VECTOR_SEARCH,
+    "top_similar": Capability.VECTOR_SEARCH, "nearest_area": Capability.VECTOR_SEARCH,
     "linked_rows": Capability.JSON_LOOKUP, "move_area_links": Capability.JSON_LOOKUP, "add_link": Capability.JSON_LOOKUP,
 }
 FIXES: dict[Capability, str] = {

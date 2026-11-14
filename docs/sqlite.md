@@ -55,6 +55,9 @@ Past that, install `memhub[sqlite]` or move to Postgres.
 `memhub doctor` and `Memory(...).store.vector_path` say which one is in use. `MEMHUB_SQLITE_VEC=0` forces the
 fallback; `MEMHUB_SQLITE_VEC=1` requires sqlite-vec and fails at startup when it cannot load.
 
+The keyword leg of hybrid search (`search.hybrid`, see [filters.md](filters.md#hybrid-search)) needs no FTS5 and no
+extra table: it reads the same rows with `instr` over the folded `content`, on both paths.
+
 ## What SQLite cannot do
 
 A missing capability raises `NotImplementedError` naming it and the fix:

@@ -57,6 +57,46 @@ Top-level keys are ANDed: a memory is kept when it passes every key.
 - **`matched_on`** names the subject a hit matched (`"machine:PRD_2"`), or `general`. It is present when the filter names a subject, and absent otherwise.
 - A `require_filter` subject type is returned only when a filter names it outside a `NOT` (see [subjects.md](subjects.md)).
 
+
+## Hybrid search
+
+Embeddings are weak on codes and ids (`E47`, `PRD_1`, `6205`, `INC-4821`, `v2.3.1`): a query that is only a code has
+almost no meaning to embed, and `E47` and `E74` look alike. So `search` runs a keyword leg next to the vector leg and
+fuses the two. It is on by default.
+
+- **What counts as a keyword.** Every word of the query, minus words shorter than 2 characters, minus the stopwords
+  of Italian, French, English and Portuguese (the Snowball lists), minus the project's own generic words in
+  `search.stopwords`. Case and accents are ignored (`préfère` matches `prefere`). There is no stemming.
+- **What matches.** A keyword matches a whole word of the memory's `content`: `E47` does not match `E470`, `PRD_1`
+  does not match `PRD_10`. `-`, `_`, `/` and `.` inside a code keep it whole (`P-101`, `6205-2RS`, `v2.3.1`).
+- **Generic words drop out by themselves.** A keyword found in more than `search.keyword_max_df` of the memories the
+  search may return (half, by default) is ignored for that search, so a word every memory of the project holds
+  ("pump" in a pump plant) does not push the right memory down. Rarer keywords weigh more (IDF).
+- **Fusion.** Each leg ranks its hits; a memory scores `vector_weight / (60 + vector rank) + keyword_weight / (60 +
+  keyword rank)`. Subject tiers keep their order: the two legs are fused inside each tier. With no keyword left, the
+  result is the vector search's.
+- **`matched_by`** on each hit says which leg found it: `vector`, `keyword` or `both`. The `search_memory` tool of
+  `MemoryToolkit` and `memhub mcp` shows it too.
+- Only active, non-stale memories of the caller and the workspace are matched, with the same filters and the same
+  `require_filter` guard as the vector leg. Nothing is stored for it: no index, no migration.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `search.hybrid` | `true` | `false`: the vector search alone, as before. `Memory.search(..., hybrid=True/False)` overrides it per call |
+| `search.vector_weight` | `1.0` | weight of the vector leg (0 or more) |
+| `search.keyword_weight` | `1.0` | weight of the keyword leg (0 or more); not both 0 |
+| `search.keyword_max_df` | `0.5` | a keyword in more than this share of the searchable memories is ignored (above 0, at most 1) |
+| `search.stopwords` | `[]` | the project's generic words, never a keyword |
+
+```yaml
+search:
+  keyword_weight: 1.5               # codes matter more than meaning in this project
+  stopwords: [machine, máquina, macchina, problema]
+```
+
+`scripts/bench_search.py --codes` prints the rank of the expected memory for a set of code-style queries, with
+hybrid on and off.
+
 ## Errors
 
 An unknown key or operator, an operator on a key that does not take it, an undeclared subject type, an empty `AND` / `OR` / `in`, an empty `prefix` / `contains`, or a date that is not ISO 8601 raises `ValidationError` before any database or model call. The CLI prints the reason and exits 1; the `search_memory` tool returns it as an error (`{"error": ...}`, or `invalid filters: ...` from the middleware).

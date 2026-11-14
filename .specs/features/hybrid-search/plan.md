@@ -41,7 +41,7 @@ flowchart LR
 | domain | The order of `search` results means "fused rank" instead of "cosine plus boosts" while hybrid is on. Nothing in memhub branches on it; the middleware's injected memories and the MCP / toolkit `search_memory` results reorder, which is the point |
 | stored data | nothing to migrate - no schema change, no backfill, `memhub migrate` untouched |
 | readers | `Memory.search`, `memhub search`, `MemoryToolkit` / `MemoryMiddleware` / MCP `search_memory`, middleware injection: all get hybrid by default (default on), and every row carries `matched_by`. `memhub config show` lists the `search:` keys |
-| tests | AD-014's same-SQL test proves the vector path: it runs with `search.hybrid: false`. An existing search test whose asserted order the keyword leg changes runs with `hybrid=False`, named in its commit; no assertion is edited |
+| tests | AD-014's same-SQL test proves the vector path: it runs with `search.hybrid: false`. No other search test's order changed. Two tests change with their claim: `test_mcp_server.py::test_search_memory` (the tool's view gains `matched_by`, settled mid-build) and `test_storage_ports.py` (38 port methods with `keyword_search`, door 3) |
 
 ```mermaid
 erDiagram

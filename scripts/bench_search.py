@@ -6,6 +6,12 @@ Checks out `--base` into a temporary git worktree, then runs the same measuremen
 working tree, alternating `--rounds` times so neither side always meets the fuller database: 200 rows like the
 tests' data, `MemoryService.search` 200 times per round. Prints the median of each side's round medians, in
 milliseconds, and their ratio (N4 asks for <= 1.10).
+
+    python scripts/bench_search.py --codes
+
+Hybrid search (#26), no database: on the in-memory backend with the tests' hash embeddings, seeds memories that
+name codes and ids among near neighbours, then prints one JSON line per code-style query with the rank of the
+memory it should find, hybrid on (`rank_hybrid`) and vector only (`rank_vector`); `null` when not in the top 20.
 """
 from __future__ import annotations
 
@@ -62,7 +68,69 @@ def measure(src: Path, dsn: str, runs: int) -> float:
     return json.loads(out.stdout.strip().splitlines()[-1])["median_ms"]
 
 
+CODE_MEMORIES = [
+    "fault E47 on the rooftop unit, low pressure",
+    "fault E74 on the rooftop unit, low pressure",
+    "fault E470 logged on the chiller",
+    "bearing replaced on PRD_1 after the noise",
+    "belt replaced on PRD_10 after the noise",
+    "the press P-101 needs a new seal",
+    "the press P-102 needs a new seal",
+    "bearing 6205 fitted on the conveyor motor",
+    "bearing 6206 fitted on the conveyor motor",
+    "ticket INC-4821 closed by the night shift",
+    "ticket INC-4812 closed by the night shift",
+    "firmware v2.3.1 fixed the display freeze",
+    "firmware v2.3.0 froze the display",
+    "la pompe P-207 fuit encore",
+    "a pompa P-270 está parada desde ontem",
+]
+CODE_QUERIES = [
+    ("E47 on the rooftop unit", "fault E47 on the rooftop unit, low pressure"),
+    ("E47", "fault E47 on the rooftop unit, low pressure"),
+    ("PRD_1", "bearing replaced on PRD_1 after the noise"),
+    ("P-101 seal", "the press P-101 needs a new seal"),
+    ("6205", "bearing 6205 fitted on the conveyor motor"),
+    ("INC-4821", "ticket INC-4821 closed by the night shift"),
+    ("v2.3.1", "firmware v2.3.1 fixed the display freeze"),
+    ("pompe P-207", "la pompe P-207 fuit encore"),
+    ("a pompa P-270", "a pompa P-270 está parada desde ontem"),
+]
+
+
+def codes() -> None:
+    sys.path[:0] = [str(ROOT / "src"), str(ROOT)]
+    from memhub.config import EmbeddingConfig, Settings, TypeConfig
+    from memhub.service import MemoryService
+    from memhub.storage.memory import InMemoryBackend
+    from memhub.storage.rules import Actor
+    from memhub.types import TypeRegistry
+    from tests.fakes import FakeEmbeddings
+
+    store = InMemoryBackend(schema=None)
+    store.init(embedding_model="fake-embed", dims=16)
+    settings = Settings(project_prefix="bench", workspace_default="ws", scopes=["user", "workspace"],
+                        embeddings=EmbeddingConfig(model="fake-embed", dims=16),
+                        types={"fact": TypeConfig(**{"class": "memhub.types:Fact"})})
+    service = MemoryService(store=store, settings=settings, registry=TypeRegistry(), embeddings=FakeEmbeddings(dims=16))
+    admin = Actor(id="admin", roles=["workspace_admin"])
+    for text in CODE_MEMORIES:
+        service.add(admin, type="fact", scope="user", fields={"content": text}, user_id="alice")
+
+    def rank(query: str, expected: str, hybrid: bool) -> int | None:
+        rows = service.search(admin, query, user_id="alice", k=20, hybrid=hybrid)
+        found = [i for i, r in enumerate(rows, start=1) if r["content"] == expected]
+        return found[0] if found else None
+
+    for query, expected in CODE_QUERIES:
+        print(json.dumps({"query": query, "expected": expected, "rank_hybrid": rank(query, expected, True),
+                          "rank_vector": rank(query, expected, False)}, ensure_ascii=False))
+
+
 def main() -> None:
+    if "--codes" in sys.argv[1:]:
+        codes()
+        return
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dsn", required=True)
     ap.add_argument("--base", default="2a58e6c")

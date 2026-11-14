@@ -44,6 +44,7 @@ def _view(row: dict) -> dict[str, Any]:
         "id": str(row["id"]), "type": row["type"], "content": row["content"], "verified": row["verified"],
         "scope": row["scope"], "as_of": observed.date().isoformat() if hasattr(observed, "date") else str(observed)[:10],
         "inferred": row.get("assertion") == "inferred",
+        **({"matched_by": row["matched_by"]} if "matched_by" in row else {}),  # hybrid search: which leg found it
     }
 
 

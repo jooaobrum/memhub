@@ -925,4 +925,120 @@ def test_filter_fills_k_from_matching_rows(backend):
         assert fsearch(uow, EntityIs("machine", "prefix", ("PRD_",)), k=5) == {"prd a", "prd b"}
 
 
+
+# --- hybrid search (#26) ---------------------------------------------------------------------------------
+
+
+class _QueryAtOne:
+    """Every query embeds to `vec(1.0)`, so a stored row's similarity is the one `add` gave it."""
+
+    def embed_query(self, text: str) -> list[float]:
+        return vec(1.0)
+
+
+def _hybrid_service(backend, settings, registry):
+    from memhub.config import EmbeddingConfig
+    from memhub.service import MemoryService
+
+    s = settings.model_copy(update={
+        "workspace_default": "ws", "embeddings": EmbeddingConfig(provider="openai", model=MODEL, dims=DIMS)})
+    return MemoryService(store=backend, settings=s, registry=registry, embeddings=_QueryAtOne())
+
+
+def test_hybrid_code_ranks_first(backend, settings, registry):
+    """#26 C1 (AC 1): two memories that differ only by a code; the wrong one is nearer by embedding."""
+    from memhub.storage.rules import Actor
+
+    with backend.unit_of_work() as uow:
+        add(uow, "fault E74 on the rooftop unit", vec(0.95))
+        add(uow, "fault E47 on the rooftop unit", vec(0.90))
+        for i in range(4):
+            add(uow, f"compressor note {i}", vec(0.5 + i * 0.01))
+    service = _hybrid_service(backend, settings, registry)
+
+    def first(query: str) -> dict:
+        return service.search(Actor(id="alice", roles=[]), query, workspace_id="ws", user_id="alice", k=5)[0]
+
+    for query, expected in (("E47", "fault E47 on the rooftop unit"), ("e47", "fault E47 on the rooftop unit"),
+                            ("E74", "fault E74 on the rooftop unit")):
+        top = first(query)
+        assert top["content"] == expected, query
+        assert top["matched_by"] in ("both", "keyword"), query
+
+
+def test_hybrid_id_outside_vector_candidates(backend, settings, registry):
+    """#26 C2 (AC 2): 25 distractors outrank the `PRD_1` memory by embedding; the keyword leg still brings it in."""
+    from memhub.storage.rules import Actor
+
+    with backend.unit_of_work() as uow:
+        for i in range(25):
+            add(uow, f"distractor number {i}", vec(0.99 - i * 0.01))
+        add(uow, "bearing replaced on PRD_1", vec(0.10))
+        add(uow, "belt replaced on PRD_10", vec(0.20))
+    rows = _hybrid_service(backend, settings, registry).search(
+        Actor(id="alice", roles=[]), "PRD_1", workspace_id="ws", user_id="alice", k=5)
+    by_content = {r["content"]: r for r in rows}
+    assert len(rows) == 5
+    assert "bearing replaced on PRD_1" in by_content
+    assert by_content["bearing replaced on PRD_1"]["matched_by"] == "keyword"
+    assert "belt replaced on PRD_10" not in by_content
+
+
+def test_keyword_search_applies_the_search_rules(backend):
+    """#26 C5 (AC 5): the keyword leg keeps exactly the rows `vectors.search` may return."""
+    p101 = {"type": "machine", "id": "P-101"}
+    with backend.unit_of_work() as uow:
+        add(uow, "mine e47", vec(0.9))
+        add(uow, "shared e47", vec(0.9), scope="workspace", user_id=None)
+        add(uow, "tagged e47", vec(0.9), entities=[p101])
+        add(uow, "episode e47", vec(0.9), type="episode")
+        add(uow, "candidate e47", vec(0.9), status="candidate")
+        add(uow, "rejected e47", vec(0.9), status="rejected")
+        add(uow, "archived e47", vec(0.9), status="archived")
+        add(uow, "expired e47", vec(0.9), valid_until=NOW - timedelta(days=1))
+        add(uow, "area e47", vec(0.9), type="area", payload={"content": "area e47", "title": "A"})
+        add(uow, "other ws e47", vec(0.9), workspace_id="ws2")
+        add(uow, "bob e47", vec(0.9), user_id="bob")
+    with backend.unit_of_work() as uow:
+        def both(**kw) -> tuple[set[str], set[str]]:
+            args = dict(query_embedding=vec(1.0), workspace_id="ws", user_id="alice", now=NOW, **kw)
+            rows, _ = uow.vectors.keyword_search(keywords=["e47"], **args)
+            return set(contents(rows)), set(contents(uow.vectors.search(k=50, **args)))
+
+        kw, vs = both()
+        assert kw == vs == {"mine e47", "shared e47", "tagged e47", "episode e47"}
+        kw, vs = both(include_stale=True)
+        assert kw == vs == {"mine e47", "shared e47", "tagged e47", "episode e47", "expired e47"}
+        kw, vs = both(type="episode")
+        assert kw == vs == {"episode e47"}
+        kw, vs = both(entities=EntityFilter(any_of=(("machine", "P-101"),)))
+        assert kw == vs == {"tagged e47"}
+        kw, vs = both(entities=EntityFilter(none_of_types=("machine",)))
+        assert kw == vs == {"mine e47", "shared e47", "episode e47"}
+        kw, vs = both(filter=NotOf(ContentContains("mine")))
+        assert kw == vs == {"shared e47", "tagged e47", "episode e47"}
+        rows, _ = uow.vectors.keyword_search(keywords=["e47"], query_embedding=vec(1.0), workspace_id="ws",
+                                             user_id=None, now=NOW)
+        assert set(contents(rows)) == {"shared e47"}
+
+
+def test_keyword_search_prefilter_count_and_similarity(backend):
+    """#26 C6 (door 3): folded substring prefilter, the count of searchable rows, and the cosine of each row."""
+    with backend.unit_of_work() as uow:
+        add(uow, "Le client PRÉFÈRE le café", vec(0.8))
+        add(uow, "code E470 seen", vec(0.6))
+        add(uow, "nothing here", vec(0.9))
+        add(uow, "a candidate prefere", vec(0.9), status="candidate")
+    with backend.unit_of_work() as uow:
+        rows, searchable = uow.vectors.keyword_search(keywords=["prefere", "e47"], query_embedding=vec(1.0),
+                                                      workspace_id="ws", user_id="alice", now=NOW)
+    sims = {r["content"]: r["similarity"] for r in rows}
+    assert searchable == 3
+    assert set(sims) == {"Le client PRÉFÈRE le café", "code E470 seen"}
+    assert abs(sims["Le client PRÉFÈRE le café"] - 0.8) < 1e-5 and abs(sims["code E470 seen"] - 0.6) < 1e-5
+    with backend.unit_of_work() as uow:
+        rows, searchable = uow.vectors.keyword_search(keywords=["zzz"], query_embedding=vec(1.0),
+                                                      workspace_id="ws", user_id="alice", now=NOW)
+    assert rows == [] and searchable == 3
+
 __all__ = ["backend", *sorted(n for n in dir() if n.startswith("test_"))]
