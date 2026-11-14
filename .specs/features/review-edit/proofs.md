@@ -1,8 +1,8 @@
 # review-edit proofs
 
-**HEAD**: 6e392a4
+**HEAD**: 1608305
 **Tree**: clean
-**Result**: 34 pass, 0 fail; mutations 3 killed, 0 not
+**Result**: 35 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -29,7 +29,7 @@
 | C21 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "propose_approve_not_allowed_falls_back"` | 3 | 3 | pass |
 | C22 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "correction_updates_the_candidate"` | 3 | 3 | pass |
 | C23 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "bad_memory_id"` | 3 | 3 | pass |
-| C24 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "rejected_repeat"` | 3 | 3 | pass |
+| C24 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "rejected_repeat"` | 6 | 6 | pass |
 | C25 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "tool_contract"` | 9 | 9 | pass |
 | C26 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "middleware_signature_unchanged"` | 1 | 1 | pass |
 | C27 | `.venv/bin/python -m pytest tests/test_example_review_inline.py -k "interrupt_describes_the_memory"` | 1 | 1 | pass |
@@ -39,6 +39,7 @@
 | C31 | `.venv/bin/python -m pytest tests/test_example_review_inline.py -k "stream_event"` | 1 | 1 | pass |
 | C32 | `.venv/bin/python -m pytest tests/test_example_review_inline.py -k "public_imports_only"` | 1 | 1 | pass |
 | C33 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "langchain_pins"` | 1 | 1 | pass |
+| C34 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "rejected_repeat"` | 6 | 6 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub examples/review_inline` | - | - | pass |
 
 ## Mutations
