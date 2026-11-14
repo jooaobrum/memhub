@@ -533,8 +533,10 @@ def test_review_in_both_files(tmp_path):
 def test_builtin_mapping(tmp_path):
     """C27 (AC 26)."""
     path = write_project(tmp_path, front={"types": {"profile": {"builtin": True, "review": False},
-                                                    "preference": {"builtin": True, "retrieval": "always"}}})
+                                                    "preference": {"builtin": True, "retrieval": "always"},
+                                                    "fact": {"builtin": True, "type_prior": 0.3}}})
     config = resolve(path).config
+    assert config.types["fact"].type_prior == 0.3  # the written option beats the built-in's own (0.6)
     (tmp_path / "plain").mkdir()
     plain = resolve(write_project(tmp_path / "plain", front={"types": {"profile": "builtin", "preference": "builtin"}})).config
     assert config.types["profile"].class_path == plain.types["profile"].class_path
@@ -562,9 +564,10 @@ def test_template_mapping(tmp_path):
     ({"template": "{a}", "fields": {"a": "str"}}, ("template", "fields")),
     ({"template": "{a}", "class": "memhub.types:Fact"}, ("template", "class")),
     ({"builtin": False}, ("builtin",)),
+    ({"template": "builtin"}, ("template",)),
 ])
 def test_mapping_schema_keys_clash(tmp_path, spec, keys):
-    """C29 (AC 28): 5 kinds."""
+    """C29 (AC 28): 5 kinds, and a template with no {field} (Verifier finding 3)."""
     with pytest.raises(ConfigError) as err:
         resolve(write_project(tmp_path, front={"types": {"fact": spec}}))
     assert "fact" in str(err.value) and all(k in str(err.value) for k in keys), err.value
@@ -585,6 +588,11 @@ def test_config_show_prints_rule(tmp_path):
                                                                 "profile": {"builtin": True, "review": False}}}))
     assert "review.diagnosis all memory.md" in lines and "review.profile none memory.md" in lines
     assert "review.fact workspace default" in lines
+    (tmp_path / "c").mkdir(), (tmp_path / "d").mkdir()
+    lines = show(write_project(tmp_path / "c", front={"review": "none"}))  # the project rule set in memory.md
+    assert "review none memory.md" in lines and "review.fact none memory.md" in lines
+    lines = show(write_project(tmp_path / "d", yaml_extra={"review": "all"}))  # set in memhub.yaml (source `yaml`)
+    assert "review all yaml" in lines and "review.fact all yaml" in lines
 
 
 # --- S6: docs ---------------------------------------------------------------------------------------------------

@@ -299,7 +299,7 @@ def _mapped_type(name: str, spec: dict[str, Any]) -> dict[str, Any]:
     options = {k: v for k, v in spec.items() if k not in ("builtin", "template")}
     if "builtin" in spec:
         return {**_short_type(name, "builtin"), **options}
-    if not isinstance(spec["template"], str):
+    if not isinstance(spec["template"], str) or "{" not in spec["template"]:
         raise ValueError(f"{name}: `template` is a string with {{fields}}")
     return {**_short_type(name, spec["template"].strip()), **options}
 
