@@ -1,8 +1,8 @@
 # review-edit proofs
 
-**HEAD**: 15b12ca
+**HEAD**: 6e392a4
 **Tree**: clean
-**Result**: 34 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 34 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -40,3 +40,11 @@
 | C32 | `.venv/bin/python -m pytest tests/test_example_review_inline.py -k "public_imports_only"` | 1 | 1 | pass |
 | C33 | `.venv/bin/python -m pytest tests/test_review_propose.py -k "langchain_pins"` | 1 | 1 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub examples/review_inline` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| C11 any user may review a user-scope candidate (owner test dropped) | `src/memhub/service.py:277` | yes |
+| C8 key compared raw, so "1" -> 1 counts as a key change | `src/memhub/service.py:297` | yes |
+| C24 rejected-repeat threshold >= -> > | `src/memhub/service.py:718` | yes |
