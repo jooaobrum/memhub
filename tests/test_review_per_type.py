@@ -38,7 +38,7 @@ runner = CliRunner()
 # The commit this feature branched from, and its last commit: old test files may differ only by the claims listed in
 # `test_old_tests_unchanged` (AD-021). `None` while the feature is being built: compare with the working tree.
 BEFORE_REVIEW = "65233c5"
-REVIEW_DONE: str | None = None
+REVIEW_DONE: str | None = "a97b7bd"  # the last code commit of #29
 
 
 # --- helpers ----------------------------------------------------------------------------------------------------
