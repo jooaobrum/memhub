@@ -22,8 +22,8 @@ from langchain_core.tools import tool
 
 from memhub.filters import HINT as FILTERS_HINT
 from memhub.filters import parse as parse_filters
-from memhub.service import Actor, MemoryService, ServiceError, ValidationError
-from memhub.toolkit import proposal_result
+from memhub.service import Actor, MemoryService, NotFound, ServiceError, ValidationError
+from memhub.toolkit import proposal_id, proposal_result
 
 log = logging.getLogger(__name__)
 

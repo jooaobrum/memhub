@@ -14,7 +14,7 @@ from typing import Any
 
 from memhub.filters import HINT as FILTERS_HINT
 from memhub.filters import parse as parse_filters
-from memhub.service import Actor, MemoryService, ServiceError, ValidationError
+from memhub.service import Actor, MemoryService, NotFound, ServiceError, ValidationError
 
 
 def proposal_result(row: dict) -> dict[str, str]:
@@ -40,22 +40,6 @@ PROPOSE_EXTRA_PARAMETERS = {
     "memory_id": {"type": "string", "description": "the id of your own pending draft, to correct it instead of adding one"},
     "user_requested": {"type": "boolean", "description": "true only when the user explicitly asks to save something a reviewer rejected before"},
 }
-
-
-_COMMON = {"entities", "tags"}  # every type has them; listing them would only hide the fields that matter
-
-
-def _fields_hint(service: MemoryService) -> str:
-    """Each type's required fields, then its optional ones, so the model fills `fields` right the first time."""
-    parts = []
-    for name in service.settings.types:
-        if name not in service.registry:
-            continue
-        model_fields = service.registry.latest(name).model_fields
-        required = [n for n, f in model_fields.items() if f.is_required()]
-        optional = [n for n, f in model_fields.items() if not f.is_required() and n not in _COMMON]
-        parts.append(f"{name}: {', '.join(required)}" + (f" (optional: {', '.join(optional)})" if optional else ""))
-    return "the type's fields; required per type: " + "; ".join(parts)
 
 
 _COMMON = {"entities", "tags"}  # every type has them; listing them would only hide the fields that matter
