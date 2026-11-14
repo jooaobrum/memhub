@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub examples/review_inline`
 Plan: `.specs/features/review-edit/plan.md`
 
-33 checks in 2 slices · 5 one-way doors · 0 open
+34 checks in 2 slices · 5 one-way doors · 0 open
 
 Run from the worktree with `PYTHONPATH=src` exported, so the tests import this tree's `src` and not the editable install's.
 
@@ -113,6 +113,9 @@ Proof: `.venv/bin/python -m pytest tests/test_example_review_inline.py -k "publi
 **C33** - `pyproject.toml` keeps `langchain>=1.0` in `dependencies` and the `dev` extra declares `langchain>=1.4.6` (AC 30)
 Proof: `.venv/bin/python -m pytest tests/test_review_propose.py -k "langchain_pins"`
 
+**C34** - A correction (`memory_id=`) whose new text is within `reconcile.duplicate` of a rejected candidate is refused with `a reviewer already rejected this memory` and leaves the draft unchanged, unless `user_requested=True`; a rejected workspace candidate refuses a 0.95-similar workspace proposal from another user of that workspace and not one in another workspace (AC 21; appended after the Verifier's findings)
+Proof: `.venv/bin/python -m pytest tests/test_review_propose.py -k "rejected_repeat"`
+
 ## Coverage
 
 | Set (size) | Member -> proof | Unproven |
@@ -135,7 +138,7 @@ Proof: `.venv/bin/python -m pytest tests/test_review_propose.py -k "langchain_pi
 | no-op fields, AC 4 (3) | `None` C6 · `{}` C6 · equal payload C6 | - |
 | AC 2 events (2) | `ADD` C4 · `UPDATE` C4 | - |
 | bad `memory_id`, AC 20 (6) | unknown C23 · other user C23 · other workspace C23 · active C23 · rejected C23 · archived C23 | - |
-| rejected repeat, AC 21 (5 examples) | 0.92 C24 · 0.91 C24 · other user C24 · other type C24 · `user_requested` C24 | - |
+| rejected repeat, AC 21 (8 examples) | 0.92 C24 · 0.91 C24 · other user C24 · other type C24 · `user_requested` C24 · correction C34 · workspace other user C34 · other workspace C34 | - |
 | proposal tool surfaces (3) | `MemoryToolkit` C25 · `MemoryMiddleware` C25 · `memhub mcp` C25 | - |
 | HITL decisions in the example (4) | approve C28 · valid edit C28 · invalid edit C29 · reject C30 | - |
 | `propose(approve=True)` actors (3) | user owner C20 · workspace reviewer C20 · workspace user-only C21 | - |

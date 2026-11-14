@@ -157,6 +157,24 @@ def test_rejected_repeat(build):
     assert m.propose("fact", {"content": "at"}, user_requested=True, **ANNA).status == "candidate"
     assert sorted(r["content"] for r in m.queue(**REVIEWER)) == ["at", "below", "same", "same"]
 
+    # a correction may not rewrite a draft into the rejected text either, unless the user asked
+    draft = m.propose("fact", {"content": "below"}, **ANNA)
+    with pytest.raises(ValidationError, match=f"^{REJECTED}$"):
+        m.propose("fact", {"content": "same"}, memory_id=draft.id, **ANNA)
+    assert m.propose("fact", {"content": "same"}, memory_id=draft.id, user_requested=True, **ANNA).content == "same"
+
+
+def test_rejected_repeat_workspace_scope(build):
+    """The workspace is the owner of a workspace memory: another user of that workspace is refused, another
+    workspace is not."""
+    m = build(LookupEmbeddings({"shared": vec_at(1.0), "close": vec_at(0.95)}, vec_at(0.0)))
+    no = m.propose("fact", {"content": "shared"}, scope="workspace", **ANNA)
+    m.reject(no.id, **REVIEWER)
+    with pytest.raises(ValidationError, match=f"^{REJECTED}$"):
+        m.propose("fact", {"content": "close"}, scope="workspace", **BOB)
+    other = m.propose("fact", {"content": "close"}, scope="workspace", workspace_id="other", user_id="bob", run_id="r")
+    assert other.status == "candidate"
+
 
 # --- C25 -----------------------------------------------------------------------------------------------------------
 

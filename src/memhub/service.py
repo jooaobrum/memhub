@@ -645,15 +645,15 @@ class MemoryService:
         entities = [e.model_dump() for e in instance.entities]
         with self.store.unit_of_work() as uow:
             self._guard_embedding_config(uow)
+            if not user_requested:  # a correction may not turn a draft into what a reviewer rejected either
+                self._refuse_rejected_repeat(uow, type=type, scope=scope, workspace_id=workspace_id, user_id=owner,
+                                             embedding=embedding)
             if memory_id is not None:
                 pending = self._own_candidate(uow, memory_id, type=type, scope=scope, workspace_id=workspace_id,
                                               user_id=owner)
                 uow.memories.amend_row(pending["id"], content=instance.content, payload=payload, embedding=embedding,
                                        entities=entities)
                 return uow.memories.get_by_id(pending["id"])
-            if not user_requested:
-                self._refuse_rejected_repeat(uow, type=type, scope=scope, workspace_id=workspace_id, user_id=owner,
-                                             embedding=embedding)
             row = uow.memories.add_memory(
                 type=type,
                 schema_version=self.registry.latest_version(type),
