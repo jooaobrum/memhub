@@ -869,9 +869,9 @@ FILTER_TABLE = [
 ]
 
 
-@pytest.mark.parametrize("flt", FILTER_TABLE, ids=[f"f{i}" for i in range(len(FILTER_TABLE))])
-def test_filter_matches_agrees_with_search(backend, flt):
-    """#25 C12: `Filter.matches` (what `service.list` uses) keeps exactly the rows the backend's query keeps."""
+def test_filter_matches_agrees_with_search(backend):
+    """#25 C12: `Filter.matches` (what `service.list` uses) keeps exactly the rows the backend's query keeps, for each
+    of the 12 filters of `FILTER_TABLE`."""
     rows = [
         dict(content="pump PRD_1", entities=[_m("PRD_1")], observed_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
         dict(content="fan PRD_12", entities=[_m("PRD_12"), _m("L1", "line")], valid_until=datetime(2026, 7, 1, tzinfo=timezone.utc)),
@@ -884,8 +884,8 @@ def test_filter_matches_agrees_with_search(backend, flt):
             add(uow, embedding=vec(0.9 - i * 0.05), **r)
     with backend.unit_of_work() as uow:
         stored = uow.memories.list_memories(workspace_id="ws")
-        expected = {r["content"] for r in stored if flt.matches(r)}
-        assert fsearch(uow, flt) == expected
+        for i, flt in enumerate(FILTER_TABLE):
+            assert fsearch(uow, flt) == {r["content"] for r in stored if flt.matches(r)}, f"FILTER_TABLE[{i}]"
 
 
 def test_filter_fills_k_from_matching_rows(backend):
