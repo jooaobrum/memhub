@@ -328,7 +328,7 @@ def test_matched_by_and_similarity(settings):
     assert rows["fault E47 far"]["matched_by"] == "keyword"
     for content, sim in (("fault E47 near", 0.9), ("a vector neighbour", 0.8), ("fault E47 far", 0.02)):
         assert abs(rows[content]["similarity"] - sim) < 1e-6, content
-    # a boost stays in `similarity`, as with hybrid off (AC 16 as restated, AD-058)
+    # a boost stays in `similarity`, as with hybrid off (AC 16 as restated, AD-060)
     boosted = make(settings)
     from memhub.storage.rules import area_link
     with boosted.store.unit_of_work() as uow:

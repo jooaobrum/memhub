@@ -73,7 +73,7 @@ Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "fuse_weights"
 **C18** - With hybrid on and two subject tiers, every tier-1 row ranks above every tier-2 row, a keyword-only row included, and each tier's keyword hits are about that tier's subject (AC 15)
 Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "tiers_keep_their_order"`
 
-**C19** - `matched_by` is `both` for a row in both lists, `keyword` for keyword only, `vector` otherwise; `similarity` is the cosine for each with no boost, and a boosted row (area) keeps the boost, the same value as with hybrid off (AD-058); the toolkit and MCP `search_memory` results carry `matched_by`, the middleware's text block does not change (AC 16)
+**C19** - `matched_by` is `both` for a row in both lists, `keyword` for keyword only, `vector` otherwise; `similarity` is the cosine for each with no boost, and a boosted row (area) keeps the boost, the same value as with hybrid off (AD-060); the toolkit and MCP `search_memory` results carry `matched_by`, the middleware's text block does not change (AC 16)
 Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "matched_by_and_similarity"`
 
 **C20** - Loading a config with `vector_weight: -1`, `keyword_weight: -0.1`, `keyword_max_df: 0`, `keyword_max_df: 1.5`, both weights 0, or `stopwords: "x"` raises `ConfigError` naming the key (AC 17)
@@ -124,7 +124,7 @@ Proof: `.venv/bin/python -m pytest tests/test_hybrid_search.py -k "bench_codes o
 
 ## Handoff
 
-- **Settled mid-build:** AC 16 / C19 restated after Verifier finding 4 - asked "Which should hold?" - user chose "Keep boosts (Recommended)" -> AD-058; C19 reworded - asked "What should the middleware show?" - user chose "JSON tools only (Recommended)": toolkit and MCP results gain `matched_by`, the middleware's text stays as it is
+- **Settled mid-build:** AC 16 / C19 restated after Verifier finding 4 - asked "Which should hold?" - user chose "Keep boosts (Recommended)" -> AD-060; C19 reworded - asked "What should the middleware show?" - user chose "JSON tools only (Recommended)": toolkit and MCP results gain `matched_by`, the middleware's text stays as it is
 - **Dispatched:** Verifier at `2b99ba1` (proofs green, 23/23) - returned, FAIL, 5 findings closed in `0e9276d`; no screens sub-agent (no capture binds)
 - **Boundary:** C1-C24 closed at `0e9276d`; proofs 25/25 and mutations 5/5 killed at that HEAD; full suite 1106 passed, 3 skipped
 - **Abandoned:** none

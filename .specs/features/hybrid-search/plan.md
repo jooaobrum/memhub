@@ -110,7 +110,7 @@ Words that carry no meaning in any of the four languages, and generic words of t
    - weights 1.0 / 1.0: keyword rank 1 + vector rank 5 beats vector rank 1 only; `keyword_weight: 0` → order equals the vector order; `vector_weight: 0` → keyword hits first in keyword order, then nothing else
    - merging several memory types, a type with no keyword hit ranks its rows by `vector_weight / (60 + rank_v)` beside the fused rows of the others
 15. WHILE hybrid is on, tiers SHALL keep their order (AD-030): a fused row of tier 2 never ranks above a row of tier 1, and each tier fuses its own two legs with the tier's filter
-16. Each returned row SHALL carry `matched_by` = `"both"` when it is in both legs' lists, `"keyword"` when only in the keyword leg's, `"vector"` otherwise, and its `similarity` SHALL be what the vector leg returns for it (the cosine plus today's area, glossary and subject boosts, the same value as with hybrid off), and the cosine for a keyword-only row (AD-058)
+16. Each returned row SHALL carry `matched_by` = `"both"` when it is in both legs' lists, `"keyword"` when only in the keyword leg's, `"vector"` otherwise, and its `similarity` SHALL be what the vector leg returns for it (the cosine plus today's area, glossary and subject boosts, the same value as with hybrid off), and the cosine for a keyword-only row (AD-060)
 17. IF `vector_weight` or `keyword_weight` is negative, `keyword_max_df` is not in `(0, 1]`, both weights are 0, or `stopwords` is not a list of strings THEN loading the config SHALL raise `ConfigError` naming the key
 18. WHEN `memhub config show` runs THEN it SHALL list `search.hybrid`, `search.vector_weight`, `search.keyword_weight`, `search.keyword_max_df` and `search.stopwords` with their values
 
@@ -159,11 +159,11 @@ Issue #26 binds; the user changed four of its proposals before the plan.
 
 | Source shows | Product shows | Confirmed |
 | --- | --- | --- |
-| `search.hybrid` off in the release that adds it, on one release later | on from the release that adds it | y - AD-056 |
-| a `tsvector` column + GIN / an FTS5 table, through `memhub migrate` with a backfill; `memhub doctor` reports the index | no stored index, no migration, nothing in `doctor`: the keyword leg runs at query time | y - AD-056 |
-| `content` plus entity ids indexed | `content` only | y - AD-056 |
-| code-aware tokens, `simple` tokenisation | every token minus it/fr/en/pt stopwords and `search.stopwords`, with whole-token matching for every token | y - AD-057 |
-| `search.keyword_weight` alone | `search.vector_weight` and `search.keyword_weight` | y - AD-056 |
+| `search.hybrid` off in the release that adds it, on one release later | on from the release that adds it | y - AD-058 |
+| a `tsvector` column + GIN / an FTS5 table, through `memhub migrate` with a backfill; `memhub doctor` reports the index | no stored index, no migration, nothing in `doctor`: the keyword leg runs at query time | y - AD-058 |
+| `content` plus entity ids indexed | `content` only | y - AD-058 |
+| code-aware tokens, `simple` tokenisation | every token minus it/fr/en/pt stopwords and `search.stopwords`, with whole-token matching for every token | y - AD-059 |
+| `search.keyword_weight` alone | `search.vector_weight` and `search.keyword_weight` | y - AD-058 |
 
 ## Sources
 
