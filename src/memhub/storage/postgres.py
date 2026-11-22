@@ -1013,6 +1013,16 @@ class MemoryStore:
         cur.execute(sql, params)
         return cur.fetchall()
 
+    def index_rows(self, cur: Cursor, *, workspace_id: str, user_id: str | None, now: datetime) -> list[Row]:
+        """The active, non-stale rows the caller may read in the workspace: its own user-scope rows and the
+        workspace-scope rows (#28)."""
+        cur.execute(
+            f"SELECT * FROM {self._t('memory')} WHERE status='active' AND workspace_id=%s AND NOT ({_STALE_SQL}) "
+            "AND (scope='workspace' OR (scope='user' AND user_id=%s)) ORDER BY created_at",
+            [workspace_id, now, user_id],
+        )
+        return cur.fetchall()
+
     def move_area_links(self, cur: Cursor, source: Any, target: Any, *, created_by: str) -> int:
         """Point every row linked to area `source` at `target`: an active row gets a new version, a pending
         candidate is updated in place. Returns the number of rows moved."""
