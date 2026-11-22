@@ -128,8 +128,9 @@ def subject_slug(entity: dict) -> str:
 
 
 def _quote(row: Row) -> str | None:
-    """The user's own words behind a row: its first quote that is not the assistant's."""
-    for e in row.get("evidence") or []:
+    """The user's own words behind a row: its newest quote that is not the assistant's. A new version keeps the
+    evidence of the one it replaces and adds its own last, so the first quote may state the old value."""
+    for e in reversed(row.get("evidence") or []):
         if isinstance(e, dict) and e.get("quote") and e.get("claim_source") in (None, "user"):
             return str(e["quote"])
     return None

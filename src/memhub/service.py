@@ -26,7 +26,7 @@ from memhub.storage.rules import (
     Actor, AnyOf, AreaIn, EntityFilter, EntityIs, EntityTypeIn, Filter, NotFound, NotOf, Row, all_of, area_ids,
     RRF_K, area_link, as_vector_list, fuse, keyword_rank, map_areas, positive_entity_nodes, query_keywords,
 )
-from memhub.types import INTERNAL_TYPES, TypeRegistry
+from memhub.types import INTERNAL_TYPES, TypeRegistry, render_template
 
 if TYPE_CHECKING:
     from memhub.filters import SearchFilter
@@ -150,12 +150,17 @@ class MemoryService:
         if type_name not in self.registry:
             raise ValidationError(f"unknown memory type {type_name!r}")
         cls = self.registry.latest(type_name) if schema_version is None else self.registry.get(type_name, schema_version)
+        cfg = self.settings.types.get(type_name)
+        template = cfg.content_template if cfg is not None else None
+        if template:  # the content is composed from the fields on every write, as ingest does (ground.py)
+            fields = {**fields, "content": fields.get("content") or template}
         try:
             instance = cls.model_validate(fields)
         except PydanticValidationError as exc:
             raise ValidationError(str(exc)) from exc
+        if template:
+            instance = instance.model_copy(update={"content": render_template(template, instance.model_dump())})
         self._check_instance(instance)
-        cfg = self.settings.types.get(type_name)
         if cfg is not None and cfg.keyed and cfg.strict_keys and instance.key not in cfg.keys:
             raise ValidationError(f"unknown key {instance.key!r} for {type_name} (allowed: {', '.join(cfg.keys)})")
         return instance
@@ -504,9 +509,13 @@ class MemoryService:
                 query_embedding=embedding,
             )
 
+            # Both legs are ranked to the same depth before fusion: a vector leg cut at `k` would leave a memory that
+            # holds every keyword, just below the vector top `k`, a keyword-only score that at best ties the vector top.
+            depth = k if keywords is None else max(k * 4, 20)
+
             def nearest(entities: EntityFilter | None, flt: Filter | None = None, type: str | None = type) -> list[Row]:
                 rows = uow.vectors.search(
-                    query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=k, type=type,
+                    query_embedding=embedding, workspace_id=workspace_id, user_id=user_id, k=depth, type=type,
                     include_stale=include_stale, now=now, area_boost=best["memory_id"] if best else None,
                     text_boost=expansion.related, **({"entities": entities} if entities is not None else {}),
                     **({"filter": flt} if flt is not None else {}),
@@ -526,7 +535,7 @@ class MemoryService:
                 if not hits:  # no keyword left, or none found: the vector result; `_score` ranks it beside another
                     # type's fused rows
                     return [{**r, "matched_by": "vector", "_score": cfg.vector_weight / (RRF_K + i)}
-                            for i, r in enumerate(rows, 1)]
+                            for i, r in enumerate(rows[:k], 1)]
                 fused.append(True)
                 return fuse(rows, hits, vector_weight=cfg.vector_weight, keyword_weight=cfg.keyword_weight, k=k)
 

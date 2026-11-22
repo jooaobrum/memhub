@@ -50,7 +50,9 @@ types:
 | `[ on {seen_on?}]` | an optional section: written only when its fields have a value |
 | `[[`, `]]` | a literal `[` or `]` |
 
-With `seen_on` empty and `count` 2, the memory reads `Saw Grey Heron at the canal (count 2)`.
+With `seen_on` empty and `count` 2, the memory reads `Saw Grey Heron at the canal (count 2)`. memhub writes
+`content` from the fields on every write (extraction, `memhub add`, `Memory.add`, `propose`, `edit`, `approve --set`), so
+a template type's memory is added with its fields alone, and a corrected field rewrites the text.
 
 **A built-in type.** `fact`, `preference`, `profile`, `episode`, `case` and `skill` come with their own fields and
 rules:

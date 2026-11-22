@@ -234,6 +234,7 @@ def _process_segment(
                     _, tin, tout = repair_relative_time(judge, c, rest, retries=settings.extraction.retries)
                     res.tokens_in, res.tokens_out = res.tokens_in + tin, res.tokens_out + tout
             proposals, res.dropped = ground(extracted.candidates, rest, settings=settings, registry=registry)
+            res.dropped += [{"candidate": c.model_dump(mode="json"), "reason": "max_candidates"} for c in extracted.capped]
             proposals = _verify(proposals, judge, rest, settings, res)
         if ordered:  # the user asked for these: no need/thin/threshold strictness, no judge second-guessing
             told = extract_remembered(judge, segment,  # the stronger model: an order is rare and must be right

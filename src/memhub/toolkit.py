@@ -52,7 +52,8 @@ def _fields_hint(service: MemoryService) -> str:
         if name not in service.registry:
             continue
         model_fields = service.registry.latest(name).model_fields
-        required = [n for n, f in model_fields.items() if f.is_required()]
+        composed = getattr(service.settings.types.get(name), "content_template", None)  # memhub writes `content`
+        required = [n for n, f in model_fields.items() if f.is_required() and not (composed and n == "content")]
         optional = [n for n, f in model_fields.items() if not f.is_required() and n not in _COMMON]
         parts.append(f"{name}: {', '.join(required)}" + (f" (optional: {', '.join(optional)})" if optional else ""))
     return "the type's fields; required per type: " + "; ".join(parts)
