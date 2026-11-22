@@ -224,7 +224,7 @@ Ingest quality knobs:
 
 ### Review workflows
 
-The commands below use the Habitantes config (`C=examples/habitantes/memhub.yaml`, after `memhub ingest --source jsonl -c $C`). Every command prints JSON; `<id>` is a row id from `queue`, and `<memory_id>` is the stable id shared by all versions of a memory.
+The commands below use the Habitantes config (`C=examples/habitantes/memhub.yaml`, after `memhub ingest --source jsonl -c $C`). Every command prints JSON; `<id>` is a row id from `queue` (or a memory id: its newest pending row), and `<memory_id>` is the stable id shared by all versions of a memory.
 
 **Resolve a contradiction.** The user first asked for short answers and later for step-by-step detail. Both values are kept until someone decides:
 

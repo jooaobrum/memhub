@@ -250,3 +250,49 @@ new folder, and session 2 is asked to use memhub only.
   produce one (the structured-output schema lists the types); found with a fake model in the PR 9 e2e test.
 - `memhub edit ""` (an empty or malformed id) prints a traceback instead of an error line.
 - Claude Code's own per-project memory can answer before memhub does; a scenario that checks memhub must ask for it.
+
+## Domain scenarios: five customer projects, ten scenarios each (2026-11-22)
+
+After #26 (hybrid search), #25 (search filters), #20 (subjects), review-per-type, review-edit and #41 (pages and the
+deepagents backend), the features were checked together, the way five different customers would use them. Each
+domain is a project folder of its own: its `memory.md` (short forms, `review`, `strict`, `entities`), a
+`memhub.yaml` with `connect: "<domain>_app:build"`, and a new database. Every scenario runs on SQLite and on
+Postgres (the Docker fixture): 100 runs, deterministic, offline. The models are simulated
+([tests/e2e/domains/harness.py](../../tests/e2e/domains/harness.py)): memhub's model returns scripted extractions and
+judge verdicts, an agent's model scripted tool calls; quotes must be found word for word in a user message, as with a
+real model.
+
+```bash
+pytest tests/e2e/domains            # 100 runs; -k sqlite without Docker
+```
+
+| Domain | File | Surfaces | Features stressed |
+|---|---|---|---|
+| Plant maintenance | [test_plant.py](../../tests/e2e/domains/test_plant.py) | `Memory`, CLI, deepagents, JSONL ingest | isolated machine/model subjects, hybrid search on codes, every filter key from Python and the CLI, widen tiers, review per type, review-edit, ttl, keyed conflicts, dry-run ingest |
+| SaaS helpdesk | [test_helpdesk.py](../../tests/e2e/domains/test_helpdesk.py) | `Memory`, CLI, `MemoryToolkit` | push with every drop reason, thread watermark, keyed update/conflict/`keep_both`, `keep_old`, verified edits, customer isolation, injection on every path, promote, erasure |
+| Outpatient clinic | [test_clinic.py](../../tests/e2e/domains/test_clinic.py) | `Memory`, CLI, toolkit, `MemoryMiddleware`, deepagents | `review: all`, `require_filter` patients on every surface, review-edit, middleware prompt, medication expiry, archive/hard delete rules, flags, pages, schema migration |
+| Software team | [test_devteam.py](../../tests/e2e/domains/test_devteam.py) | MCP server, Claude Code ingest, CLI only, toolkit | MCP tools and enums, `claude_code` source, `use`/`config`/`doctor`, embedding mismatch, repo/org tiers, version strings by keyword, promote, inline review, rejected repeats over MCP, `max_active`, one filter on four surfaces, areas and `areas merge` |
+| Travel concierge | [test_travel.py](../../tests/e2e/domains/test_travel.py) | deepagents, `MemoryMiddleware`, `Memory` | `strict` closed areas, reading/writing pages, page edits keep ids, team page review and rejected repeats, every page guard, stale writes, keyed seat in pages and prompt, trip expiry, two travellers' isolation, city summaries |
+
+### Bugs found and fixed
+
+| ID | Found in | Symptom | Root cause | Fix |
+|---|---|---|---|---|
+| E1 | P2, P6, H5 | `memhub add --type fault -f {code, symptom}` fails with `content Field required`; `approve --set action=...` on a template type leaves the old text (`E470 fixed by reset the drive` with `action: replaced the drive fan`); `propose_memory` for a template type needs an invented `content` | `content_template` was applied only in ingest (`ground.py`) | `MemoryService._validate` (every write) composes `content` from the template; the tool hint no longer lists `content` as required for a template type |
+| E2 | P2 | `search("seal on P-101", top_k=1)` returns "Pump 0 was greased", not the only memory naming P-101 and seal | the vector leg was cut at `k` before fusion while the keyword leg ranked `max(k*4, 20)`: a keyword-only hit can at best tie the vector top and loses the tie on similarity | both legs are ranked to the same depth, fused, then cut to `k` |
+| E3 | P6, P10 | a `fix` declared `area: optional` with no area is dropped as `no_area` | `plan_areas` dropped any area type with no area, not only `required` ones (`ground.py` checked it right) | `no_area` only for an `area: required` type, as docs/memory.md says |
+| E4 | P6 | `memhub approve <memory id>` (the `id` of `AddResult`) prints `NotFound: no row`; `Memory.approve` takes either id | the CLI looked up version rows only | `approve`/`reject` take a memory id too (its newest pending row); a malformed id is an error line, not a traceback (the "`memhub edit ""`" open item) |
+| E5 | H1 | a push extracting five candidates with `max_candidates: 4` returns four outcomes: the fifth vanishes from `AddResult.dropped`, `memhub runs` and the dry-run preview | the cap was a silent slice in `extract()` | candidates past the cap are dropped as `max_candidates` |
+| E6 | T7 | after an `UPDATE` (aisle → window seat) the agent's page shows `#id [said] "I always take an aisle seat"` for the window-seat memory, and the page tells the agent to copy quotes | a new version keeps the old evidence and appends its own; the page quoted the first | the page quotes the newest user quote |
+
+### Open observations (not changed)
+
+- `--resolve replace` makes the conflicting candidate the active row under its own memory id and archives the old
+  memory (design.md); an app holding the old id gets `NotFound`, while a judged `UPDATE` keeps the id.
+- A memory added by hand (`memhub add`, `Memory.add`) has no area, so it never shows on a page; in a `strict`
+  project this is the only way in without one.
+- The extraction schema still asks a template type's candidates for `content`, which memhub then rewrites.
+- With one memory in the ledger every keyword is in 100% of the searchable rows and `keyword_max_df` drops it
+  (expected; noted because a first demo sees `matched_by: vector` only).
+- `memhub list` lists `area` rows next to the memories.
+- `create_agent` without `context_schema` makes LangGraph warn when `context=` is a dict (the middleware works).
