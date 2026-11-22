@@ -72,7 +72,12 @@ The written page is compared with the current one, line by line, by `#<id>`:
 Whether a change is saved at once or waits in `memhub queue` comes from the project's `review` config, in both
 folders, the same as for extracted memories. With the default `review: workspace`, personal lines are saved and
 team lines wait. A whole-file `write_file` based on a page that has changed since the agent read it is refused,
-so the agent reads it again. `edit_file` applies to the current page.
+so the agent reads it again. `edit_file` applies to the current page, sends only the changed lines, and is never stale; the page header tells the agent to prefer it:
+
+```
+edit_file(old_string="## Memory\n", new_string="## Memory\nPumps fail above 40°C\n")   # add a line
+edit_file(old_string="#3f9a21c0 [said] ...", new_string="")                          # remove a line
+```
 
 The tool result lists what happened to each line:
 

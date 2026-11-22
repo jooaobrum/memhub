@@ -37,7 +37,8 @@ HOW_TO_READ = """## How to read this
 - Provenance: [said] quoted from the user · [reviewed] approved by a person · [inferred] a guess, check before acting · [added] written by the app, with no quote.
 - Lines under "Pending review" are not usable yet.
 - This file is read-only. To change a line, edit only that line and keep its `#<id>`; the edit becomes a proposal. To add a fact, append a line with no id. A line needs the user's own words in the conversation, or it is kept as a flag for a reviewer.
-- Large areas show summaries such as `#s_<subject>`; open one with `read_file` on the path after the arrow."""
+- Large areas show summaries such as `#s_<subject>`; open one with `read_file` on the path after the arrow.
+- Change memory with `edit_file` on the lines you change; `write_file` resends the whole page and is refused when the page changed since you read it."""
 
 _ID_LINE = re.compile(r"^#([0-9a-f]{8,32})(?=\s|$)\s*(?:\[(\w+)\]\s*)?(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$")
 _STAMP = re.compile(r"\bstamp ([0-9a-f]{12})\b")

@@ -19,6 +19,8 @@ Postgres (the Docker fixture).
     S11 a large area shows subject summaries; the agent opens one
     S12 what a reviewer rejected is not proposed again
     S13 a personal type that needs review waits, and says why
+    S14 edit_file changes one line, id kept: personal saved, team waits and supersedes on approve
+    S15 edit_file removes one line: personal archived, team proposed for archiving and archived on approve
 """
 from __future__ import annotations
 
@@ -378,3 +380,66 @@ def test_s13_personal_type_needs_review(env):
     assert f"- [pending] Has asthma. Proposed {TODAY}." in tools[2]
     [queued] = queue(env)
     assert (queued["scope"], queued["user_id"]) == ("user", "anna")
+
+
+def page_line(tool_content: str, text: str) -> str:
+    """The whole line of a page that holds `text`, as the agent would quote it in `old_string`."""
+    return next(ln for ln in plain(tool_content).splitlines() if text in ln and ln.startswith("#"))
+
+
+def replace_line(path: str, text: str, make_new: Callable[[str], str]) -> Step:
+    """Read the page (the previous step), then `edit_file` the line holding `text` into `make_new(that line)`."""
+    def step(messages):
+        old = page_line(last_tool(messages), text)
+        return call("edit_file", file_path=path, old_string=old, new_string=make_new(old))
+    return step
+
+
+def test_s14_edit_file_changes_one_line(env):
+    _row(env.memory, "Takes the 7am shuttle", env.travel, observed_at=NOW - timedelta(days=2))
+    tools = run(env, "I take the 8am shuttle now",
+                call("read_file", file_path=ME),
+                replace_line(ME, "7am shuttle", lambda old: old.replace("7am", "8am")),
+                call("read_file", file_path=ME),
+                checks=[extraction(candidate("Takes the 8am shuttle", "I take the 8am shuttle now", scope="user"))])
+    old = line_id(plain(tools[0]), "Takes the 7am shuttle")
+    assert tools[1].startswith("Successfully replaced 1 instance(s)")
+    assert f"saved #{old}: Takes the 8am shuttle" in tools[1]
+    assert line_id(plain(tools[2]), '"I take the 8am shuttle now"') == old and "7am" not in tools[2]
+
+    tools = run(env, "the pumps hum at night and in the morning",
+                call("read_file", file_path=TEAM),
+                replace_line(TEAM, "Pumps hum at night", lambda old: old.replace("at night", "at night and in the morning")),
+                call("read_file", file_path=TEAM),
+                checks=[extraction(candidate("Pumps hum at night and in the morning",
+                                             "the pumps hum at night and in the morning"))])
+    team_id = line_id(plain(tools[0]), "Pumps hum at night")
+    assert "pending review: Pumps hum at night and in the morning" in tools[1]
+    assert "Pumps hum at night (" in memory_section(tools[2])  # the active version serves until a person approves
+    [queued] = queue(env)
+    assert (queued["version"], queued["status"]) == (2, "candidate")
+    assert memhub_cli(env, "approve", queued["id"]).exit_code == 0
+    [page] = run(env, "pumps?", call("read_file", file_path=TEAM))
+    assert line_id(plain(page), "Pumps hum at night and in the morning") == team_id
+    assert re.search(rf"#{team_id} \[reviewed\] Pumps hum at night and in the morning", page)
+
+
+def test_s15_edit_file_removes_one_line(env):
+    tools = run(env, "forget where I fly from",
+                call("read_file", file_path=ME), replace_line(ME, "I always fly from CDG", lambda old: ""),
+                call("read_file", file_path=ME))
+    assert tools[1].startswith("Successfully replaced 1 instance(s)")
+    assert f"archived #{line_id(plain(tools[0]), 'I always fly from CDG')}" in tools[1]
+    assert "CDG" not in memory_section(tools[2])
+
+    tools = run(env, "the night hum is fixed",
+                call("read_file", file_path=TEAM), replace_line(TEAM, "Pumps hum at night", lambda old: ""),
+                call("read_file", file_path=TEAM))
+    team_id = line_id(plain(tools[0]), "Pumps hum at night")
+    assert f"pending review: archive #{team_id}" in tools[1]
+    assert "Pumps hum at night" in memory_section(tools[2])  # still served until a person approves the archive
+    [queued] = queue(env)
+    assert queued["payload"]["_action"] == "archive"
+    assert memhub_cli(env, "approve", queued["id"]).exit_code == 0
+    [page] = run(env, "pumps?", call("read_file", file_path=TEAM))
+    assert "Pumps hum" not in memory_section(page)

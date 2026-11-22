@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub examples/deepagents_backend`
 Plan: `.specs/features/deepagents-backend/plan.md`
 
-46 checks in 9 slices · 5 one-way doors · 0 open
+47 checks in 9 slices · 5 one-way doors · 0 open
 
 Run with `PYTHONPATH=src` exported. `tests/test_pages.py` (rendering, the page diff, the review decisions, flags) runs on the in-memory backend with fake models and no Docker; the storage rules for flags and edit/archive candidates are in the contract suite (`src/memhub/storage/contract.py`), run on in-memory, SQLite (both vector paths) and Postgres (Docker, the `pg_dsn` fixture). `tests/test_example_deepagents.py` needs the `deepagents` extra and runs a real `create_deep_agent` with a scripted chat model against SQLite.
 
@@ -174,6 +174,10 @@ Proof: `.venv/bin/python -m pytest tests/e2e/test_deepagents_backend.py -k "test
 **C46** - A page written back with what a file tool shows around it - deepagents' `@@ lines 1-9 of 9 @@` header and a line-number gutter - changes nothing (`no change`) (AC 27)
 Proof: `.venv/bin/python -m pytest tests/test_pages.py -k "file_tool_framing"`
 
+**C47** - Through a real agent's `edit_file`, on SQLite and Postgres: replacing one line (id kept) saves the personal edit under the same id and makes the team edit a version-2 candidate that serves the old text until `memhub approve`; replacing one line with `""` archives a personal memory and proposes a team one for archiving, archived on approve. The page header tells the agent to prefer `edit_file` (AC 4, AC 22, AC 24, AC 25)
+Proof: `.venv/bin/python -m pytest tests/e2e/test_deepagents_backend.py -k "test_s14 or test_s15"`
+Proof: `.venv/bin/python -m pytest tests/test_pages.py -k "page_header"`
+
 ## Coverage
 
 | Set (size) | Member -> proof | Unproven |
@@ -225,4 +229,5 @@ Proof: `.venv/bin/python -m pytest tests/test_pages.py -k "file_tool_framing"`
 - **Boundary:** C1-C46 closed at `0333915`; proofs green (55 pass); Verifier findings closed at `d28885b`
 - **Abandoned:** none
 - **Settled mid-build (2):** user: "I need a test end to end, simulate memory and check if everything is working, each scenario. Once done and pass. You can open the PR" - C45 added; the end-to-end run found that a page written back with deepagents' `@@ lines … @@` read header became a new line (a model call, then a flag): C46 added and the page parser fixed
+- **Settled mid-build (3):** user: "ok go ahead" to adding the `edit_file` end-to-end scenarios (S14, S15) and one header line, "Change memory with `edit_file` on the lines you change; `write_file` resends the whole page and is refused when the page changed since you read it." (AD-063's fixed text gains that line): C47 added
 - **Deviations:** C15 gained a second proof (`read_window` asserts the backend serves `Memory.render`), since `tests/test_pages.py` must run without deepagents (C37); the plan's Surface gained a "Built" note: `personal` selects the folder (AD-001 keeps `user_id` as the caller)

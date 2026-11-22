@@ -127,6 +127,8 @@ def test_page_header(cfg):
     howto = "\n".join(page[3:3 + len(HOW_TO_READ.splitlines())])
     assert howto == HOW_TO_READ
     assert HOW_TO_READ.startswith("## How to read this\n- Each line is one memory: `#<id> [provenance] text (date)`.")
+    assert HOW_TO_READ.endswith("\n- Change memory with `edit_file` on the lines you change; `write_file` resends the "
+                                "whole page and is refused when the page changed since you read it.")
 
 
 def test_only_active_lines(cfg):
