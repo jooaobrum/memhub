@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections import Counter
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -293,9 +294,11 @@ class _Op:
 
 def diff(page: Page, written: str) -> list[_Op]:
     """The written page against the current one, in written order, then the removed lines in page order. The
-    header, the how-to-read text, summary lines and the pending section are not memory: they never change it."""
-    ops, seen, in_howto = [], set(), False
-    refused_texts = []
+    header, the how-to-read text, summary lines and the pending section are not memory: they never change it.
+
+    An id names one line. An id the page does not show, or one written on two lines, refuses every line that holds
+    it, and nothing else happens to those memories. A line is removed only when both its id and its text are gone."""
+    parsed, in_howto = [], False
     for raw in written.splitlines():
         # what a file tool adds around a page it shows (deepagents: `@@ lines 1-12 of 12 @@`, a line-number gutter)
         line = _GUTTER.sub("", raw).strip()
@@ -308,22 +311,23 @@ def diff(page: Page, written: str) -> list[_Op]:
                 or re.match(r"^- \[(pending|flag)\]", line) or line.startswith("#s_"):
             continue
         m = _ID_LINE.match(line)
-        if m:
-            current = page.by_id.get(m.group(1))
-            if current is None or m.group(1) in seen:
-                ops.append(_Op("refused", reason=f"line #{m.group(1)} id changed"))
-                refused_texts.append(_norm(_unquote(m.group(3))))
-                continue
-            seen.add(m.group(1))
-            if _norm(m.group(3)) != _norm(current.text):
-                ops.append(_Op("edit", text=_unquote(m.group(3)), line=current))
-            continue
-        ops.append(_Op("new", text=re.sub(r"^[-*]\s+", "", line)))
+        parsed.append((m.group(1), m.group(3)) if m else (None, re.sub(r"^[-*]\s+", "", line)))
+    counts = Counter(i for i, _ in parsed if i is not None)
+    written_texts = {_norm(_unquote(t)) for i, t in parsed if i is not None}
+    ops, kept = [], set()
+    for line_id, text in parsed:
+        if line_id is None:
+            ops.append(_Op("new", text=text))
+        elif counts[line_id] > 1 or line_id not in page.by_id:
+            ops.append(_Op("refused", reason=f"line #{line_id} id changed"))
+        else:
+            kept.add(line_id)
+            if _norm(text) != _norm(page.by_id[line_id].text):
+                ops.append(_Op("edit", text=_unquote(text), line=page.by_id[line_id]))
     for ln in page.lines:
-        if ln.id not in seen:
-            if _norm(_unquote(ln.text)) in refused_texts or _norm(ln.text) in refused_texts:
-                continue  # its id was changed, not the line removed: that line is refused, nothing else happens
-            ops.append(_Op("remove", line=ln))
+        if ln.id in kept or counts[ln.id] > 1 or _norm(_unquote(ln.text)) in written_texts:
+            continue  # still on the page, or its line was refused: nothing happens to this memory
+        ops.append(_Op("remove", line=ln))
     return ops
 
 

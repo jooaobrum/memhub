@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 
 from memhub import Memory, NotFound, ValidationError, cli
 from memhub.config import RenderConfig, TypeConfig
-from memhub.pages import HOW_TO_READ, STALE
+from memhub.pages import HOW_TO_READ, STALE, Folder, build_page
 from memhub.pipeline.extract import Candidate, Evidence
 from memhub.storage.rules import area_link
 from memhub.types import Area
@@ -153,10 +153,12 @@ def test_tag_table(cfg):
     with m.store.unit_of_work() as uow:
         uow.memories.add_link(uuid.UUID(added.version_id), area_link(a["memory_id"]))
     add_row(m, "Nobody reviewed", a, reviewed_by=None, observed_at=NOW - timedelta(days=5))
+    add_row(m, "Empty reviewer", a, reviewed_by="", quote="said with no reviewer", observed_at=NOW - timedelta(days=6))
     page = m.render("travel", **IDS)
     tags = {ln.split("] ", 1)[1].rsplit(" (", 1)[0]: ln.split(" ", 2)[1] for ln in memory_lines(page)}
     assert tags == {"Reviewed one": "[reviewed]", "Inferred one": "[inferred]", '"I always fly from CDG"': "[said]",
-                    "Added by the app": "[added]", "Nobody reviewed": "[added]"}
+                    "Added by the app": "[added]", "Nobody reviewed": "[added]",
+                    '"said with no reviewer"': "[said]"}
 
 
 def test_line_id_prefix(cfg):
@@ -467,9 +469,23 @@ def test_id_changed_refused(cfg):
     assert m.get(other["memory_id"], **IDS)["status"] == "active"
     assert sum(1 for r in all_rows(m) if r["content"] == "Flies from CDG" and r["status"] == "active") == 1
 
+
+
+@pytest.mark.parametrize("moved", ["later-onto-earlier", "earlier-onto-later"])
+def test_id_moved_onto_another_line(cfg, moved):
+    """C26 (AC 26), Verifier finding 1: an id written on two lines refuses both, and both memories stay as they were,
+    whichever line took the other's id."""
+    m = memory(cfg)
+    a = add_area(m, "travel")
+    first = add_row(m, "Flies from CDG", a)
+    second = add_row(m, "Likes aisles", a, observed_at=NOW - timedelta(days=1))
     page = m.render("travel", **IDS)
-    written = page.replace(f"#{aisle} ", f"#{cdg} ", 1)  # another line's id, twice on the page
-    assert "refused: line #" in lines(m.write_page("travel", written, **IDS))[0]
+    cdg, aisle = line_id(page, "Flies from CDG"), line_id(page, "Likes aisles")
+    src, dst = (cdg, aisle) if moved == "earlier-onto-later" else (aisle, cdg)
+    written = page.replace(f"#{src} ", f"#{dst} ", 1)
+    assert lines(m.write_page("travel", written, **IDS)) == [f"refused: line #{dst} id changed"] * 2
+    for row in (first, second):
+        assert [(h["version"], h["status"]) for h in m.history(row["memory_id"], **IDS)] == [(1, "active")]
 
 
 def test_ignored_sections(cfg):
@@ -515,6 +531,12 @@ def test_stale_stamp(cfg):
     fresh = m.render("travel", **IDS)
     assert lines(m.write_page("travel", fresh.replace("Flies from CDG", "Flies from CDG"), edit=True, **IDS)) == \
         ["no change"]
+
+    # Verifier finding 3: a whole-file write with no stamp at all is stale too
+    unstamped = re.sub(r" · stamp [0-9a-f]{12}", "", fresh) + "Another line\n"
+    with pytest.raises(ValidationError, match=re.escape(STALE)):
+        m.write_page("travel", unstamped, **IDS)
+    assert len(all_rows(m)) == before
 
 
 # --- S5: flags ------------------------------------------------------------------------------------------------
@@ -649,7 +671,11 @@ def test_stamp_tracks_content(cfg):
     add_row(m, "Flies from CDG", a)
     stamp = lambda page: re.search(r"stamp ([0-9a-f]{12})", page).group(1)  # noqa: E731
     first = m.render("travel", **IDS)
-    assert stamp(m.render("travel", **IDS)) == stamp(first)
+    with m.store.unit_of_work() as uow:  # Verifier finding 4: two render times a day apart, one stamp
+        early = build_page(uow, m.settings, Folder("user", "w1", "u1"), "travel", viewer="u1", now=NOW)
+        late = build_page(uow, m.settings, Folder("user", "w1", "u1"), "travel", viewer="u1",
+                          now=NOW + timedelta(days=1, seconds=7))
+    assert early.text != late.text and stamp(early.text) == stamp(late.text) == stamp(first)
     add_row(m, "Waiting", a, status="candidate", reviewed_by=None)
     second = m.render("travel", **IDS)
     assert stamp(second) != stamp(first)
