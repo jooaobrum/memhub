@@ -375,7 +375,7 @@ class Memory:
         with self.store.unit_of_work() as uow:
             row = uow.memories.get_by_id(key)
             if row is None:
-                pending = [r for r in uow.memories.history(key) if r["status"] == "candidate"]
+                pending = [r for r in uow.memories.history(key) if r["status"] in ("candidate", "flag")]
                 row = max(pending, key=lambda r: (r["version"], r["created_at"])) if pending else None
         return self._visible(row, ctx)
 
@@ -492,6 +492,71 @@ class Memory:
         self._visible(rows[-1], ctx)
         return [_clean(r) for r in rows]
 
+    # --- the file view (#41) ----------------------------------------------------------------------------------
+
+    def _folder(self, ctx: CallContext, personal: bool) -> Any:
+        from memhub.pages import Folder
+
+        return Folder("user", ctx.workspace_id, ctx.user_id) if personal else Folder("workspace", ctx.workspace_id, None)
+
+    def _page(self, ctx: CallContext, area: str | None, personal: bool, subject: str | None) -> Any:
+        from memhub.pages import build_page
+
+        with self.store.unit_of_work() as uow:
+            return build_page(uow, self.settings, self._folder(ctx, personal), area, subject=subject, viewer=ctx.user_id)
+
+    def render(self, area: str | None = None, *, personal: bool = True, subject: str | None = None,
+               workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
+               roles: list[str] | None = None) -> str:
+        """An area (by key) of your own memory (`personal=True`) or of the workspace's, as the page an agent reads
+        (AD-063): the "How to read this" header, one `#<id> [tag] text (date)` line per active memory, subject
+        summaries over `render.summarize_over`, and your own pending items. `area=None` is the folder's README;
+        `subject` one subject of a summarized area. `NotFound` for an area or subject you have not got."""
+        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        return self._page(ctx, area, personal, subject).text
+
+    def pages(self, *, personal: bool = True, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
+              agent_id: Any = None, roles: list[str] | None = None) -> list[dict[str, Any]]:
+        """Every area page of your own memory (or the workspace's) with at least one active row."""
+        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        return self.service.pages(ctx.user_id if personal else None, workspace_id=ctx.workspace_id)
+
+    def page(self, area: str, *, personal: bool = True, workspace_id: Any = None, user_id: Any = None,
+             run_id: Any = None, agent_id: Any = None, roles: list[str] | None = None) -> dict[str, Any]:
+        """One area page (by key, title or id) of your own memory or the workspace's; `NotFound` otherwise."""
+        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        return self.service.page(ctx.user_id if personal else None, area, workspace_id=ctx.workspace_id)
+
+    def write_page(self, area: str, text: str, *, personal: bool = True, messages: list[dict[str, Any]] | None = None,
+                   edit: bool = False, subject: str | None = None, thread_id: str | None = None,
+                   workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
+                   roles: list[str] | None = None) -> list[Any]:
+        """A page an agent wrote back, turned into changes (`PageChange`, one per changed line; AD-062, AD-065).
+
+        A new line or an edited one (id kept) needs a verbatim quote in a recent user message of `messages`
+        (`[{"role", "content"}]`), else it is stored as a flag. It is saved, or waits in the queue, by the project's
+        review config; a removed line is archived, or proposed for archiving, the same way. A whole-file write
+        (`edit=False`) whose stamp is not the current page's raises `ValidationError`; `edit=True` is a change the
+        caller already applied to the current page."""
+        from memhub.pages import Writer, area_key, write_page
+        from memhub.pipeline.line_check import check_line, recent
+
+        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        folder = self._folder(ctx, personal)
+        page = self._page(ctx, area, personal, subject)
+        thread = thread_id or ctx.run_id
+        interactions = recent(list(messages or []), self.settings, workspace_id=ctx.workspace_id, user_id=ctx.user_id,
+                              thread_id=thread)
+
+        def check(line: str, types: list[str], area_row: Any) -> Any:
+            return check_line(self.llm, line, interactions, types=types, area=area_row, area_key=area_key(area_row),
+                              settings=self.settings, registry=self.registry, workspace_id=ctx.workspace_id,
+                              user_id=ctx.user_id, thread_id=thread)
+
+        writer = Writer(service=self.service, folder=folder, viewer=ctx.user_id, run_id=ctx.run_id,
+                        agent_id=ctx.agent_id, thread_id=thread, messages=list(messages or []), check=check)
+        return write_page(writer, page, text, whole=not edit)
+
     # --- agents and jobs --------------------------------------------------------------------------------------
 
     def middleware(self, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
@@ -538,7 +603,8 @@ class Memory:
 
 
 _SCOPED = ("add", "search", "get", "get_all", "update", "delete", "delete_all", "history", "queue", "approve",
-           "reject", "promote", "propose", "check_fields", "middleware", "tools", "ingest")
+           "reject", "promote", "propose", "check_fields", "middleware", "tools", "ingest", "render", "pages", "page",
+           "write_page")
 
 
 class ScopedMemory:

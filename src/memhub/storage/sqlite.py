@@ -422,9 +422,10 @@ class _Tx:
         row = self.get_by_id(id)
         if row is None:
             raise NotFound(f"no row {id}")
-        if row["status"] != "candidate":
+        if row["status"] not in ("candidate", "flag"):
             raise StoreError("only a candidate can be rejected")
-        return self._reviewed(id, reviewed_by, note, status="rejected")
+        # a dismissed flag is archived, so it never blocks a later proposal (AD-061)
+        return self._reviewed(id, reviewed_by, note, status="archived" if row["status"] == "flag" else "rejected")
 
     def approve(
         self,
@@ -574,7 +575,7 @@ class _Tx:
         ).fetchone()["n"]
 
     def queue(self, *, workspace_id: str | None = None) -> list[Row]:
-        clauses, params = ["status = 'candidate'"], []
+        clauses, params = ["status IN ('candidate', 'flag')"], []
         if workspace_id is not None:
             clauses.append("workspace_id = ?")
             params.append(workspace_id)
