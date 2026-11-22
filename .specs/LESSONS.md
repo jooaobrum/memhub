@@ -188,6 +188,36 @@ Seen once or not yet corroborated. Tracked, not trusted.
 - evidence: AC 14 (search)
 - last seen: 2026-11-14T17:07:21Z
 
+### L-030 - When pairing written lines to records by id, refuse every line that repeats an id and treat a record as removed only when its id and its text are both gone.
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `pages` · harmful: 0
+- features: deepagents-backend
+- evidence: AC 26 / pages.py diff (pages)
+- last seen: 2026-11-22T20:53:14Z
+
+### L-031 - Assert the exact result lines and the untouched state for a refusal, in every order the input can take, not a substring of the first line.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `tests` · harmful: 0
+- features: deepagents-backend
+- evidence: C26 tests/test_pages.py (tests)
+- last seen: 2026-11-22T20:53:14Z
+
+### L-032 - A staleness guard needs a test for the token missing entirely, not only for a wrong token.
+- signal: `surviving_mutant` · recurrence: 1 feature(s) · scope: `pages` · harmful: 0
+- features: deepagents-backend
+- evidence: C28 pages.py stamp check (pages)
+- last seen: 2026-11-22T20:53:15Z
+
+### L-033 - Prove a hash ignores a timestamp by building it at two different times, never by rendering twice in the same second.
+- signal: `spec_precision_gap` · recurrence: 1 feature(s) · scope: `tests` · harmful: 0
+- features: deepagents-backend
+- evidence: C42 tests/test_pages.py (tests)
+- last seen: 2026-11-22T20:53:15Z
+
+### L-034 - Every value a criterion names in a negation (not X, not empty) gets its own row in the table test.
+- signal: `ac_gap` · recurrence: 1 feature(s) · scope: `tests` · harmful: 0
+- features: deepagents-backend
+- evidence: AC 6 tag table (tests)
+- last seen: 2026-11-22T20:53:15Z
+
 ## Quarantined (failed when applied - ignore)
 
 A confirmed lesson that recurred alongside failure. Kept for the maintainer to review.
