@@ -25,6 +25,7 @@ mistral = ["langchain-mistralai>=0.2"]
 mlflow = ["mlflow>=2.14"]
 sqlite = ["sqlite-vec>=0.1.6"]
 mcp = ["mcp>=2.0,<3"]
+deepagents = ["deepagents>=0.7.41,<0.8"]  # examples/deepagents_backend
 dev = [
   "hatchling",  # the packaging test builds a wheel
   "pytest>=8.0",
@@ -32,6 +33,7 @@ dev = [
   "sqlite-vec>=0.1.6",
   "mcp>=2.0,<3",
   "langchain>=1.4.6",  # examples/review_inline: per-call human-in-the-loop interrupts
+  "deepagents>=0.7.41,<0.8",  # examples/deepagents_backend
 ]
 
 [project.scripts]
