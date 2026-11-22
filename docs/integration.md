@@ -350,11 +350,34 @@ agent.invoke({"messages": [("user", "…")]},
 
 What it does:
 
-- **Once per thread:** `<about_the_user>` (Profile, then Preference, each within its `max_chars`) and a skill index.
+- **Once per thread:** `<about_the_user>` (Profile, then Preference, each within its `max_chars`), a `<memory_index>`, and a skill index.
 - **Every turn:** a `<memory>` block from `search`, and an `<area_page>` when the query is close enough to one of the user's areas (`areas.page_min_similarity`, budget `areas.page_max_chars`).
 - Appended to the system message **for that model call only**; the stored message history is unchanged.
-- Adds tools `search_memory`, `load_skill`, `propose_memory`. Proposals are always candidates.
+- Adds tools `search_memory`, `load_skill`, `propose_memory`, `read_memory_page`. Proposals are always candidates.
 - Writes the injected `memory_id@version` list to state key `memhub_injected` and to the active MLflow trace metadata (`memhub_injected`).
+
+The memory index shows the model what exists, with counts and no memory content, so it can open what it needs
+instead of guessing search words:
+
+```
+<memory_index>
+Yours (users/u42):
+Areas: Lubrication [lubrication] (8) · Bearings [bearings] (5)
+Subjects: machine PRD_1 (12) · machine PRD_2 (7)
+Types: fact (21) · incident (9)
+Team (team/acme):
+Areas: Lubrication [lubrication] (3)
+Open an area with read_memory_page(area, owner); a subject with search_memory filters={"entities": {"type": .., "id": ..}}.
+</memory_index>
+```
+
+- Counts are of `active`, non-stale memories the user may read: their own and the workspace's, never candidates or
+  another user's. A `require_filter` subject type is not named unless `index.show_guarded` lists it.
+- Injected only when it names an area or a subject; it adds no id to `memhub_injected`.
+- `read_memory_page(area, subject?, owner?)` returns the area's page (`Memory.render`); `owner` is `me` (Yours) or `team`.
+- Settings: `index.enabled` (true), `index.max_chars` (1200: each section keeps its largest entries, then `and N more`),
+  `index.show` (`[areas, subjects, types]`), `index.show_guarded` (`[]`). The same index is `Memory.index(...)`,
+  `memhub index`, and the `list_memory_index` tool of `MemoryToolkit` and `memhub mcp`.
 
 Caveats:
 
