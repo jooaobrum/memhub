@@ -569,6 +569,29 @@ def page(
         typer.echo("\n\n".join(_render_page(pg) for pg in pages))
 
 
+@app.command(name="index")
+def index_(
+    user: Optional[str] = typer.Option(None, "--user"),
+    workspace: Optional[str] = typer.Option(None, "--ws"),
+    as_json: bool = typer.Option(False, "--json", help="Print the index data instead of its text"),
+    config: Optional[Path] = ConfigOpt,
+) -> None:
+    """What the memory holds: your own and the team's areas, subjects and types, with counts (no content)."""
+    from memhub.pages import index_text
+
+    service = _service(config)
+    workspace, user = _ids(workspace, user)
+    try:
+        index = service.index(_actor(), workspace_id=workspace, user_id=user)
+    except (ServiceError, StoreError) as exc:
+        _fail(exc)
+    else:
+        if as_json:
+            typer.echo(json.dumps(index, ensure_ascii=False, indent=2))
+        else:
+            typer.echo(index_text(index, service.settings.index.show))
+
+
 def _render_page(pg: dict) -> str:
     lines = [f"# {pg['title']}", f"Summary (auto-summary): {pg['summary'] or '(none yet)'}"]
     lines += [f"- {d['observed_at'].date().isoformat()}  {d['content']}" for d in pg["details"]]
@@ -588,7 +611,7 @@ def mcp(
     user: Optional[str] = typer.Option(None, "--user", help="User (default: MEMHUB_USER, else the OS user)"),
     config: Optional[Path] = ConfigOpt,
 ) -> None:
-    """Serve search_memory and propose_memory over MCP (stdio). In Claude Code: `claude mcp add memhub -- memhub mcp`."""
+    """Serve search_memory, propose_memory, list_memory_index and read_memory_page over MCP (stdio). In Claude Code: `claude mcp add memhub -- memhub mcp`."""
     from memhub import mcp_server
     from memhub.memory import Memory
 

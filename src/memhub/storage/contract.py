@@ -852,6 +852,29 @@ def test_filter_areas(backend):
         assert fsearch(uow, NotOf(AreaIn((str(bearings),)))) == {"in lube", "in other", "no area"}
 
 
+def test_index_rows_visible(backend):
+    """#28 C2, C9: the caller's own active user rows and the workspace's, never stale, other users' or other
+    workspaces' rows, nor anything not active."""
+    with backend.unit_of_work() as uow:
+        add(uow, "mine")
+        add(uow, "team", scope="workspace", user_id=None)
+        add(uow, "bob's", user_id="bob")
+        add(uow, "other ws", workspace_id="ws2")
+        add(uow, "other ws team", workspace_id="ws2", scope="workspace", user_id=None)
+        add(uow, "stale", valid_until=NOW - timedelta(days=1))
+        add(uow, "fresh", valid_until=NOW + timedelta(days=1))
+        add(uow, "candidate", status="candidate")
+        add(uow, "flag", status="flag")
+        archived = add(uow, "archived")
+        uow.memories.archive(archived["memory_id"])
+    with backend.unit_of_work() as uow:
+        assert sorted(contents(uow.memories.index_rows(workspace_id="ws", user_id="alice", now=NOW))) == [
+            "fresh", "mine", "team"]
+        assert contents(uow.memories.index_rows(workspace_id="ws", user_id=None, now=NOW)) == ["team"]
+        assert contents(uow.memories.index_rows(workspace_id="ws", user_id="bob", now=NOW)) in (
+            ["team", "bob's"], ["bob's", "team"])
+
+
 def test_filter_observed_at_bounds(backend):
     """#25 C8: a date-only `lte` keeps its whole UTC day (AD-049); a datetime bound compares exactly."""
     with backend.unit_of_work() as uow:

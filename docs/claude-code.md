@@ -68,9 +68,12 @@ run summary's `skipped_lines` and the next line is read.
 
 ## The server: `memhub mcp`
 
-A stdio MCP server with two tools, the same ones `MemoryToolkit` gives any agent:
+A stdio MCP server with four tools, the same ones `MemoryToolkit` gives any agent:
 
-- `search_memory(query, type?)` - your active user memories and the workspace's, nearest first.
+- `list_memory_index()` - what the memory holds: your areas, subjects and types and the workspace's, with counts and
+  no content (`{"text", "index"}`), so a session knows what to open before it guesses search words.
+- `read_memory_page(area, subject?, owner?)` - one area as a page, one line per memory; `owner` is `me` or `team`.
+- `search_memory(query, type?, filters?)` - your active user memories and the workspace's, nearest first.
 - `propose_memory(type, fields, evidence?, scope?)` - stores a **candidate** and answers
   `{"id", "event": "PENDING", "status": "candidate"}`. Nothing an agent proposes is used until someone approves it
   in `memhub queue`.

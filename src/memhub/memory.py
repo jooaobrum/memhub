@@ -515,6 +515,13 @@ class Memory:
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
         return self._page(ctx, area, personal, subject).text
 
+    def index(self, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
+              roles: list[str] | None = None) -> dict[str, Any]:
+        """What your memory holds (#28): `me` (your own) and `team` (the workspace's), each with its `areas`,
+        `subjects` and `types` and the count of active, non-stale memories in each, largest first. No content."""
+        ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
+        return self.service.index(ctx.actor, workspace_id=ctx.workspace_id, user_id=ctx.user_id)
+
     def pages(self, *, personal: bool = True, workspace_id: Any = None, user_id: Any = None, run_id: Any = None,
               agent_id: Any = None, roles: list[str] | None = None) -> list[dict[str, Any]]:
         """Every area page of your own memory (or the workspace's) with at least one active row."""
@@ -573,7 +580,8 @@ class Memory:
 
     def tools(self, *, workspace_id: Any = None, user_id: Any = None, run_id: Any = None, agent_id: Any = None,
               roles: list[str] | None = None, k: int = 5) -> MemoryToolkit:
-        """Framework-neutral `search_memory` / `propose_memory` tools for this workspace and user."""
+        """Framework-neutral `search_memory`, `propose_memory`, `list_memory_index` and `read_memory_page` tools for
+        this workspace and user."""
         ctx = self._call(workspace_id, user_id, run_id, agent_id, roles)
         return MemoryToolkit(self.service, workspace_id=ctx.workspace_id, user_id=ctx.user_id, k=k,
                              actor=Actor(id=ctx.agent_id or "agent"), run_id=ctx.run_id, agent_id=ctx.agent_id)
@@ -604,7 +612,7 @@ class Memory:
 
 _SCOPED = ("add", "search", "get", "get_all", "update", "delete", "delete_all", "history", "queue", "approve",
            "reject", "promote", "propose", "check_fields", "middleware", "tools", "ingest", "render", "pages", "page",
-           "write_page")
+           "write_page", "index")
 
 
 class ScopedMemory:

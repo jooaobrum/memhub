@@ -175,6 +175,18 @@ class RenderConfig(BaseModel):
     summarize_over: int = Field(default=30, ge=1)  # an area with more active lines shows one summary line per subject
 
 
+INDEX_SECTIONS = ("areas", "subjects", "types")
+
+
+class IndexConfig(BaseModel):
+    """The memory index (#28): what exists - areas, subjects and types with counts - shown to the agent."""
+
+    enabled: bool = True  # false: the middleware never injects `<memory_index>`
+    max_chars: int = Field(default=1200, ge=200)  # budget of `<memory_index>` and `list_memory_index`'s text
+    show: list[Literal["areas", "subjects", "types"]] = Field(default_factory=lambda: list(INDEX_SECTIONS))
+    show_guarded: list[str] = Field(default_factory=list)  # `require_filter` subject types the index may name (AD-069)
+
+
 class TermsConfig(BaseModel):
     max_per_workspace: int = 300  # only used by projects that enable the `term` type
     max_aliases: int = 5
@@ -424,6 +436,7 @@ class Config(BaseModel):
     areas: AreasConfig = Field(default_factory=AreasConfig)
     terms: TermsConfig = Field(default_factory=TermsConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
+    index: IndexConfig = Field(default_factory=IndexConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
 
     _raw: dict | None = PrivateAttr(default=None)  # the file layers before `${VAR}` interpolation: what `save` writes back
@@ -462,6 +475,13 @@ class Config(BaseModel):
         both = [n for n in self.entity_types if n in self.entities]
         if both:
             raise ValueError(f"entity type {both[0]!r} is declared in both entity_types and entities: keep one")
+        return self
+
+    @model_validator(mode="after")
+    def _index_guarded_declared(self) -> "Config":
+        unknown = [n for n in self.index.show_guarded if n not in self.entity_rules()]
+        if unknown:
+            raise ValueError(f"index.show_guarded: {unknown[0]!r} is not a declared subject type (entities)")
         return self
 
     def needs_review(self, type: str, scope: str) -> bool:

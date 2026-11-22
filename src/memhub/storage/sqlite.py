@@ -613,6 +613,15 @@ class _Tx:
             params.append(limit)
         return self._memories(sql, params)
 
+    def index_rows(self, *, workspace_id: str, user_id: str | None, now: datetime) -> list[Row]:
+        """The active, non-stale rows the caller may read in the workspace: its own user-scope rows and the
+        workspace-scope rows (#28)."""
+        return self._memories(
+            f"SELECT * FROM {self.mem} WHERE status = 'active' AND workspace_id = ? AND NOT ({_STALE_SQL}) "
+            "AND (scope = 'workspace' OR (scope = 'user' AND user_id = ?)) ORDER BY created_at, rowid",
+            [workspace_id, _ts(now), user_id],
+        )
+
     def move_area_links(self, source: Any, target: Any, *, created_by: str) -> int:
         old, new = area_link(source), area_link(target)
         linked, params = _link_sql(old)

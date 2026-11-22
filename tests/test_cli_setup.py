@@ -601,7 +601,7 @@ def _all_commands(uid: str) -> dict[str, list[str]]:
         "reembed": ["reembed"], "ingest": ["ingest", "--source", "nope"], "add": COMMANDS["add"], "list": ["list"],
         "search": ["search", "q"], "queue": ["queue"], "approve": ["approve", uid], "reject": ["reject", uid],
         "edit": ["edit", uid, "-f", "m.json"], "history": ["history", uid], "archive": ["archive", uid],
-        "delete": ["delete", uid], "promote": ["promote", uid], "page": ["page"], "runs": ["runs"], "areas": ["areas"],
+        "delete": ["delete", uid], "promote": ["promote", uid], "page": ["page"], "index": ["index"], "runs": ["runs"], "areas": ["areas"],
         "areas merge": ["areas", "merge", uid, uid], "config show": ["config", "show"],
         "config set": ["config", "set", "project", "x1"], "doctor": ["doctor"], "migrate": ["migrate"], "mcp": ["mcp"],
     }

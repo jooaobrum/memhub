@@ -1,4 +1,4 @@
-"""`memhub mcp`: memhub's `search_memory` and `propose_memory` tools over MCP (stdio), for Claude Code and any MCP
+"""`memhub mcp`: memhub's `search_memory`, `propose_memory`, `list_memory_index` and `read_memory_page` tools over MCP (stdio), for Claude Code and any MCP
 client.
 
     claude mcp add memhub -- memhub mcp
@@ -22,7 +22,8 @@ AGENT_ID = "mcp"
 # own notes instead, and memhub never saw it
 INSTRUCTIONS = (
     "memhub is the long-term memory of this project and user, shared by every session and agent. Call "
-    "search_memory before answering when past decisions, conventions, preferences or fixes may matter. When the "
+    "list_memory_index to see what it holds (areas, subjects, types with counts) and read_memory_page to open an "
+    "area. Call search_memory before answering when past decisions, conventions, preferences or fixes may matter. When the "
     "user asks you to remember something, or states a lasting convention, decision or fact, save it with "
     "propose_memory, even if you also keep notes of your own: this is where the project's memory lives. A proposal "
     "is a candidate that a person approves before it is used; that review is expected and is no reason to skip it."
@@ -54,7 +55,7 @@ def new_run_id() -> str:
 
 
 def build_server(memory: Any, *, workspace_id: str, user_id: str, run_id: str) -> Any:
-    """An MCP server whose two tools run on `memory` for this workspace and user. Raises before serving when the
+    """An MCP server whose four tools run on `memory` for this workspace and user. Raises before serving when the
     ledger cannot be used (no tables, an old schema, another embedder)."""
     server_class = require_sdk()
     kit = memory.tools(workspace_id=workspace_id, user_id=user_id, run_id=run_id, agent_id=AGENT_ID)
@@ -71,6 +72,12 @@ def build_server(memory: Any, *, workspace_id: str, user_id: str, run_id: str) -
         return kit.call("propose_memory", {"type": type, "fields": fields, "evidence": evidence or [], "scope": scope,
                                            "memory_id": memory_id, "user_requested": user_requested})
 
+    def list_memory_index() -> str:
+        return kit.call("list_memory_index", {})
+
+    def read_memory_page(area: str, subject: Optional[str] = None, owner: Literal["me", "team"] = "me") -> str:
+        return kit.call("read_memory_page", {"area": area, "subject": subject, "owner": owner})
+
     # the configured types and scopes, as enums the model can see
     search_memory.__annotations__["type"] = Optional[Literal[types]]  # type: ignore[valid-type]
     search_memory.__annotations__["filters"] = Annotated[Optional[Union[dict, str]], Field(description=FILTERS_HINT)]
@@ -79,6 +86,8 @@ def build_server(memory: Any, *, workspace_id: str, user_id: str, run_id: str) -
     specs = {s["function"]["name"]: s["function"]["description"] for s in kit.tool_specs()}
     server.tool(description=specs["search_memory"])(search_memory)
     server.tool(description=specs["propose_memory"])(propose_memory)
+    server.tool(description=specs["list_memory_index"])(list_memory_index)
+    server.tool(description=specs["read_memory_page"])(read_memory_page)
     return server
 
 

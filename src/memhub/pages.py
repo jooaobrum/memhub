@@ -8,6 +8,8 @@ review config (AD-065). Nothing here stores the page itself.
     Folder         whose page: a user's own (`scope="user"`) or the workspace's
     build_page     the area (or one subject of it, or the folder's README) as a `Page`
     write_page     a written page -> `list[PageChange]`, one per changed line
+    index_text     the memory index (#28) as the agent reads it, within a character budget
+    read_page      the page a `read_memory_page` tool returns
 """
 from __future__ import annotations
 
@@ -21,11 +23,12 @@ from typing import Any, Callable, Literal
 from memhub import injection
 from memhub.config import Settings
 from memhub.pipeline.route import AUTO, evidence_entries
-from memhub.service import MemoryService, NotFound, ValidationError
+from memhub.service import MemoryService, NotFound, ValidationError, index_group
 from memhub.storage import UnitOfWork
 from memhub.storage.rules import Row, area_link, as_vector_list
 
-__all__ = ["Folder", "Page", "PageChange", "HOW_TO_READ", "STALE", "build_page", "write_page"]
+__all__ = ["Folder", "Page", "PageChange", "HOW_TO_READ", "INDEX_HOWTO", "STALE", "build_page", "index_text",
+           "read_page", "write_page"]
 
 STALE = "page changed since you read it: read it again"
 ARCHIVE = "_action"  # AD-062: a candidate whose payload carries `"_action": "archive"` proposes archiving the memory
@@ -208,16 +211,6 @@ def find_area(uow: UnitOfWork, folder: Folder, key: str) -> Row:
     raise NotFound(f"no area {key!r}")
 
 
-def areas(uow: UnitOfWork, folder: Folder, now: datetime) -> list[tuple[Row, int]]:
-    """The folder's areas with their count of active, non-stale lines; areas with none are left out."""
-    out = []
-    for row in uow.memories.owner_areas(scope=folder.scope, workspace_id=folder.workspace_id, user_id=folder.user_id):
-        n = sum(1 for r in uow.memories.linked_rows(row["memory_id"], stale_at=now) if folder.owns(r))
-        if n:
-            out.append((row, n))
-    return out
-
-
 def _header(title: str, now: datetime, stamp: str) -> list[str]:
     return [f"# {title}",
             f"<!-- memhub · rendered {now.strftime('%Y-%m-%dT%H:%M:%SZ')} · stamp {stamp} · "
@@ -233,8 +226,18 @@ def build_page(uow: UnitOfWork, settings: Settings, folder: Folder, key: str | N
     """The README (`key` None), an area page, or one subject of an area, as the agent reads it."""
     now = now or datetime.now(timezone.utc)
     if key is None:
-        listed = [f"- {area_key(a)}.md: {a['payload']['title']} ({n} memories)" for a, n in areas(uow, folder, now)]
-        body = ["## Areas", *(listed or ["<!-- no areas yet -->"])]
+        group = index_group(uow, settings, uow.memories.index_rows(
+            workspace_id=folder.workspace_id, user_id=folder.user_id, now=now), scope=folder.scope,
+            workspace_id=folder.workspace_id, user_id=folder.user_id)
+        show = settings.index.show
+        body = ["## Areas", *([f"- {a['key']}.md: {a['title']} ({a['count']} memories)" for a in group["areas"]]
+                              or ["<!-- no areas yet -->"])]
+        if "subjects" in show:
+            body += ["", "## Subjects", *([f"- {s['type']} {s['id']} ({s['count']})" for s in group["subjects"]]
+                                          or ["<!-- no subjects yet -->"])]
+        if "types" in show:
+            body += ["", "## Types", *([f"- {t['name']} ({t['count']})" for t in group["types"]]
+                                       or ["<!-- no types yet -->"])]
         page = Page(title=f"Memory ({folder.label})", folder=folder, stamp=_stamp(body))
         page.text = "\n".join([*_header(page.title, now, page.stamp), *body]) + "\n"
         return page
@@ -270,6 +273,83 @@ def build_page(uow: UnitOfWork, settings: Settings, folder: Folder, key: str | N
     page.stamp = _stamp(body)
     page.text = "\n".join([*_header(page.title, now, page.stamp), *body]) + "\n"
     return page
+
+
+# --- the memory index (#28) ---------------------------------------------------------------------------------
+
+INDEX_HOWTO = ('Open an area with read_memory_page(area, owner); a subject with search_memory '
+               'filters={"entities": {"type": .., "id": ..}}.')
+_SECTIONS = (("areas", "Areas"), ("subjects", "Subjects"), ("types", "Types"))
+_GROUPS = (("me", "Yours"), ("team", "Team"))
+
+
+def _item(section: str, entry: dict) -> str:
+    if section == "areas":
+        return f"{entry['title']} [{entry['key']}] ({entry['count']})"
+    if section == "subjects":
+        return f"{entry['type']} {entry['id']} ({entry['count']})"
+    return f"{entry['name']} ({entry['count']})"
+
+
+def lists_anything(index: dict, show: list[str]) -> bool:
+    """Whether the index names an area or a subject (AD-068: type counts alone are not worth a prompt block)."""
+    return any(g and g[s] for g in (index["me"], index["team"]) for s in ("areas", "subjects") if s in show)
+
+
+def index_text(index: dict, show: list[str], max_chars: int | None = None) -> str:
+    """The index as the agent reads it: `<memory_index>`, a group per owner with something listed, one line per
+    shown section, the how-to line. Within `max_chars`, each section keeps its largest entries whole and ends
+    `· and N more`; entries are taken in turn across the sections, so one long section cannot starve the rest."""
+    lines: list[tuple[str, str, list[str]]] = []  # (group header, section label, entries) in print order
+    for name, label in _GROUPS:
+        group = index[name]
+        if group is None:
+            continue
+        sections = [(title, [_item(s, e) for e in group[s]]) for s, title in _SECTIONS if s in show and group[s]]
+        if sections:
+            lines += [(f"{label} ({group['folder']}):", title, items) for title, items in sections]
+    shown = [len(items) if max_chars is None else 0 for _, _, items in lines]
+    dropped: set[int] = set()
+
+    def render() -> str:
+        out, header = ["<memory_index>"], None
+        for i, (head, title, items) in enumerate(lines):
+            if i in dropped:
+                continue
+            if head != header:
+                out.append(head)
+                header = head
+            kept, rest = items[:shown[i]], len(items) - shown[i]
+            out.append(f"{title}: " + " · ".join([*kept, *([f"and {rest} more"] if rest else [])]))
+        return "\n".join([*out, INDEX_HOWTO, "</memory_index>"])
+
+    if max_chars is None:
+        return render()
+    for i in reversed(range(len(lines))):  # even the bare `and N more` lines may not fit: drop whole lines, last first
+        if len(render()) <= max_chars:
+            break
+        dropped.add(i)
+    open_ = [i for i in range(len(lines)) if i not in dropped]
+    while open_:
+        for i in list(open_):
+            shown[i] += 1
+            if shown[i] > len(lines[i][2]) or len(render()) > max_chars:
+                shown[i] -= 1
+                open_.remove(i)
+    return render()
+
+
+def read_page(service: MemoryService, *, workspace_id: str, user_id: str | None, area: str,
+              subject: str | None = None, owner: str = "me") -> str:
+    """The page `read_memory_page` returns: an area (or one subject of it) of the caller's own memory (`me`) or of
+    the workspace's (`team`). `ValidationError` for another owner, `NotFound` for an area or subject not there."""
+    if owner not in ("me", "team"):
+        raise ValidationError("owner must be me or team")
+    if owner == "me" and not user_id:
+        raise ValidationError("no user: owner must be team")
+    folder = Folder("user", workspace_id, user_id) if owner == "me" else Folder("workspace", workspace_id, None)
+    with service.store.unit_of_work() as uow:
+        return build_page(uow, service.settings, folder, area, subject=subject, viewer=user_id or "").text
 
 
 # --- writing ------------------------------------------------------------------------------------------------

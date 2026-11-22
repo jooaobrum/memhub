@@ -155,7 +155,10 @@ def test_h5_toolkit_agent(p):
     lead.add({"content": "Acme SSO uses Azure AD", "entities": [ACME]}, scope="workspace")
     kit = p.memory.tools(**p.ids("agent-7"), agent_id="support-bot")
     specs = {s["function"]["name"]: s["function"] for s in kit.tool_specs()}
-    assert set(specs) == {"search_memory", "propose_memory"}
+    assert set(specs) == {"search_memory", "propose_memory", "list_memory_index", "read_memory_page"}
+    index = json.loads(kit.call("list_memory_index", {}))
+    assert "error" not in index
+    assert "error" in json.loads(kit.call("read_memory_page", {"area": "no-such-area"}))
     assert "account" in specs["propose_memory"]["parameters"]["properties"]["type"]["enum"]
     assert "account: company (optional: plan, contact)" in specs["propose_memory"]["parameters"]["properties"][
         "fields"]["description"]  # a template type: memhub writes `content`, the model fills the fields

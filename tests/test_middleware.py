@@ -314,7 +314,7 @@ def test_the_toolkit_gives_any_agent_stack_the_same_search_and_propose(service, 
 
     kit = MemoryToolkit(service, workspace_id="ws", user_id="alice")
     names = [t["function"]["name"] for t in kit.tool_specs()]
-    assert names == ["search_memory", "propose_memory"]
+    assert names == ["search_memory", "propose_memory", "list_memory_index", "read_memory_page"]  # #28
     assert "enum" in kit.tool_specs()[0]["function"]["parameters"]["properties"]["type"]
     out = json.loads(kit.call("propose_memory", json.dumps({"type": "fact", "fields": {"content": "Uses Okta for SSO"}, "scope": "user"})))
     assert out["status"] == "candidate"
