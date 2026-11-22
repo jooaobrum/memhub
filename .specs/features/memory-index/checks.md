@@ -150,7 +150,8 @@ Proof: `.venv/bin/python -m pytest tests/test_docs.py -k "test_index_docs or tes
 
 ## Handoff
 
-- **Settled mid-build:** none
-- **Dispatched:** none yet
-- **Boundary:** none closed
+- **Settled mid-build:** user: "fix, commit and push" - push authorized before the Verifier ran
+- **Dispatched:** none - Verifier not run yet (push asked first)
+- **Boundary:** C1-C30 closed at `e42f6c0`; proofs 35/35 at that HEAD
 - **Abandoned:** none
+- **Full suite:** every file green except `test_config.py` and `test_terms.py`, which need an untracked repo-root `memhub.yaml` (green with it copied in); `test_upsert.py` slow on Postgres (over 7 min), passing when run alone
