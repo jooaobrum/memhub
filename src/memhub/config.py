@@ -169,6 +169,12 @@ class AreasConfig(BaseModel):
         return {**rest, "seeds": seeds}
 
 
+class RenderConfig(BaseModel):
+    """The file view of memory (#41, AD-063): how an area page is drawn."""
+
+    summarize_over: int = Field(default=30, ge=1)  # an area with more active lines shows one summary line per subject
+
+
 class TermsConfig(BaseModel):
     max_per_workspace: int = 300  # only used by projects that enable the `term` type
     max_aliases: int = 5
@@ -417,6 +423,7 @@ class Config(BaseModel):
     guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig)
     areas: AreasConfig = Field(default_factory=AreasConfig)
     terms: TermsConfig = Field(default_factory=TermsConfig)
+    render: RenderConfig = Field(default_factory=RenderConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
 
     _raw: dict | None = PrivateAttr(default=None)  # the file layers before `${VAR}` interpolation: what `save` writes back

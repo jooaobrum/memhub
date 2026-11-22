@@ -284,9 +284,10 @@ class _Tx:
         row = self.get_by_id(id)
         if row is None:
             raise NotFound(f"no row {id}")
-        if row["status"] != "candidate":
+        if row["status"] not in ("candidate", "flag"):
             raise StoreError("only a candidate can be rejected")
-        return self._out(self._set(id, status="rejected", reviewed_by=reviewed_by, reviewed_at=self.now, review_note=note))
+        status = "archived" if row["status"] == "flag" else "rejected"  # a dismissed flag never blocks a proposal (AD-061)
+        return self._out(self._set(id, status=status, reviewed_by=reviewed_by, reviewed_at=self.now, review_note=note))
 
     def approve(
         self,
@@ -431,7 +432,7 @@ class _Tx:
 
     def queue(self, *, workspace_id: str | None = None) -> list[Row]:
         rows = [r for r in self._mem().values()
-                if r["status"] == "candidate" and (workspace_id is None or r["workspace_id"] == workspace_id)]
+                if r["status"] in ("candidate", "flag") and (workspace_id is None or r["workspace_id"] == workspace_id)]
         rows.sort(key=lambda r: r["created_at"])
         rows.sort(key=lambda r: r["conflicts_with"] is not None, reverse=True)
         return self._outs(rows)

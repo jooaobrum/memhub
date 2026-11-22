@@ -1109,4 +1109,104 @@ def test_keyword_search_prefilter_count_and_similarity(backend):
         assert found("strasse") == {"Straße 12"}
         assert found("m2") == {"area 40 m²"}
 
+
+# --- the file view (#41): flags and edit / archive proposals --------------------------------------------------
+
+
+def _review_service(backend, settings, registry):
+    from memhub.config import EmbeddingConfig
+    from memhub.service import MemoryService
+
+    s = settings.model_copy(update={
+        "workspace_default": "ws", "embeddings": EmbeddingConfig(provider="openai", model=MODEL, dims=DIMS)})
+    return MemoryService(store=backend, settings=s, registry=registry, embeddings=_QueryAtOne())
+
+
+def _lead():
+    from memhub.storage.rules import Actor
+
+    return Actor(id="lead", roles=["workspace_admin"])
+
+
+def _proposal(backend, *, archive: bool, content: str = "Pumps fail above 40C") -> tuple[dict, dict]:
+    with backend.unit_of_work() as uow:
+        active = add(uow, "Pumps fail above 35C", scope="workspace", user_id=None)
+        payload = {**active["payload"], "_action": "archive"} if archive else {"content": content}
+        cand = uow.memories.edit_memory(
+            active["memory_id"], content=active["content"] if archive else content, payload=payload, entities=[],
+            embedding=vec(1.0), verified=False, created_by="u1", as_candidate=True)
+    return active, cand
+
+
+def test_edit_candidate_approve_reject(backend, settings, registry):
+    """#41 C23 (AC 23): a candidate version of an active memory supersedes it on approve, and leaves it on reject."""
+    service = _review_service(backend, settings, registry)
+    active, cand = _proposal(backend, archive=False)
+    assert (cand["memory_id"], cand["version"], cand["status"]) == (active["memory_id"], 2, "candidate")
+    service.approve(_lead(), cand["id"])
+    with backend.unit_of_work() as uow:
+        assert [(r["version"], r["status"]) for r in uow.memories.history(active["memory_id"])] == [
+            (1, "superseded"), (2, "active")]
+        assert uow.memories.get_active(active["memory_id"])["content"] == "Pumps fail above 40C"
+
+    other, cand = _proposal(backend, archive=False, content="Pumps fail above 50C")
+    service.reject(_lead(), cand["id"])
+    with backend.unit_of_work() as uow:
+        assert [(r["version"], r["status"]) for r in uow.memories.history(other["memory_id"])] == [
+            (1, "active"), (2, "rejected")]
+        assert uow.memories.get_active(other["memory_id"])["content"] == "Pumps fail above 35C"
+
+
+def test_archive_candidate(backend, settings, registry):
+    """#41 C24 (AC 24, AD-062): approving an archive proposal archives the memory; rejecting it leaves it active."""
+    service = _review_service(backend, settings, registry)
+    active, cand = _proposal(backend, archive=True)
+    service.approve(_lead(), cand["id"])
+    with backend.unit_of_work() as uow:
+        assert uow.memories.get_active(active["memory_id"]) is None
+        assert [r["status"] for r in uow.memories.history(active["memory_id"])] == ["superseded", "archived"]
+
+    kept, cand = _proposal(backend, archive=True)
+    service.reject(_lead(), cand["id"])
+    with backend.unit_of_work() as uow:
+        assert uow.memories.get_active(kept["memory_id"])["id"] == kept["id"]
+
+
+def test_archive_candidate_stale(backend, settings, registry):
+    """#41 C44: rejecting an archive proposal keeps the memory; approving one whose memory was archived meanwhile
+    is refused and changes nothing."""
+    from memhub.service import ValidationError
+
+    service = _review_service(backend, settings, registry)
+    active, cand = _proposal(backend, archive=True)
+    with backend.unit_of_work() as uow:
+        uow.memories.archive(active["memory_id"])
+    with pytest.raises(ValidationError, match="no longer active"):
+        service.approve(_lead(), cand["id"])
+    with backend.unit_of_work() as uow:
+        assert uow.memories.get_by_id(cand["id"])["status"] == "candidate"
+        assert [r["status"] for r in uow.memories.history(active["memory_id"])] == ["archived", "candidate"]
+
+
+def test_queue_lists_flags(backend, settings, registry):
+    """#41 C32 (AC 32, AD-061): the queue lists flags beside candidates; a flag is never active, and rejecting it
+    archives it."""
+    from memhub.service import ValidationError
+
+    service = _review_service(backend, settings, registry)
+    with backend.unit_of_work() as uow:
+        flag = add(uow, "Team uses Amex", scope="workspace", user_id=None, status="flag")
+        add(uow, "A candidate", scope="workspace", user_id=None, status="candidate")
+        add(uow, "Active", scope="workspace", user_id=None)
+        assert sorted((r["content"], r["status"]) for r in uow.memories.queue(workspace_id="ws")) == [
+            ("A candidate", "candidate"), ("Team uses Amex", "flag")]
+        assert "Team uses Amex" not in contents(uow.memories.list_memories(status="active"))
+    with pytest.raises(ValidationError, match="a flag is not a memory"):
+        service.approve(_lead(), flag["id"])
+    service.reject(_lead(), flag["id"])
+    with backend.unit_of_work() as uow:
+        assert uow.memories.get_by_id(flag["id"])["status"] == "archived"
+        assert "Team uses Amex" not in contents(uow.memories.queue(workspace_id="ws"))
+
+
 __all__ = ["backend", *sorted(n for n in dir() if n.startswith("test_"))]

@@ -571,12 +571,13 @@ class MemoryStore:
         row = self.get_by_id(cur, id)
         if row is None:
             raise NotFound(f"no row {id}")
-        if row["status"] != "candidate":
+        if row["status"] not in ("candidate", "flag"):
             raise StoreError("only a candidate can be rejected")
+        # a dismissed flag is archived, so it never blocks a later proposal (AD-061)
         cur.execute(
-            f"UPDATE {self._t('memory')} SET status='rejected', reviewed_by=%s, reviewed_at=now(), "
+            f"UPDATE {self._t('memory')} SET status=%s, reviewed_by=%s, reviewed_at=now(), "
             f"review_note=%s WHERE id=%s RETURNING *",
-            (reviewed_by, note, id),
+            ("archived" if row["status"] == "flag" else "rejected", reviewed_by, note, id),
         )
         return cur.fetchone()
 
@@ -750,7 +751,7 @@ class MemoryStore:
         return cur.fetchone()["n"]
 
     def queue(self, cur: Cursor, *, workspace_id: str | None = None) -> list[Row]:
-        clauses = ["status='candidate'"]
+        clauses = ["status IN ('candidate', 'flag')"]
         params: list[Any] = []
         if workspace_id is not None:
             clauses.append("workspace_id=%s")

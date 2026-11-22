@@ -72,6 +72,8 @@ def _occurs(name: str, text: str) -> bool:
 
 
 REJECTED_REPEAT = "a reviewer already rejected this memory"
+FLAG_NOT_MEMORY = "a flag is not a memory: reject it to dismiss it"
+ARCHIVE_ACTION = "_action"  # AD-062: a candidate whose payload holds `"_action": "archive"` proposes an archive
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -320,6 +322,15 @@ class MemoryService:
             if row is None:
                 raise NotFound(f"no row {id}")
             self._authorize_review(actor, row)
+            if row["status"] == "flag":  # AD-061
+                raise ValidationError(FLAG_NOT_MEMORY)
+            if row["status"] == "candidate" and row["payload"].get(ARCHIVE_ACTION) == "archive":  # AD-062
+                if fields:
+                    raise ValidationError("an archive proposal has nothing to edit: approve or reject it")
+                if uow.memories.get_active(row["memory_id"]) is None:
+                    raise ValidationError(f"memory {row['memory_id']} is no longer active: nothing to archive")
+                uow.memories.approve(id, reviewed_by=actor.id, note=note)
+                return uow.memories.archive(row["memory_id"])
             edit = self._review_edit(uow, row, fields, resolve) if fields else None
             if resolve == "keep_both" and row["conflicts_with"] is not None \
                     and row["payload"].get("key") is not None:
@@ -689,6 +700,7 @@ class MemoryService:
         )
         return {
             "memory_id": area["memory_id"],
+            "key": area["payload"].get("key"),
             "version": area["version"],
             "title": area["payload"]["title"],
             "summary": area["payload"].get("summary", ""),
