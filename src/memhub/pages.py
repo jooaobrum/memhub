@@ -40,6 +40,8 @@ HOW_TO_READ = """## How to read this
 
 _ID_LINE = re.compile(r"^#([0-9a-f]{8,32})(?=\s|$)\s*(?:\[(\w+)\]\s*)?(.*?)\s*(?:\((\d{4}-\d{2}-\d{2})\))?\s*$")
 _STAMP = re.compile(r"\bstamp ([0-9a-f]{12})\b")
+_GUTTER = re.compile(r"^\s*\d+(?:\.\d+)?\t")
+_WINDOW = re.compile(r"^@@ .* @@$")
 
 
 @dataclass(frozen=True)
@@ -295,7 +297,10 @@ def diff(page: Page, written: str) -> list[_Op]:
     ops, seen, in_howto = [], set(), False
     refused_texts = []
     for raw in written.splitlines():
-        line = raw.strip()
+        # what a file tool adds around a page it shows (deepagents: `@@ lines 1-12 of 12 @@`, a line-number gutter)
+        line = _GUTTER.sub("", raw).strip()
+        if _WINDOW.match(line):
+            continue
         if line.startswith("## "):
             in_howto = line == "## How to read this"
             continue

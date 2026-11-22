@@ -491,6 +491,16 @@ def test_ignored_sections(cfg):
     assert len(all_rows(m)) == before
 
 
+def test_file_tool_framing_is_not_a_line(cfg):
+    """C27's sweep, found end to end: what a file tool shows around a page - deepagents' `@@ lines 1-9 of 9 @@`
+    header, a line-number gutter - is not memory."""
+    m = memory(cfg)
+    add_row(m, "Flies from CDG", add_area(m, "travel"))
+    page = m.render("travel", **IDS)
+    shown = "@@ lines 1-9 of 9 @@\n" + "\n".join(f"{n:6}\t{ln}" for n, ln in enumerate(page.splitlines(), 1)) + "\n"
+    assert lines(m.write_page("travel", shown, **IDS)) == ["no change"]
+
+
 def test_stale_stamp(cfg):
     """C28 (AC 28), memhub's side."""
     m = memory(cfg)

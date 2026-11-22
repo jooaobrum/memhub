@@ -4,7 +4,7 @@ Mutations: 3
 Build: `.venv/bin/python -m compileall -q src/memhub examples/deepagents_backend`
 Plan: `.specs/features/deepagents-backend/plan.md`
 
-44 checks in 8 slices · 5 one-way doors · 0 open
+46 checks in 9 slices · 5 one-way doors · 0 open
 
 Run with `PYTHONPATH=src` exported. `tests/test_pages.py` (rendering, the page diff, the review decisions, flags) runs on the in-memory backend with fake models and no Docker; the storage rules for flags and edit/archive candidates are in the contract suite (`src/memhub/storage/contract.py`), run on in-memory, SQLite (both vector paths) and Postgres (Docker, the `pg_dsn` fixture). `tests/test_example_deepagents.py` needs the `deepagents` extra and runs a real `create_deep_agent` with a scripted chat model against SQLite.
 
@@ -166,6 +166,14 @@ Proof: `.venv/bin/python -m pytest tests/test_pages.py -k "write_provenance"`
 **C44** - `memhub reject` on an archive candidate leaves the memory active; `memhub approve` on an archive candidate whose memory was archived meanwhile raises `ValidationError` and changes nothing (state transitions)
 Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py tests/test_contract_sqlite.py -k "archive_candidate_stale"`
 
+### S9 - end to end (appended mid-build)
+
+**C45** - Thirteen scenarios run through a real `create_deep_agent` (its own `ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`), `CompositeBackend` + `MemhubBackend`, memhub and the `memhub` CLI, on SQLite and on Postgres: reading, a personal line saved, a team line reviewed and read back, a team type with `review: false`, a flag, edits keeping the id, removals, guards, a stale write re-read, grep and glob, subject summaries, a rejected repeat, a personal type that needs review (AC 1-36)
+Proof: `.venv/bin/python -m pytest tests/e2e/test_deepagents_backend.py -k "test_s"`
+
+**C46** - A page written back with what a file tool shows around it - deepagents' `@@ lines 1-9 of 9 @@` header and a line-number gutter - changes nothing (`no change`) (AC 27)
+Proof: `.venv/bin/python -m pytest tests/test_pages.py -k "file_tool_framing"`
+
 ## Coverage
 
 | Set (size) | Member -> proof | Unproven |
@@ -216,4 +224,5 @@ Proof: `.venv/bin/python -m pytest tests/test_contract_memory.py tests/test_cont
 - **Dispatched:** none
 - **Boundary:** none yet
 - **Abandoned:** none
+- **Settled mid-build (2):** user: "I need a test end to end, simulate memory and check if everything is working, each scenario. Once done and pass. You can open the PR" - C45 added; the end-to-end run found that a page written back with deepagents' `@@ lines … @@` read header became a new line (a model call, then a flag): C46 added and the page parser fixed
 - **Deviations:** C15 gained a second proof (`read_window` asserts the backend serves `Memory.render`), since `tests/test_pages.py` must run without deepagents (C37); the plan's Surface gained a "Built" note: `personal` selects the folder (AD-001 keeps `user_id` as the caller)
