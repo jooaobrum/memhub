@@ -24,9 +24,9 @@ from memhub.config import Settings
 from memhub.storage import Backend, UnitOfWork
 from memhub.storage.rules import (
     Actor, AnyOf, AreaIn, EntityFilter, EntityIs, EntityTypeIn, Filter, NotFound, NotOf, Row, all_of, area_ids,
-    RRF_K, as_vector_list, fuse, keyword_rank, map_areas, positive_entity_nodes, query_keywords,
+    RRF_K, area_link, as_vector_list, fuse, keyword_rank, map_areas, positive_entity_nodes, query_keywords,
 )
-from memhub.types import TypeRegistry
+from memhub.types import INTERNAL_TYPES, TypeRegistry
 
 if TYPE_CHECKING:
     from memhub.filters import SearchFilter
@@ -56,6 +56,38 @@ class ValidationError(ServiceError):
 
 class InjectionDetected(ServiceError):
     pass
+
+
+def index_group(uow: UnitOfWork, settings: Settings, rows: list[Row], *, scope: str, workspace_id: str,
+                user_id: str | None) -> dict[str, list[dict[str, Any]]]:
+    """One owner's part of the memory index (#28): its areas, subjects and types, each with the count of `rows`
+    (the caller's visible, active, non-stale rows) it holds, largest first. Only `rows` of this owner count; the
+    internal types count nowhere; a `require_filter` subject type is named only when `index.show_guarded` lists it
+    (AD-069); an area with no counted row is left out."""
+    from memhub.pipeline.areas import slugify
+
+    own = [r for r in rows if r["scope"] == scope and r["type"] not in INTERNAL_TYPES
+           and (scope == "workspace" or r["user_id"] == user_id)]
+    hidden = set(settings.guarded_types()) - set(settings.index.show_guarded)
+    areas = []
+    for area in uow.memories.owner_areas(scope=scope, workspace_id=workspace_id, user_id=user_id):
+        link = area_link(area["memory_id"])
+        count = sum(1 for r in own if link in (r["links"] or []))
+        if count:
+            areas.append({"key": area["payload"].get("key") or slugify(area["payload"]["title"]),
+                          "title": area["payload"]["title"], "count": count})
+    subjects: dict[tuple[str, str], int] = {}
+    types: dict[str, int] = {}
+    for r in own:
+        types[r["type"]] = types.get(r["type"], 0) + 1
+        for key in {(str(e["type"]), str(e["id"])) for e in r["entities"] or [] if e.get("type") not in hidden}:
+            subjects[key] = subjects.get(key, 0) + 1
+    return {
+        "areas": sorted(areas, key=lambda a: (-a["count"], a["title"])),
+        "subjects": [{"type": t, "id": i, "count": n}
+                     for (t, i), n in sorted(subjects.items(), key=lambda kv: (-kv[1], f"{kv[0][0]} {kv[0][1]}"))],
+        "types": [{"name": t, "count": n} for t, n in sorted(types.items(), key=lambda kv: (-kv[1], kv[0]))],
+    }
 
 
 @dataclass
@@ -638,6 +670,22 @@ class MemoryService:
                 }
                 for r in reversed(rows)
             ]
+
+    def index(self, actor: Actor, *, workspace_id: str | None = None, user_id: str | None = None,
+              now: datetime | None = None) -> dict[str, Any]:
+        """What the caller's memory holds (#28): `me` (the user's own memory; None with no user) and `team` (the
+        workspace's), each `{"folder", "areas", "subjects", "types"}` with counts of active, non-stale rows only."""
+        workspace_id = workspace_id or self.settings.workspace_default
+        now = now or datetime.now(timezone.utc)
+        with self.store.unit_of_work() as uow:
+            rows = uow.memories.index_rows(workspace_id=workspace_id, user_id=user_id, now=now)
+
+            def group(scope: str, folder: str) -> dict[str, Any]:
+                return {"folder": folder, **index_group(uow, self.settings, rows, scope=scope,
+                                                        workspace_id=workspace_id, user_id=user_id)}
+
+            return {"me": group("user", f"users/{user_id}") if user_id else None,
+                    "team": group("workspace", f"team/{workspace_id}")}
 
     def merge_areas(self, actor: Actor, source: uuid.UUID, target: uuid.UUID) -> dict[str, Any]:
         """Move every `in_area` link of `source` to `target` (new versions), then archive `source`."""

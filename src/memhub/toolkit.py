@@ -1,4 +1,4 @@
-"""Framework-neutral memory tools: the same search / propose / load-skill an agent gets from `MemoryMiddleware`, as plain
+"""Framework-neutral memory tools: the same search / propose / index / page tools an agent gets from `MemoryMiddleware`, as plain
 callables plus JSON-schema tool specs, so any agent stack (OpenAI Agents SDK, LlamaIndex, a hand-written loop, a FastAPI
 endpoint, an MCP wrapper) can use memhub without LangChain.
 
@@ -68,6 +68,28 @@ def _view(row: dict) -> dict[str, Any]:
     }
 
 
+LIST_INDEX_DESCRIPTION = ("List what the long-term memory holds: your own and the team's areas, subjects and memory "
+                          "types, with counts. No memory content: open an area with read_memory_page, a subject with "
+                          "search_memory filters.")
+READ_PAGE_DESCRIPTION = ("Read one area of memory as a page, one line per memory. area: the key in [brackets] in the "
+                         "memory index; owner: \"me\" for an area listed under Yours, \"team\" for one under Team; "
+                         "subject: optional, one subject of a large area (the name after the arrow on its summary line).")
+READ_PAGE_PARAMETERS = {
+    "area": {"type": "string", "description": "the area key, e.g. lubrication"},
+    "subject": {"type": "string", "description": "optional: one subject of the area"},
+    "owner": {"type": "string", "enum": ["me", "team"], "description": "me (default) or team"},
+}
+
+
+def memory_index(service: MemoryService, actor: Actor, *, workspace_id: str, user_id: str | None) -> dict[str, Any]:
+    """What `list_memory_index` returns: the index text within `index.max_chars`, and the index itself."""
+    from memhub.pages import index_text
+
+    index = service.index(actor, workspace_id=workspace_id, user_id=user_id)
+    cfg = service.settings.index
+    return {"text": index_text(index, cfg.show, cfg.max_chars), "index": index}
+
+
 class MemoryToolkit:
     def __init__(self, service: MemoryService, *, workspace_id: str, user_id: str | None, k: int = 5, actor: Actor | None = None,
                  run_id: str | None = None, agent_id: str | None = None):
@@ -103,6 +125,22 @@ class MemoryToolkit:
             return {"rejected": str(exc)}
         return proposal_result(row)
 
+    def list_memory_index(self) -> dict[str, Any]:
+        """Built at each call, so a memory saved since the last one shows."""
+        try:
+            return memory_index(self.service, self.actor, workspace_id=self.workspace_id, user_id=self.user_id)
+        except (ServiceError, NotFound) as exc:
+            return {"error": str(exc)}
+
+    def read_memory_page(self, area: str, subject: str | None = None, owner: str = "me") -> Any:
+        from memhub.pages import read_page
+
+        try:
+            return read_page(self.service, workspace_id=self.workspace_id, user_id=self.user_id, area=area,
+                             subject=subject, owner=owner)
+        except (ServiceError, NotFound) as exc:
+            return {"error": str(exc)}
+
     def tool_specs(self) -> list[dict[str, Any]]:
         types = list(self.service.settings.types)
         return [
@@ -118,14 +156,22 @@ class MemoryToolkit:
                     "type": {"type": "string", "enum": types}, "fields": {"type": "object", "description": _fields_hint(self.service)},
                     "evidence": {"type": "array", "items": {"type": "object"}}, "scope": {"type": "string", "enum": self.service.settings.scopes}},
                     "required": ["type", "fields"]}}},
+            {"type": "function", "function": {
+                "name": "list_memory_index", "description": LIST_INDEX_DESCRIPTION,
+                "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {
+                "name": "read_memory_page", "description": READ_PAGE_DESCRIPTION,
+                "parameters": {"type": "object", "properties": READ_PAGE_PARAMETERS, "required": ["area"]}}},
         ]
 
     def call(self, name: str, arguments: dict[str, Any] | str) -> str:
-        """Run a tool by name with the model's arguments (a dict or its JSON text); the result is a JSON string."""
+        """Run a tool by name with the model's arguments (a dict or its JSON text); the result is a JSON string, except
+        a page from `read_memory_page`, which is its text as is."""
         args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments)
-        if name not in ("search_memory", "propose_memory"):
+        if name not in ("search_memory", "propose_memory", "list_memory_index", "read_memory_page"):
             return json.dumps({"error": f"unknown tool {name!r}"})
         try:
-            return json.dumps(getattr(self, name)(**args), default=str, ensure_ascii=False)
+            result = getattr(self, name)(**args)
+            return result if isinstance(result, str) else json.dumps(result, default=str, ensure_ascii=False)
         except TypeError as exc:  # the model sent arguments the tool does not take
             return json.dumps({"error": str(exc)})

@@ -31,6 +31,7 @@ METHODS: dict[str, tuple[str, ...]] = {
         "add_memory", "edit_memory", "amend_row", "archive", "reject", "approve", "merge_evidence",
         "merge_evidence_row", "delete_row", "delete_user", "get_by_id", "get_active", "history", "list_memories",
         "count_active", "queue", "owner_areas", "linked_rows", "move_area_links", "areas_by_memory_id", "add_link",
+        "index_rows",
     ),
     "runs": (
         "get_watermark", "upsert_run", "list_run_summaries", "run_detail", "dropped_by_reason", "purge_dropped",

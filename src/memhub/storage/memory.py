@@ -461,6 +461,14 @@ class _Tx:
         rows = _newest_first(rows, "observed_at", "created_at")
         return self._outs(rows if limit is None else rows[:limit])
 
+    def index_rows(self, *, workspace_id: str, user_id: str | None, now: datetime) -> list[Row]:
+        """The active, non-stale rows the caller may read in the workspace: its own user-scope rows and the
+        workspace-scope rows (#28)."""
+        rows = [r for r in self._mem().values()
+                if r["status"] == "active" and r["workspace_id"] == workspace_id and not self._stale(r, now)
+                and (r["scope"] == "workspace" or (r["scope"] == "user" and user_id is not None and r["user_id"] == user_id))]
+        return self._outs(sorted(rows, key=lambda r: r["created_at"]))
+
     def move_area_links(self, source: Any, target: Any, *, created_by: str) -> int:
         old, new = area_link(source), area_link(target)
         rows = self._outs([r for r in self._mem().values() if r["status"] in ("active", "candidate") and _contains(r["links"], old)])

@@ -96,6 +96,14 @@ memhub stores no relation between subjects. You pass the order to widen in, beca
 
 Without `filters`, search returns what it always did, with one exception: a `require_filter` type. Its tagged memories never appear in a search that doesn't name the type. This also holds for every surface that searches without filters: `MemoryToolkit`, `MemoryMiddleware`, `memhub search` and the MCP server.
 
+The memory index (`memhub index`, `list_memory_index`, the middleware's `<memory_index>`) lists subjects with counts,
+such as `machine PRD_1 (12)`. A `require_filter` type is never named there either, unless the project lists it:
+
+```yaml
+index:
+  show_guarded: [patient]   # name patients in the index; default: []
+```
+
 ## Recipes by domain
 
 | Domain | Subject types | Write | Search |
