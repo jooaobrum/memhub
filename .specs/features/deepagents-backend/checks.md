@@ -221,8 +221,8 @@ Proof: `.venv/bin/python -m pytest tests/test_pages.py -k "file_tool_framing"`
 ## Handoff
 
 - **Settled mid-build:** C39 had no content length limit to prove; asked "What should C39's second half prove instead?" - user chose "A grounding drop (Recommended)": a line dropped for its form reads `refused: <reason>`
-- **Dispatched:** none
-- **Boundary:** none yet
+- **Dispatched:** Verifier at `0333915` (diff `beb019f..0333915`), sent; no screens sub-agent (no capture)
+- **Boundary:** C1-C46 closed at `0333915`; proofs green (55 pass)
 - **Abandoned:** none
 - **Settled mid-build (2):** user: "I need a test end to end, simulate memory and check if everything is working, each scenario. Once done and pass. You can open the PR" - C45 added; the end-to-end run found that a page written back with deepagents' `@@ lines … @@` read header became a new line (a model call, then a flag): C46 added and the page parser fixed
 - **Deviations:** C15 gained a second proof (`read_window` asserts the backend serves `Memory.render`), since `tests/test_pages.py` must run without deepagents (C37); the plan's Surface gained a "Built" note: `personal` selects the folder (AD-001 keeps `user_id` as the caller)
