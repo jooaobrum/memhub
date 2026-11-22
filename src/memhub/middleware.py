@@ -23,7 +23,7 @@ from langchain_core.tools import tool
 from memhub.filters import HINT as FILTERS_HINT
 from memhub.filters import parse as parse_filters
 from memhub.service import Actor, MemoryService, NotFound, ServiceError, ValidationError
-from memhub.toolkit import proposal_id, proposal_result
+from memhub.toolkit import READ_PAGE_DESCRIPTION, proposal_id, proposal_result
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ MEMORY_FRAME = (
 
 
 class MemoryState(AgentState):
-    memory_snapshot: NotRequired[str]  # profile + skill index, fixed per thread
+    memory_snapshot: NotRequired[str]  # profile + memory index + skill index, fixed per thread
     memory_turn: NotRequired[str]  # <memory> block for the current user turn
     memhub_injected: NotRequired[list[str]]  # `memory_id@version` of every injected item, across the thread
 
@@ -102,7 +102,8 @@ class MemoryMiddleware(AgentMiddleware):
         self.user_from = user_from
         self.k = k
         self.actor = actor or Actor(id="agent")
-        self.tools = [self._search_memory_tool(), self._load_skill_tool(), self._propose_memory_tool()]
+        self.tools = [self._search_memory_tool(), self._load_skill_tool(), self._propose_memory_tool(),
+                      self._read_memory_page_tool()]
 
     def _ids(self, context: Any) -> tuple[str, str]:
         return _resolve(self.workspace_from, context), _resolve(self.user_from, context)
@@ -123,6 +124,13 @@ class MemoryMiddleware(AgentMiddleware):
                 about.append(text)
         if about:
             parts.append("<about_the_user>\n" + "\n".join(about) + "\n</about_the_user>")
+        cfg = self.service.settings.index
+        if cfg.enabled:  # #28: counts only, so it adds no injected id (AD-068: only when it names an area or subject)
+            from memhub.pages import index_text, lists_anything
+
+            index = self.service.index(self.actor, workspace_id=workspace_id, user_id=user_id)
+            if lists_anything(index, cfg.show):
+                parts.append(index_text(index, cfg.show, cfg.max_chars))
         for name, cfg in types.items():
             if cfg.retrieval == "index_then_load":
                 lines = [
@@ -199,6 +207,20 @@ class MemoryMiddleware(AgentMiddleware):
 
         search_memory.__doc__ = f"Search long-term memory, optionally restricted to one memory type. filters: {FILTERS_HINT}"
         return tool(search_memory)
+
+    def _read_memory_page_tool(self):
+        def read_memory_page(area: str, runtime: ToolRuntime, subject: str | None = None, owner: str = "me") -> str:
+            from memhub.pages import read_page
+
+            workspace_id, user_id = self._ids(runtime.context)
+            try:
+                return read_page(self.service, workspace_id=workspace_id, user_id=user_id, area=area, subject=subject,
+                                 owner=owner)
+            except (ServiceError, NotFound) as exc:
+                return f"error: {exc}"
+
+        read_memory_page.__doc__ = READ_PAGE_DESCRIPTION
+        return tool(read_memory_page)
 
     def _load_skill_tool(self):
         @tool

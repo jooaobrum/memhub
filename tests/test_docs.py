@@ -106,3 +106,11 @@ def test_quickstart_order_and_birds_guide():
     front = birds[0].split("---\n")[1]
     assert len(front.strip().splitlines()) <= 20 and "null" not in front
     assert "admission.threshold" not in birds[0] and "--preset" not in guide
+
+
+def test_index_docs():
+    """#28 C30: the index is documented where each surface is."""
+    assert "<memory_index>" in (DOCS / "integration.md").read_text()
+    claude = (DOCS / "claude-code.md").read_text()
+    assert "list_memory_index" in claude and "read_memory_page" in claude
+    assert "show_guarded" in (DOCS / "subjects.md").read_text()

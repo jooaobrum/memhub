@@ -1,4 +1,4 @@
-"""`memhub mcp`: the two tools over MCP, who a call runs as, and refusing to serve an unusable ledger. Tools are
+"""`memhub mcp`: the four tools over MCP, who a call runs as, and refusing to serve an unusable ledger. Tools are
 called through the MCP SDK's in-process client, the way a real client calls them."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from mcp import Client
 from typer.testing import CliRunner
 
 from memhub import Memory, cli
-from memhub.mcp_server import build_server, folder_workspace, identity, new_run_id
+from memhub.mcp_server import INSTRUCTIONS, build_server, folder_workspace, identity, new_run_id
 from tests.fakes import FakeEmbeddings
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +50,14 @@ def test_tools_and_their_schemas():
             return {t.name: t.input_schema for t in (await client.list_tools()).tools}
 
     tools = anyio.run(run)
-    assert set(tools) == {"search_memory", "propose_memory"}
+    assert set(tools) == {"search_memory", "propose_memory", "list_memory_index", "read_memory_page"}  # #28 C21
+    specs = {s["function"]["name"]: s["function"]["description"] for s in _memory().tools(
+        workspace_id="acme", user_id="anna", run_id="r").tool_specs()}
+    descriptions = anyio.run(_descriptions, server)
+    assert descriptions == specs
+    assert tools["list_memory_index"].get("properties", {}) == {}
+    assert tools["read_memory_page"]["required"] == ["area"]
+    assert set(tools["read_memory_page"]["properties"]) == {"area", "subject", "owner"}
     search, propose = tools["search_memory"], tools["propose_memory"]
     assert search["required"] == ["query"] and set(search["properties"]) == {"query", "type", "filters"}  # #25
     assert json.dumps(search["properties"]["type"]).count('"fact"') == 1 and '"preference"' in json.dumps(search["properties"]["type"])
@@ -58,6 +65,40 @@ def test_tools_and_their_schemas():
     assert set(propose["properties"]) == {"type", "fields", "evidence", "scope", "memory_id", "user_requested"}
     assert propose["properties"]["type"]["enum"] == ["fact", "preference"]
     assert propose["properties"]["scope"]["enum"] == ["user", "workspace"]
+
+
+async def _descriptions(server) -> dict:
+    async with Client(server) as client:
+        return {t.name: t.description for t in (await client.list_tools()).tools}
+
+
+def test_list_memory_index_and_read_memory_page():
+    """#28 C22, C23: the index and a page through the MCP client."""
+    from tests.test_pages import add_area, add_row
+
+    m = Memory(db=MEM, embedder=FakeEmbeddings(16), config={"scopes": ["user", "workspace"], "types": TYPES,
+                                                            "workspace_default": "w1"})
+    m.init()
+    add_row(m, "grease weekly", add_area(m, "lubrication"))
+    add_row(m, "team greases monthly", add_area(m, "lubrication", scope="workspace"))
+    server = build_server(m, workspace_id="w1", user_id="u1", run_id="mcp-x")
+    index, page, team, missing = _call(server, ("list_memory_index", {}), ("read_memory_page", {"area": "lubrication"}),
+                                       ("read_memory_page", {"area": "lubrication", "owner": "team"}),
+                                       ("read_memory_page", {"area": "nope"}))
+    data = _json(index)
+    assert "Areas: Lubrication [lubrication] (1)" in data["text"] and "Yours (users/u1):" in data["text"]
+    assert data["index"]["me"]["areas"] == [{"key": "lubrication", "title": "Lubrication", "count": 1}]
+    assert page.content[0].text.startswith("# Memory: Lubrication (u1)") and "grease weekly" in page.content[0].text
+    assert "team greases monthly" in team.content[0].text and "grease weekly" not in team.content[0].text
+    assert _json(missing) == {"error": "no area 'nope'"}
+    add_row(m, "new fact", add_area(m, "bearings"))
+    [again] = _call(server, ("list_memory_index", {}))
+    assert "Bearings [bearings] (1)" in _json(again)["text"]
+
+
+def test_instructions_name_the_index():
+    """#28 C25."""
+    assert "list_memory_index" in INSTRUCTIONS and "read_memory_page" in INSTRUCTIONS
 
 
 def test_search_memory():
