@@ -1,0 +1,23 @@
+[
+  {
+    "file": "src/memhub/pages.py",
+    "old": "if m is None or m.group(1) != page.stamp:",
+    "new": "if m is not None and m.group(1) != page.stamp:",
+    "proof": ".venv/bin/python -m pytest tests/test_pages.py tests/test_example_deepagents.py -k \"stale_stamp or stale_write_and_fresh_edit\"",
+    "label": "C28: a whole-file write with no stamp is accepted"
+  },
+  {
+    "file": "src/memhub/pages.py",
+    "old": "if reason in (None, \"ungrounded\", \"assistant_only\", \"inferred\"):",
+    "new": "if reason in (None, \"ungrounded\", \"inferred\"):",
+    "proof": ".venv/bin/python -m pytest tests/test_pages.py -k \"quote_window\"",
+    "label": "C18/C31: an assistant-only quote is refused instead of flagged"
+  },
+  {
+    "file": "src/memhub/service.py",
+    "old": "return uow.memories.archive(row[\"memory_id\"])",
+    "new": "return uow.memories.get_active(row[\"memory_id\"])",
+    "proof": ".venv/bin/python -m pytest tests/test_contract_memory.py tests/test_contract_sqlite.py -k \"archive_candidate\"",
+    "label": "C24: approving an archive candidate leaves the memory active"
+  }
+]
