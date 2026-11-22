@@ -141,6 +141,26 @@ def _fail(exc: Exception) -> None:
     raise typer.Exit(1)
 
 
+def _uuid(value: str) -> uuid.UUID:
+    """An id argument; a malformed one is an error line, not a traceback."""
+    try:
+        return uuid.UUID(value.strip())
+    except (ValueError, AttributeError):
+        typer.secho(f"not a memhub id: {value!r}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+
+def _review_id(service: MemoryService, value: str) -> uuid.UUID:
+    """`approve` / `reject` take a version row id (what `queue` prints) or a memory id: its newest pending row, as
+    `Memory.approve` does."""
+    key = _uuid(value)
+    with service.store.unit_of_work() as uow:
+        if uow.memories.get_by_id(key) is not None:
+            return key
+        pending = [r for r in uow.memories.history(key) if r["status"] in ("candidate", "flag")]
+    return max(pending, key=lambda r: (r["version"], r["created_at"]))["id"] if pending else key
+
+
 ConfigOpt = typer.Option(None, "--config", "-c", help="Path to memhub.yaml (default: ./memhub.yaml, $MEMHUB_CONFIG, ~/.config/memhub/memhub.yaml)")
 FilterOpt = typer.Option(None, "--filter", help='A filter as JSON, e.g. \'{"entities": {"type": "machine", "id": {"prefix": "PRD_"}}}\' (docs/filters.md)')
 EntityOpt = typer.Option(None, "--entity", help="A subject as TYPE:ID; repeat for any of several, ranked in that order")
@@ -406,7 +426,7 @@ def approve(
         _fail(exc)
     service = _service(config)
     try:
-        row = service.approve(_actor(), uuid.UUID(id), fields=fields or None, resolve=resolve, note=note)
+        row = service.approve(_actor(), _review_id(service, id), fields=fields or None, resolve=resolve, note=note)
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:
@@ -417,7 +437,7 @@ def approve(
 def reject(id: str, note: Optional[str] = None, config: Optional[Path] = ConfigOpt) -> None:
     service = _service(config)
     try:
-        row = service.reject(_actor(), uuid.UUID(id), note=note)
+        row = service.reject(_actor(), _review_id(service, id), note=note)
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:
@@ -430,7 +450,7 @@ def edit(id: str, file: Path = typer.Option(..., "--file", "-f"), config: Option
     service = _service(config)
     fields = json.loads(file.read_text())
     try:
-        row = service.edit(_actor(), uuid.UUID(id), fields)
+        row = service.edit(_actor(), _uuid(id), fields)
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:
@@ -442,7 +462,7 @@ def history(id: str, config: Optional[Path] = ConfigOpt) -> None:
     """Every version of memory `id`, oldest first: value, observed_at, evidence and who created it."""
     service = _service(config)
     try:
-        rows = service.history(_actor(), uuid.UUID(id))
+        rows = service.history(_actor(), _uuid(id))
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:
@@ -460,7 +480,7 @@ def history(id: str, config: Optional[Path] = ConfigOpt) -> None:
 def archive(id: str, config: Optional[Path] = ConfigOpt) -> None:
     service = _service(config)
     try:
-        row = service.archive(_actor(), uuid.UUID(id))
+        row = service.archive(_actor(), _uuid(id))
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:
@@ -479,7 +499,7 @@ def delete(
             result = service.delete_user(_actor(), user)
             _print(result)
         elif id is not None:
-            service.delete(_actor(), uuid.UUID(id))
+            service.delete(_actor(), _uuid(id))
             typer.echo(f"deleted {id}")
         else:
             typer.secho("pass either an id or --user <id>", fg=typer.colors.RED, err=True)
@@ -493,7 +513,7 @@ def promote(id: str, config: Optional[Path] = ConfigOpt) -> None:
     """Copy a user-scope memory into the workspace review queue as a new candidate."""
     service = _service(config)
     try:
-        row = service.promote(_actor(), uuid.UUID(id))
+        row = service.promote(_actor(), _uuid(id))
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:
@@ -524,7 +544,7 @@ def areas_merge(source: str, target: str, config: Optional[Path] = ConfigOpt) ->
     """Move every memory of area `source` (a memory_id) to `target`, as new versions, and archive `source`."""
     service = _service(config)
     try:
-        result = service.merge_areas(_actor(), uuid.UUID(source), uuid.UUID(target))
+        result = service.merge_areas(_actor(), _uuid(source), _uuid(target))
     except (ServiceError, StoreError) as exc:
         _fail(exc)
     else:

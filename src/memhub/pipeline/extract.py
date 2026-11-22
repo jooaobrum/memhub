@@ -71,6 +71,7 @@ class ExtractResult:
     ok: bool = True
     tokens_in: int = 0
     tokens_out: int = 0
+    capped: list[Candidate] = field(default_factory=list)  # past `ingestion.max_candidates`: dropped, with a reason
 
 
 def extractable_types(settings: Settings, registry: TypeRegistry, final_pass: bool) -> list[str]:
@@ -336,8 +337,10 @@ def extract(
         terms, found = _sample(extractor, segment, ["term"], _TERM_INSTRUCTIONS, 2, 1, **kw)
         result.tokens_in += terms.tokens_in
         result.tokens_out += terms.tokens_out
+        result.capped = candidates[max_c * passes:] + found[2:]
         candidates = candidates[: max_c * passes] + found[:2]  # a failed glossary call loses only the terms
     else:
+        result.capped = candidates[max_c * passes:]
         candidates = candidates[: max_c * passes]
     labels = _labels(segment)
     real_ids = {m.message_id for m in segment.messages}

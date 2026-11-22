@@ -292,10 +292,11 @@ def test_vector_weight_on_a_type_without_keywords(settings):
                 payload={"content": text}, entities=[], embedding=unit(0.95 - i * 0.01), evidence=[],
                 status="active", verified=True, created_by="test")
     rows = m.search("E47", types=["fact", "episode"], top_k=3, **ALICE)
-    # fact E47 fault (outside the fact vector leg's k): 1/61; episode E47 0: 0.2/61, similarity 0.95 (vector only);
-    # fact other 0: 0.2/61, similarity 0.9. With 1/61 for the vector-only rows, an episode would tie the fused row.
+    # fact E47 fault: 1/61 from the keyword leg (+ 0.2/66 from the vector leg, ranked as deep as the keyword leg);
+    # episode E47 0: 0.2/61, similarity 0.95 (vector only); fact other 0: 0.2/61, similarity 0.9. With 1/61 for the
+    # vector-only rows, an episode would tie the fused row.
     assert names(rows) == ["fact E47 fault", "episode E47 0", "fact other 0"]
-    assert [r["matched_by"] for r in rows] == ["keyword", "vector", "vector"]
+    assert [r["matched_by"] for r in rows] == ["both", "vector", "vector"]
 
 
 def test_tiers_keep_their_order(settings):

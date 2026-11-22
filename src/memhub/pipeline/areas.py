@@ -116,7 +116,8 @@ def plan_areas(p: Proposal, *, uow: UnitOfWork, settings: Settings, segment: Seg
                 plan.pending.append(PendingArea(key, title, description, proposed=True, embedding=embedding))
 
     if not plan.rows and not plan.pending:
-        plan.dropped = "no_area"
+        if settings.area_types().get(p.candidate.type) == "required":  # an `optional` type is kept with no area
+            plan.dropped = "no_area"
     elif any(a.proposed for a in plan.pending):
         cap = settings.areas.max_per_user if p.scope == "user" else settings.areas.max_per_workspace
         if len(owned) + len(plan.pending) > cap:
