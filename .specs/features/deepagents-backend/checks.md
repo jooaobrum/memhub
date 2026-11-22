@@ -226,7 +226,7 @@ Proof: `.venv/bin/python -m pytest tests/test_pages.py -k "page_header"`
 
 - **Settled mid-build:** C39 had no content length limit to prove; asked "What should C39's second half prove instead?" - user chose "A grounding drop (Recommended)": a line dropped for its form reads `refused: <reason>`
 - **Dispatched:** Verifier at `0333915` (diff `beb019f..0333915`), returned - FAIL, 5 findings (stopped once on a usage limit and resumed); no screens sub-agent (no capture)
-- **Boundary:** C1-C46 closed at `0333915`; proofs green (55 pass); Verifier findings closed at `d28885b`
+- **Boundary:** C1-C46 closed at `0333915`; proofs green (55 pass); Verifier findings closed at `d28885b`; final proofs at `aeedf37`: 57 pass, 3 mutations killed
 - **Abandoned:** none
 - **Settled mid-build (2):** user: "I need a test end to end, simulate memory and check if everything is working, each scenario. Once done and pass. You can open the PR" - C45 added; the end-to-end run found that a page written back with deepagents' `@@ lines … @@` read header became a new line (a model call, then a flag): C46 added and the page parser fixed
 - **Settled mid-build (3):** user: "ok go ahead" to adding the `edit_file` end-to-end scenarios (S14, S15) and one header line, "Change memory with `edit_file` on the lines you change; `write_file` resends the whole page and is refused when the page changed since you read it." (AD-063's fixed text gains that line): C47 added

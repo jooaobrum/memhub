@@ -1,8 +1,8 @@
 # deepagents-backend proofs
 
-**HEAD**: 0333915
+**HEAD**: aeedf37
 **Tree**: clean
-**Result**: 55 pass, 0 fail; mutations 0 killed, 0 not
+**Result**: 57 pass, 0 fail; mutations 3 killed, 0 not
 
 | Check | Proof | Ran | Passed | Result |
 | --- | --- | --- | --- | --- |
@@ -50,7 +50,7 @@
 | C35 | `.venv/bin/python -m pytest tests/test_example_deepagents.py -k "imports_public_only"` | 1 | 1 | pass |
 | C36 | `.venv/bin/python -m pytest tests/test_example_deepagents.py -k "agent_round_trip"` | 1 | 1 | pass |
 | C37 | `.venv/bin/python -m pytest tests/test_pages.py -k "no_deepagents_needed"` | 1 | 1 | pass |
-| C37 | `.venv/bin/python -m pytest tests -q -x --ignore=tests/test_example_deepagents.py` | 1403 | 1403 | pass |
+| C37 | `.venv/bin/python -m pytest tests -q -x --ignore=tests/test_example_deepagents.py` | 1409 | 1409 | pass |
 | C38 | `.venv/bin/python -m pytest tests/test_example_deepagents.py -k "folder_template_guards"` | 1 | 1 | pass |
 | C39 | `.venv/bin/python -m pytest tests/test_pages.py -k "line_validation"` | 1 | 1 | pass |
 | C40 | `.venv/bin/python -m pytest tests/test_pages.py -k "model_failure"` | 1 | 1 | pass |
@@ -58,6 +58,16 @@
 | C42 | `.venv/bin/python -m pytest tests/test_pages.py -k "stamp_tracks_content"` | 1 | 1 | pass |
 | C43 | `.venv/bin/python -m pytest tests/test_pages.py -k "write_provenance"` | 1 | 1 | pass |
 | C44 | `.venv/bin/python -m pytest tests/test_contract_memory.py tests/test_contract_sqlite.py -k "archive_candidate_s` | 3 | 3 | pass |
-| C45 | `.venv/bin/python -m pytest tests/e2e/test_deepagents_backend.py -k "test_s"` | 26 | 26 | pass |
+| C45 | `.venv/bin/python -m pytest tests/e2e/test_deepagents_backend.py -k "test_s"` | 30 | 30 | pass |
 | C46 | `.venv/bin/python -m pytest tests/test_pages.py -k "file_tool_framing"` | 1 | 1 | pass |
+| C47 | `.venv/bin/python -m pytest tests/e2e/test_deepagents_backend.py -k "test_s14 or test_s15"` | 4 | 4 | pass |
+| C47 | `.venv/bin/python -m pytest tests/test_pages.py -k "page_header"` | 1 | 1 | pass |
 | Build | `.venv/bin/python -m compileall -q src/memhub examples/deepagents_backend` | - | - | pass |
+
+## Mutations
+
+| Mutation | Location | Killed |
+| --- | --- | --- |
+| C28: a whole-file write with no stamp is accepted | `src/memhub/pages.py:494` | yes |
+| C18/C31: an assistant-only quote is refused instead of flagged | `src/memhub/pages.py:483` | yes |
+| C24: approving an archive candidate leaves the memory active | `src/memhub/service.py:333` | yes |
